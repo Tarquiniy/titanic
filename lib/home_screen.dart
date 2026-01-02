@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:titanic/transfer_v_screen.dart';
 import 'login_screen.dart';
 import 'models/app_user.dart';
 
@@ -63,9 +64,17 @@ class _HomeScreenState extends State<HomeScreen> {
       ));
     }
 
-    add('Перевести V/M', () {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Открыть: Перевести')));
-    });
+    add('Перевести V', () async {
+  final result = await Navigator.of(context).push(
+    MaterialPageRoute(
+      builder: (_) => TransferVScreen(user: user),
+    ),
+  );
+
+  if (result == true) {
+    setState(() {});
+  }
+});
 
     add('Опросы / Аукционы', () {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Открыть: Опросы/Аукционы')));
