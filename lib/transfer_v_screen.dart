@@ -20,8 +20,9 @@ class _TransferVScreenState extends State<TransferVScreen> {
 
   final supabase = Supabase.instance.client;
 
-  // Список получателей (не-политики)
+  // Список получателей (весь список, затем клиентская фильтрация)
   List<Map<String, dynamic>> _allRecipients = [];
+  List<Map<String, dynamic>> _visibleRecipients = [];
   bool _recipientsLoading = false;
   String _recipientsError = '';
 
@@ -45,45 +46,51 @@ class _TransferVScreenState extends State<TransferVScreen> {
     });
 
     try {
-      // Запрашиваем только пользователей, у которых role != 'politician'
+      // Запрашиваем всех пользователей, кроме текущего отправителя
       final dynamic res = await supabase
           .from('user_credentials')
-          .select('telegram_username, first_name, last_name, role')
-          .neq('role', 'politician')
+          .select('id, telegram_username, first_name, last_name, role')
+          .neq('id', widget.user.id)
           .order('telegram_username');
 
       List<Map<String, dynamic>> list = [];
 
-      // В современных версиях SDK ожидаем List; приводим элементы к Map<String,dynamic>
       if (res is List) {
         list = res
             .where((e) => e != null)
             .map<Map<String, dynamic>>((e) {
-              if (e is Map) {
-                return Map<String, dynamic>.from(e);
-              } else {
-                return <String, dynamic>{};
-              }
+              if (e is Map) return Map<String, dynamic>.from(e);
+              return <String, dynamic>{};
             })
             .where((m) => m.isNotEmpty)
             .toList();
       } else {
-        // Если SDK вернул что-то неожиданное — считаем список пустым
         list = [];
+      }
+
+      // Клиентская фильтрация: если отправитель — politician, то исключаем политиков
+      List<Map<String, dynamic>> visible;
+      if (widget.user.role == 'politician') {
+        visible = list.where((r) => (r['role']?.toString() ?? '') != 'politician').toList();
+      } else {
+        visible = list;
       }
 
       setState(() {
         _allRecipients = list;
+        _visibleRecipients = visible;
       });
     } on PostgrestException catch (e) {
       setState(() {
         _recipientsError = 'Ошибка при загрузке получателей: ${e.message}';
         _allRecipients = [];
+        _visibleRecipients = [];
       });
     } catch (e) {
       setState(() {
         _recipientsError = 'Ошибка при загрузке получателей: ${e.toString()}';
         _allRecipients = [];
+        _visibleRecipients = [];
       });
     } finally {
       setState(() {
@@ -94,14 +101,14 @@ class _TransferVScreenState extends State<TransferVScreen> {
 
   // Показываем modal sheet со списком и поиском
   Future<void> _openRecipientPicker() async {
-    if (_recipientsLoading) return; // ещё грузятся
+    if (_recipientsLoading) return;
 
     final selected = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
       builder: (_) {
         return RecipientPickerSheet(
-          recipients: _allRecipients,
+          recipients: _visibleRecipients,
         );
       },
     );
@@ -124,7 +131,6 @@ class _TransferVScreenState extends State<TransferVScreen> {
     }
     final amount = amountValue;
 
-    // Локальная проверка баланса
     if (amount > widget.user.vBalance) {
       setState(() => _error = 'Недостаточно средств');
       return;
@@ -132,14 +138,12 @@ class _TransferVScreenState extends State<TransferVScreen> {
 
     setState(() => _loading = true);
     try {
-      // Вызов серверной RPC-функции (сервер выполняет окончательные проверки ролей/баланса)
       await supabase.rpc('transfer_v_points', params: {
         'from_user': widget.user.id,
         'to_username': toUsername,
         'amount': amount,
       });
 
-      // Обновляем локально баланс (рекомендуется затем ре-fetch профиля с сервера)
       setState(() {
         widget.user.vBalance = widget.user.vBalance - amount;
       });
