@@ -25,7 +25,7 @@ class _TransferVScreenState extends State<TransferVScreen> {
 
   final supabase = Supabase.instance.client;
 
-  // полный список получателей (мап содержит id, telegram_username, first_name, last_name, role)
+  // полный список получателей (мап содержит id, telegram_username, first_name, last_name)
   List<Map<String, dynamic>> _allRecipients = [];
   // видимый список после клиентской фильтрации
   List<Map<String, dynamic>> _visibleRecipients = [];
@@ -58,7 +58,7 @@ class _TransferVScreenState extends State<TransferVScreen> {
       // Запрашиваем всех пользователей, кроме текущего отправителя
       final dynamic res = await supabase
           .from('user_credentials')
-          .select('id, telegram_username, first_name, last_name, role')
+          .select('id, telegram_username, first_name, last_name')
           .neq('id', widget.user.id)
           .order('first_name'); // сортируем по имени для удобства
 
@@ -368,10 +368,8 @@ class _RecipientPickerSheetState extends State<RecipientPickerSheet> {
                         final first = (row['first_name'] ?? '').toString();
                         final last = (row['last_name'] ?? '').toString();
                         final displayName = ('$first $last').trim().isEmpty ? 'Без имени' : '$first $last';
-                        final role = (row['role'] ?? '').toString();
                         return ListTile(
                           title: Text(displayName),
-                          subtitle: role.isNotEmpty ? Text(role) : null,
                           onTap: () => Navigator.of(context).pop(row),
                         );
                       },
