@@ -118,6 +118,7 @@ class _TransferVScreenState extends State<TransferVScreen> {
     }
   }
 
+  // Обновлённый _transfer: вызываем RPC, парсим ответ и обновляем локальный баланс.
   Future<void> _transfer() async {
     setState(() => _error = null);
 
@@ -131,6 +132,11 @@ class _TransferVScreenState extends State<TransferVScreen> {
     }
     final amount = amountValue;
 
+    if (amount <= 0) {
+      setState(() => _error = 'Сумма должна быть больше нуля');
+      return;
+    }
+
     if (amount > widget.user.vBalance) {
       setState(() => _error = 'Недостаточно средств');
       return;
@@ -138,16 +144,44 @@ class _TransferVScreenState extends State<TransferVScreen> {
 
     setState(() => _loading = true);
     try {
-      await supabase.rpc('transfer_v_points', params: {
+      final dynamic rpcRes = await supabase.rpc('transfer_v_points', params: {
         'from_user': widget.user.id,
         'to_username': toUsername,
         'amount': amount,
       });
 
-      setState(() {
-        widget.user.vBalance = widget.user.vBalance - amount;
-      });
+      // Попробуем извлечь from_balance из ответа RPC
+      Map<String, dynamic>? parsed;
+      if (rpcRes is Map<String, dynamic>) {
+        parsed = rpcRes;
+      } else if (rpcRes is List && rpcRes.isNotEmpty && rpcRes[0] is Map) {
+        parsed = Map<String, dynamic>.from(rpcRes[0] as Map);
+      } else {
+        parsed = null;
+      }
 
+      if (parsed != null && parsed.containsKey('from_balance')) {
+        final fb = parsed['from_balance'];
+        if (fb is num) {
+          widget.user.vBalance = (fb as num).toDouble();
+        }
+      } else {
+        // Если RPC не вернул балансы — ре-fetchим профиль отправителя
+        final profile = await supabase
+            .from('user_credentials')
+            .select('v_balance, m_balance')
+            .eq('id', widget.user.id)
+            .maybeSingle();
+
+        if (profile is Map<String, dynamic>) {
+          final v = profile['v_balance'];
+          final m = profile['m_balance'];
+          if (v is num) widget.user.vBalance = (v as num).toDouble();
+          if (m is num) widget.user.mBalance = (m as num).toDouble();
+        }
+      }
+
+      // Успех — закрываем экран и передаём true
       if (!mounted) return;
       Navigator.of(context).pop(true);
     } on PostgrestException catch (e) {
