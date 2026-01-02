@@ -1,4 +1,9 @@
 // lib/transfer_v_screen.dart
+//
+// Экран для перевода V-поинтов между пользователями.
+// Изменения: убраны упоминания "username" в UI — вместо этого показываются
+// имена пользователей; внутренняя логика по-прежнему хранит telegram_username
+// в выбранном получателе и использует его при RPC-вызове.
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'models/app_user.dart';
@@ -13,18 +18,22 @@ class TransferVScreen extends StatefulWidget {
 
 class _TransferVScreenState extends State<TransferVScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _toCtrl = TextEditingController();
+  final _toCtrl = TextEditingController(); // показывает display name, не username
   final _amountCtrl = TextEditingController();
   bool _loading = false;
   String? _error;
 
   final supabase = Supabase.instance.client;
 
-  // Список получателей (весь список, затем клиентская фильтрация)
+  // полный список получателей (мап содержит id, telegram_username, first_name, last_name, role)
   List<Map<String, dynamic>> _allRecipients = [];
+  // видимый список после клиентской фильтрации
   List<Map<String, dynamic>> _visibleRecipients = [];
   bool _recipientsLoading = false;
   String _recipientsError = '';
+
+  // выбранный получатель (содержит telegram_username и id и т.д.)
+  Map<String, dynamic>? _selectedRecipient;
 
   @override
   void initState() {
@@ -51,7 +60,7 @@ class _TransferVScreenState extends State<TransferVScreen> {
           .from('user_credentials')
           .select('id, telegram_username, first_name, last_name, role')
           .neq('id', widget.user.id)
-          .order('telegram_username');
+          .order('first_name'); // сортируем по имени для удобства
 
       List<Map<String, dynamic>> list = [];
 
@@ -69,12 +78,9 @@ class _TransferVScreenState extends State<TransferVScreen> {
       }
 
       // Клиентская фильтрация: если отправитель — politician, то исключаем политиков
-      List<Map<String, dynamic>> visible;
-      if (widget.user.role == 'politician') {
-        visible = list.where((r) => (r['role']?.toString() ?? '') != 'politician').toList();
-      } else {
-        visible = list;
-      }
+      final visible = (widget.user.role == 'politician')
+          ? list.where((r) => (r['role']?.toString() ?? '') != 'politician').toList()
+          : List<Map<String, dynamic>>.from(list);
 
       setState(() {
         _allRecipients = list;
@@ -103,28 +109,41 @@ class _TransferVScreenState extends State<TransferVScreen> {
   Future<void> _openRecipientPicker() async {
     if (_recipientsLoading) return;
 
-    final selected = await showModalBottomSheet<Map<String, dynamic>>(
+    final Map<String, dynamic>? selected = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
       builder: (_) {
-        return RecipientPickerSheet(
-          recipients: _visibleRecipients,
-        );
+        return RecipientPickerSheet(recipients: _visibleRecipients);
       },
     );
 
-    if (selected != null && selected.containsKey('telegram_username')) {
-      _toCtrl.text = selected['telegram_username'] as String;
+    if (selected != null) {
+      // Запоминаем выбранного получателя и показываем его display name в поле
+      _selectedRecipient = selected;
+      final first = (selected['first_name'] ?? '').toString();
+      final last = (selected['last_name'] ?? '').toString();
+      final displayName = ('$first $last').trim().isEmpty ? 'Без имени' : '$first $last';
+      _toCtrl.text = displayName;
     }
   }
 
-  // Обновлённый _transfer: вызываем RPC, парсим ответ и обновляем локальный баланс.
+  // Выполнение перевода: используем telegram_username из _selectedRecipient
   Future<void> _transfer() async {
     setState(() => _error = null);
 
     if (!_formKey.currentState!.validate()) return;
 
-    final toUsername = _toCtrl.text.trim();
+    if (_selectedRecipient == null) {
+      setState(() => _error = 'Выберите получателя');
+      return;
+    }
+
+    final toUsername = (_selectedRecipient!['telegram_username'] ?? '').toString();
+    if (toUsername.isEmpty) {
+      setState(() => _error = 'У получателя не задан идентификатор, выберите другого получателя');
+      return;
+    }
+
     final amountValue = double.tryParse(_amountCtrl.text.replaceAll(',', '.'));
     if (amountValue == null) {
       setState(() => _error = 'Неверный формат суммы');
@@ -162,9 +181,7 @@ class _TransferVScreenState extends State<TransferVScreen> {
 
       if (parsed != null && parsed.containsKey('from_balance')) {
         final fb = parsed['from_balance'];
-        if (fb is num) {
-          widget.user.vBalance = (fb as num).toDouble();
-        }
+        if (fb is num) widget.user.vBalance = (fb as num).toDouble();
       } else {
         // Если RPC не вернул балансы — ре-fetchим профиль отправителя
         final profile = await supabase
@@ -181,7 +198,6 @@ class _TransferVScreenState extends State<TransferVScreen> {
         }
       }
 
-      // Успех — закрываем экран и передаём true
       if (!mounted) return;
       Navigator.of(context).pop(true);
     } on PostgrestException catch (e) {
@@ -191,12 +207,6 @@ class _TransferVScreenState extends State<TransferVScreen> {
     } finally {
       setState(() => _loading = false);
     }
-  }
-
-  String? _validateRecipient(String? v) {
-    if (v == null || v.trim().isEmpty) return 'Выберите получателя';
-    if (v.contains('@')) return 'Укажите username без @';
-    return null;
   }
 
   String? _validateAmount(String? v) {
@@ -222,10 +232,13 @@ class _TransferVScreenState extends State<TransferVScreen> {
                 child: TextFormField(
                   controller: _toCtrl,
                   decoration: const InputDecoration(
-                    labelText: 'Получатель (telegram username)',
+                    labelText: 'Получатель',
                     suffixIcon: Icon(Icons.expand_more),
                   ),
-                  validator: _validateRecipient,
+                  validator: (_) {
+                    if (_selectedRecipient == null) return 'Выберите получателя';
+                    return null;
+                  },
                 ),
               ),
             ),
@@ -265,7 +278,7 @@ class _TransferVScreenState extends State<TransferVScreen> {
   }
 }
 
-/// Bottom sheet: список и поиск получателей
+/// Bottom sheet: список и поиск получателей (без упоминания username в UI)
 class RecipientPickerSheet extends StatefulWidget {
   final List<Map<String, dynamic>> recipients;
   const RecipientPickerSheet({Key? key, required this.recipients}) : super(key: key);
@@ -324,7 +337,7 @@ class _RecipientPickerSheetState extends State<RecipientPickerSheet> {
                     child: TextField(
                       controller: _searchCtrl,
                       decoration: InputDecoration(
-                        hintText: 'Поиск по username, имени или фамилии',
+                        hintText: 'Поиск по имени или фамилии',
                         prefixIcon: const Icon(Icons.search),
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                         isDense: true,
@@ -352,15 +365,14 @@ class _RecipientPickerSheetState extends State<RecipientPickerSheet> {
                       separatorBuilder: (_, __) => const Divider(height: 0),
                       itemBuilder: (context, index) {
                         final row = _filtered[index];
-                        final username = row['telegram_username'] ?? '';
-                        final first = row['first_name'] ?? '';
-                        final last = row['last_name'] ?? '';
+                        final first = (row['first_name'] ?? '').toString();
+                        final last = (row['last_name'] ?? '').toString();
+                        final displayName = ('$first $last').trim().isEmpty ? 'Без имени' : '$first $last';
+                        final role = (row['role'] ?? '').toString();
                         return ListTile(
-                          title: Text('$first $last'.trim().isEmpty ? '@$username' : '$first $last'),
-                          subtitle: Text('@$username'),
-                          onTap: () {
-                            Navigator.of(context).pop(row);
-                          },
+                          title: Text(displayName),
+                          subtitle: role.isNotEmpty ? Text(role) : null,
+                          onTap: () => Navigator.of(context).pop(row),
                         );
                       },
                     ),
