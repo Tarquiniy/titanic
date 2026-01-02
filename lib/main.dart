@@ -2,10 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'login_screen.dart';
 
-/// Замените эти значения на свои из Supabase dashboard.
-/// В проде — передавайте через --dart-define или храните в безопасных секретах CI.
-const String SUPABASE_URL = 'https://your-project-ref.supabase.co';
-const String SUPABASE_ANON_KEY = 'your-anon-key';
+
+const String SUPABASE_URL = 'https://lfgfrqpxmjwmklbrugbp.supabase.co';
+const String SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxmZ2ZycXB4bWp3bWtsYnJ1Z2JwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjczNTU4MTEsImV4cCI6MjA4MjkzMTgxMX0.MBCsfcg8h47OTmBGVc4c8iT6kAC8unA2x8Q9PbVO_vA';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
