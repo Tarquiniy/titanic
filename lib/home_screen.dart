@@ -1,10 +1,4 @@
 // lib/home_screen.dart
-//
-// Главный экран — обновлённая логика "Речь жизни":
-// - убрана кнопка "Остановить речь";
-// - если любой политик нажал "Речь жизни", у других политиков кнопка становится неактивной;
-// - кнопка снова становится активной в 20:00 по времени Екатеринбурга (YEKT, UTC+5) — проверка выполняется на клиенте.
-// Примечание: серверная флаговая таблица speech_state по-прежнему используется (см. предыдущие SQL).
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -23,10 +17,10 @@ class _HomeScreenState extends State<HomeScreen> {
   late AppUser user;
   final supabase = Supabase.instance.client;
 
-  // Состояние речи, отражающее серверный флаг
+  // Состояние речи (серверный флаг)
   bool speechActive = false;
   String? speechActorId;
-  DateTime? speechExpiresAt;
+  DateTime? speechExpiresAt; // в UTC
 
   // Пуллинг для обновления состояния speech_state
   Timer? _pollTimer;
@@ -58,6 +52,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _pollTimer = null;
   }
 
+  // Получить состояние с сервера и актуализировать локальный флаг.
   Future<void> _fetchSpeechState() async {
     try {
       final res = await supabase
@@ -69,10 +64,13 @@ class _HomeScreenState extends State<HomeScreen> {
       if (res is Map<String, dynamic>) {
         final active = (res['active'] as bool?) ?? false;
         final actor = res['actor_id']?.toString();
-        final expires = res['expires_at'] != null ? DateTime.tryParse(res['expires_at'].toString()) : null;
+        final expiresRaw = res['expires_at'];
+        final expires = expiresRaw != null ? DateTime.tryParse(expiresRaw.toString()) : null;
 
-        // Если active и expires_at в прошлом — считаем неактивным
-        if (active && expires != null && DateTime.now().isAfter(expires)) {
+        final nowUtc = DateTime.now().toUtc();
+
+        // Если есть expires_at и оно в прошлом — считаем неактивным и очищаем локально.
+        if (expires != null && nowUtc.isAfter(expires)) {
           setState(() {
             speechActive = false;
             speechActorId = null;
@@ -87,6 +85,7 @@ class _HomeScreenState extends State<HomeScreen> {
           speechExpiresAt = expires;
         });
       } else {
+        // Если строки нет — считаем неактивным
         setState(() {
           speechActive = false;
           speechActorId = null;
@@ -98,48 +97,75 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // Возвращает true если сейчас в Екатеринбурге >= 20:00
-  bool _isYekaterinburgAtOrAfter20() {
+  // Вычисляет следующий момент 20:00 по YEKT (UTC+5) в UTC.
+  DateTime _nextYekaterinburg20Utc() {
     final nowUtc = DateTime.now().toUtc();
-    // YEKT = UTC+5
-    final nowYe = nowUtc.add(const Duration(hours: 5));
-    final today20Ye = DateTime(nowYe.year, nowYe.month, nowYe.day, 20, 0);
-    return !nowYe.isBefore(today20Ye);
+    final nowYe = nowUtc.add(const Duration(hours: 5)); // YEKT = UTC+5
+    DateTime targetYe = DateTime(nowYe.year, nowYe.month, nowYe.day, 20, 0);
+    if (!nowYe.isBefore(targetYe)) {
+      // если уже >= 20:00 YEKT сегодня, берём завтра
+      final tomorrow = nowYe.add(const Duration(days: 1));
+      targetYe = DateTime(tomorrow.year, tomorrow.month, tomorrow.day, 20, 0);
+    }
+    // вернуть в UTC
+    return targetYe.subtract(const Duration(hours: 5));
   }
 
-  // Определяем, доступна ли кнопка "Речь жизни" для текущего пользователя.
-  // Правило: только политики видят кнопку; если серверный флаг активен,
-  // кнопка становится неактивной для политиков до 20:00 YEKT, после чего клиент снова позволяет нажать.
+  // Возвращает количество секунд от nowUtc до targetUtc (>=1)
+  int _secondsUntilUtc(DateTime targetUtc) {
+    final nowUtc = DateTime.now().toUtc();
+    final diff = targetUtc.difference(nowUtc);
+    final secs = diff.inSeconds;
+    return secs > 0 ? secs : 0;
+  }
+
+  // Доступность кнопки "Речь жизни" для текущего пользователя.
+  // Правило: только политики; после нажатия кнопка неактивна до 20:00 YEKT.
   bool get _isSpeechButtonEnabled {
     if (user.role != 'politician') return false;
     if (_rpcLoading) return false;
 
-    // Если сервер говорит, что речь неактивна — можно нажать
+    // Если серверный флаг неактивен — можно нажать
     if (!speechActive) return true;
 
-    // speechActive == true: разрешаем нажать снова только после 20:00 YEKT
-    return _isYekaterinburgAtOrAfter20();
+    // Если active == true:
+    // кнопка должна быть неактивна до speechExpiresAt (серверное значение)
+    final nowUtc = DateTime.now().toUtc();
+    if (speechExpiresAt != null) {
+      return nowUtc.isAfter(speechExpiresAt!);
+    }
+
+    // Если сервер активен, но нет expires — вычисляем локально следующий 20:00 и сравниваем
+    final next20Utc = _nextYekaterinburg20Utc();
+    return nowUtc.isAfter(next20Utc);
   }
 
-  // Нажатие "Речь жизни" — вызывает серверную функцию start_speech
+  // Нажатие "Речь жизни": вычисляем секунды до следующего YEKT 20:00 и передаём в RPC.
   Future<void> _onStartSpeechPressed() async {
     if (user.role != 'politician') return;
     if (!_isSpeechButtonEnabled) return;
 
-    const durationSeconds = 3600; // длительность события (пример)
+    // Вычисляем целевой момент 20:00 YEKT
+    final target20Utc = _nextYekaterinburg20Utc();
+    final seconds = _secondsUntilUtc(target20Utc);
+    if (seconds <= 0) {
+      _showMessage('Невозможно вычислить время до 20:00 YEKT');
+      return;
+    }
 
     setState(() => _rpcLoading = true);
     try {
-      await supabase.rpc('start_speech', params: {'p_actor': user.id, 'p_duration_seconds': durationSeconds});
+      // Серверная функция start_speech принимает p_duration_seconds (int)
+      await supabase.rpc('start_speech', params: {'p_actor': user.id, 'p_duration_seconds': seconds});
 
-      // Обновляем локальное состояние для быстрого UI-отклика.
+      // Обновляем локально: speechActive true до target20Utc
       setState(() {
         speechActive = true;
         speechActorId = user.id;
-        speechExpiresAt = DateTime.now().toUtc().add(Duration(seconds: durationSeconds));
+        speechExpiresAt = target20Utc.toUtc();
       });
+      _showMessage('Речь запущена до 20:00 по времени Екатеринбурга');
     } on PostgrestException catch (e) {
-      // Если сервер сказал, что уже активна — оставляем локальное состояние и покажем сообщение
       _showMessage(e.message ?? e.toString());
     } catch (e) {
       _showMessage(e.toString());
@@ -157,6 +183,8 @@ class _HomeScreenState extends State<HomeScreen> {
     if (user.role != 'politician') return const SizedBox.shrink();
 
     final enabled = _isSpeechButtonEnabled;
+    // Показываем инициатора (если есть) — можно показать имя по id при дополнительном fetch,
+    // но сейчас показываем id.
     final actorLabel = speechActorId == user.id ? 'Вы' : (speechActorId ?? '—');
 
     return Column(
@@ -177,7 +205,7 @@ class _HomeScreenState extends State<HomeScreen> {
               style: const TextStyle(fontSize: 12, color: Colors.grey),
             ),
           ),
-        if (!_isYekaterinburgAtOrAfter20() && speechActive)
+        if (speechActive)
           Padding(
             padding: const EdgeInsets.only(top: 6.0),
             child: Text(
