@@ -1,5 +1,6 @@
 // lib/home_screen.dart
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'models/app_user.dart';
@@ -183,71 +184,76 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // Нажатие "Речь жизни": вычисляем секунды до следующего YEKT 20:00 и передаём в RPC.
   Future<void> _onStartSpeechPressed() async {
-    if (user.role != 'politician') return;
-    if (!_isSpeechButtonEnabled) return;
+  if (user.role != 'politician') return;
+  if (!_isSpeechButtonEnabled) return;
 
-    final target20Utc = _nextYekaterinburg20Utc();
-    final seconds = _secondsUntilUtc(target20Utc);
-    if (seconds <= 0) {
-      _showMessage('Невозможно вычислить время до 20:00 YEKT');
-      return;
-    }
+  // вычисляем секунды до следующего 20:00 YEKT (как у вас ранее)
+  final target20Utc = _nextYekaterinburg20Utc(); // ваш helper
+  final seconds = _secondsUntilUtc(target20Utc);
+  if (seconds <= 0) {
+    _showMessage('Невозможно вычислить время до 20:00 YEKT');
+    return;
+  }
 
-    setState(() {
-      _rpcLoading = true;
-      // локально блокируем кнопку и включаем ожидание подтверждения от сервера
-      speechActive = true;
-      speechActorId = user.id;
-      speechExpiresAt = target20Utc;
-      _waitingForServerConfirm = true;
-      // подстраховочный таймаут ожидания (например 10 секунд)
-      _waitingTimeoutUtc = DateTime.now().toUtc().add(const Duration(seconds: 10));
+  setState(() {
+    _rpcLoading = true;
+  });
+
+  try {
+    final dynamic rpcRes = await supabase.rpc('start_speech', params: {
+      'p_actor': user.id,
+      'p_duration_seconds': seconds,
     });
 
-    try {
-      await supabase.rpc('start_speech', params: {'p_actor': user.id, 'p_duration_seconds': seconds});
-
-      // После успешного RPC: немедленно попытаемся получить подтверждение от сервера.
-      // Сервер может потребовать небольшого времени на commit, поэтому мы не снимаем _waitingForServerConfirm сразу —
-      // дождёмся poll-а или запустим немедленный fetch.
-      await _fetchSpeechState();
-      // Если сервер установил active=true, _fetchSpeechState снимет _waitingForServerConfirm.
-      // В противном случае оставляем ожидание — poll будет проверять и timeout снимет ожидание через _waitingTimeoutUtc.
-      _showMessage('Речь запущена до 20:00 по времени Екатеринбурга');
-    } on PostgrestException catch (e) {
-      // Если сервер вернул "Speech already active", приводим локальное состояние в соответствие.
-      final msg = e.message ?? e.toString();
-      if (msg.contains('Speech already active')) {
-        // Установим локально активность и снимем ожидание (сервер уже active)
-        setState(() {
-          speechActive = true;
-          // пытаться подтянуть actor_id и expires через fetch
-        });
-        await _fetchSpeechState();
-      } else {
-        _showMessage(msg);
-        // Откатим локальные блокировки — позволим пользователю повторить после poll
-        setState(() {
-          speechActive = false;
-          speechActorId = null;
-          speechExpiresAt = null;
-          _waitingForServerConfirm = false;
-          _waitingTimeoutUtc = null;
-        });
+    // Парсим ответ — ожидаем Map с полями active, actor_id, expires_at
+    Map<String, dynamic>? parsed;
+    if (rpcRes is Map<String, dynamic>) {
+      parsed = rpcRes;
+    } else if (rpcRes is List && rpcRes.isNotEmpty && rpcRes[0] is Map) {
+      parsed = Map<String, dynamic>.from(rpcRes[0] as Map);
+    } else if (rpcRes is String) {
+      // Иногда PostgREST возвращает строку JSON
+      try {
+        parsed = Map<String, dynamic>.from(jsonDecode(rpcRes) as Map);
+      } catch (_) {
+        parsed = null;
       }
-    } catch (e) {
-      _showMessage(e.toString());
+    } else {
+      parsed = null;
+    }
+
+    if (parsed != null) {
+      final active = parsed['active'] as bool? ?? true;
+      final actor = parsed['actor_id']?.toString();
+      final expiresRaw = parsed['expires_at'];
+      final expires = expiresRaw != null ? DateTime.tryParse(expiresRaw.toString()) : target20Utc;
+
       setState(() {
-        speechActive = false;
-        speechActorId = null;
-        speechExpiresAt = null;
+        speechActive = active;
+        speechActorId = actor;
+        speechExpiresAt = expires;
         _waitingForServerConfirm = false;
         _waitingTimeoutUtc = null;
       });
-    } finally {
-      setState(() => _rpcLoading = false);
+    } else {
+      // Fallback: сделаем immédiate fetch состояния с сервера
+      await _fetchSpeechState();
     }
+
+    _showMessage('Речь запущена до 20:00 YEKT');
+  } on PostgrestException catch (e) {
+    final msg = e.message ?? e.toString();
+    _showMessage(msg);
+    // Если ошибка "Speech already active", подтянем актуальное состояние
+    if (msg.contains('Speech already active')) {
+      await _fetchSpeechState();
+    }
+  } catch (e) {
+    _showMessage(e.toString());
+  } finally {
+    setState(() => _rpcLoading = false);
   }
+}
 
   void _showMessage(String message) {
     if (!mounted) return;
