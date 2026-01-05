@@ -28,6 +28,11 @@ class _HomeScreenState extends State<HomeScreen> {
   // RPC loading
   bool _rpcLoading = false;
 
+  // NEW: ожидаем подтверждения от сервера после RPC старта (чтобы не перезаписать локальный флаг старым poll)
+  bool _waitingForServerConfirm = false;
+  // Опционально: время, до которого ожидаем подтверждения (защита от вечного ожидания)
+  DateTime? _waitingTimeoutUtc;
+
   @override
   void initState() {
     super.initState();
@@ -69,16 +74,50 @@ class _HomeScreenState extends State<HomeScreen> {
 
         final nowUtc = DateTime.now().toUtc();
 
-        // Если есть expires_at и оно в прошлом — считаем неактивным и очищаем локально.
+        // Если есть expires_at и оно в прошлом — считаем неактивным
         if (expires != null && nowUtc.isAfter(expires)) {
+          // Очистка состояний
           setState(() {
             speechActive = false;
             speechActorId = null;
             speechExpiresAt = null;
+            _waitingForServerConfirm = false;
+            _waitingTimeoutUtc = null;
           });
           return;
         }
 
+        // NEW: если мы ожидаем подтверждения от сервера, не позволяем poll перезаписать локальный флаг в false,
+        // пока сервер не покажет active == true или не закончится timeout.
+        if (_waitingForServerConfirm) {
+          // если сервер уже вернул active == true => подтверждаем и отключаем ожидание
+          if (active) {
+            setState(() {
+              speechActive = true;
+              speechActorId = actor;
+              speechExpiresAt = expires;
+              _waitingForServerConfirm = false;
+              _waitingTimeoutUtc = null;
+            });
+            return;
+          } else {
+            // сервер пока ещё не установил active; если вышел timeout, снимем ожидание и применим текущее состояние сервера
+            if (_waitingTimeoutUtc != null && nowUtc.isAfter(_waitingTimeoutUtc!)) {
+              setState(() {
+                speechActive = active;
+                speechActorId = actor;
+                speechExpiresAt = expires;
+                _waitingForServerConfirm = false;
+                _waitingTimeoutUtc = null;
+              });
+              return;
+            }
+            // Иначе — игнорируем этот poll (оставляем локальный speechActive без изменений)
+            return;
+          }
+        }
+
+        // Обычное поведение (когда мы не ожидаем подтверждения)
         setState(() {
           speechActive = active;
           speechActorId = actor;
@@ -86,11 +125,13 @@ class _HomeScreenState extends State<HomeScreen> {
         });
       } else {
         // Если строки нет — считаем неактивным
-        setState(() {
-          speechActive = false;
-          speechActorId = null;
-          speechExpiresAt = null;
-        });
+        if (!_waitingForServerConfirm) {
+          setState(() {
+            speechActive = false;
+            speechActorId = null;
+            speechExpiresAt = null;
+          });
+        }
       }
     } catch (e) {
       // Игнорируем ошибки пуллинга (можно логировать)
@@ -103,11 +144,9 @@ class _HomeScreenState extends State<HomeScreen> {
     final nowYe = nowUtc.add(const Duration(hours: 5)); // YEKT = UTC+5
     DateTime targetYe = DateTime(nowYe.year, nowYe.month, nowYe.day, 20, 0);
     if (!nowYe.isBefore(targetYe)) {
-      // если уже >= 20:00 YEKT сегодня, берём завтра
       final tomorrow = nowYe.add(const Duration(days: 1));
       targetYe = DateTime(tomorrow.year, tomorrow.month, tomorrow.day, 20, 0);
     }
-    // вернуть в UTC
     return targetYe.subtract(const Duration(hours: 5));
   }
 
@@ -120,24 +159,26 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // Доступность кнопки "Речь жизни" для текущего пользователя.
-  // Правило: только политики; после нажатия кнопка неактивна до 20:00 YEKT.
   bool get _isSpeechButtonEnabled {
     if (user.role != 'politician') return false;
     if (_rpcLoading) return false;
 
-    // Если серверный флаг неактивен — можно нажать
-    if (!speechActive) return true;
-
-    // Если active == true:
-    // кнопка должна быть неактивна до speechExpiresAt (серверное значение)
-    final nowUtc = DateTime.now().toUtc();
-    if (speechExpiresAt != null) {
-      return nowUtc.isAfter(speechExpiresAt!);
+    // Если мы локально считаем, что речь активна — кнопка неактивна (пока не истечёт expires)
+    if (speechActive) {
+      final nowUtc = DateTime.now().toUtc();
+      if (speechExpiresAt != null) {
+        return nowUtc.isAfter(speechExpiresAt!);
+      } else {
+        // без expires: используем next 20:00 rule
+        final next20Utc = _nextYekaterinburg20Utc();
+        return nowUtc.isAfter(next20Utc);
+      }
     }
 
-    // Если сервер активен, но нет expires — вычисляем локально следующий 20:00 и сравниваем
-    final next20Utc = _nextYekaterinburg20Utc();
-    return nowUtc.isAfter(next20Utc);
+    // Если speech не активен и мы ожидаем подтверждение (например, только что нажали) — не позволяем нажать снова
+    if (_waitingForServerConfirm) return false;
+
+    return true;
   }
 
   // Нажатие "Речь жизни": вычисляем секунды до следующего YEKT 20:00 и передаём в RPC.
@@ -145,7 +186,6 @@ class _HomeScreenState extends State<HomeScreen> {
     if (user.role != 'politician') return;
     if (!_isSpeechButtonEnabled) return;
 
-    // Вычисляем целевой момент 20:00 YEKT
     final target20Utc = _nextYekaterinburg20Utc();
     final seconds = _secondsUntilUtc(target20Utc);
     if (seconds <= 0) {
@@ -153,22 +193,57 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    setState(() => _rpcLoading = true);
+    setState(() {
+      _rpcLoading = true;
+      // локально блокируем кнопку и включаем ожидание подтверждения от сервера
+      speechActive = true;
+      speechActorId = user.id;
+      speechExpiresAt = target20Utc;
+      _waitingForServerConfirm = true;
+      // подстраховочный таймаут ожидания (например 10 секунд)
+      _waitingTimeoutUtc = DateTime.now().toUtc().add(const Duration(seconds: 10));
+    });
+
     try {
-      // Серверная функция start_speech принимает p_duration_seconds (int)
       await supabase.rpc('start_speech', params: {'p_actor': user.id, 'p_duration_seconds': seconds});
 
-      // Обновляем локально: speechActive true до target20Utc
-      setState(() {
-        speechActive = true;
-        speechActorId = user.id;
-        speechExpiresAt = target20Utc.toUtc();
-      });
+      // После успешного RPC: немедленно попытаемся получить подтверждение от сервера.
+      // Сервер может потребовать небольшого времени на commit, поэтому мы не снимаем _waitingForServerConfirm сразу —
+      // дождёмся poll-а или запустим немедленный fetch.
+      await _fetchSpeechState();
+      // Если сервер установил active=true, _fetchSpeechState снимет _waitingForServerConfirm.
+      // В противном случае оставляем ожидание — poll будет проверять и timeout снимет ожидание через _waitingTimeoutUtc.
       _showMessage('Речь запущена до 20:00 по времени Екатеринбурга');
     } on PostgrestException catch (e) {
-      _showMessage(e.message ?? e.toString());
+      // Если сервер вернул "Speech already active", приводим локальное состояние в соответствие.
+      final msg = e.message ?? e.toString();
+      if (msg.contains('Speech already active')) {
+        // Установим локально активность и снимем ожидание (сервер уже active)
+        setState(() {
+          speechActive = true;
+          // пытаться подтянуть actor_id и expires через fetch
+        });
+        await _fetchSpeechState();
+      } else {
+        _showMessage(msg);
+        // Откатим локальные блокировки — позволим пользователю повторить после poll
+        setState(() {
+          speechActive = false;
+          speechActorId = null;
+          speechExpiresAt = null;
+          _waitingForServerConfirm = false;
+          _waitingTimeoutUtc = null;
+        });
+      }
     } catch (e) {
       _showMessage(e.toString());
+      setState(() {
+        speechActive = false;
+        speechActorId = null;
+        speechExpiresAt = null;
+        _waitingForServerConfirm = false;
+        _waitingTimeoutUtc = null;
+      });
     } finally {
       setState(() => _rpcLoading = false);
     }
@@ -183,8 +258,6 @@ class _HomeScreenState extends State<HomeScreen> {
     if (user.role != 'politician') return const SizedBox.shrink();
 
     final enabled = _isSpeechButtonEnabled;
-    // Показываем инициатора (если есть) — можно показать имя по id при дополнительном fetch,
-    // но сейчас показываем id.
     final actorLabel = speechActorId == user.id ? 'Вы' : (speechActorId ?? '—');
 
     return Column(
