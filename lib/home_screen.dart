@@ -1,4 +1,10 @@
 // lib/home_screen.dart
+//
+// Главный экран — обновлённая логика "Речь жизни":
+// - убрана кнопка "Остановить речь";
+// - если любой политик нажал "Речь жизни", у других политиков кнопка становится неактивной;
+// - кнопка снова становится активной в 20:00 по времени Екатеринбурга (YEKT, UTC+5) — проверка выполняется на клиенте.
+// Примечание: серверная флаговая таблица speech_state по-прежнему используется (см. предыдущие SQL).
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -17,23 +23,23 @@ class _HomeScreenState extends State<HomeScreen> {
   late AppUser user;
   final supabase = Supabase.instance.client;
 
-  // Speech state
+  // Состояние речи, отражающее серверный флаг
   bool speechActive = false;
   String? speechActorId;
   DateTime? speechExpiresAt;
 
-  // Polling timer
+  // Пуллинг для обновления состояния speech_state
   Timer? _pollTimer;
 
-  // local loading flag for RPC calls
+  // RPC loading
   bool _rpcLoading = false;
 
   @override
   void initState() {
     super.initState();
     user = widget.user;
-    _fetchSpeechState(); // initial fetch
-    _startPollingSpeechState(); // start periodic poll (fallback to realtime)
+    _fetchSpeechState();
+    _startPollingSpeechState();
   }
 
   @override
@@ -42,7 +48,6 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
-  // Start polling every N seconds
   void _startPollingSpeechState({int seconds = 3}) {
     _pollTimer?.cancel();
     _pollTimer = Timer.periodic(Duration(seconds: seconds), (_) => _fetchSpeechState());
@@ -53,7 +58,6 @@ class _HomeScreenState extends State<HomeScreen> {
     _pollTimer = null;
   }
 
-  // Fetch current speech state from DB
   Future<void> _fetchSpeechState() async {
     try {
       final res = await supabase
@@ -67,14 +71,8 @@ class _HomeScreenState extends State<HomeScreen> {
         final actor = res['actor_id']?.toString();
         final expires = res['expires_at'] != null ? DateTime.tryParse(res['expires_at'].toString()) : null;
 
-        // If expires_at passed, optionally auto-stop on client (server should also clean up)
+        // Если active и expires_at в прошлом — считаем неактивным
         if (active && expires != null && DateTime.now().isAfter(expires)) {
-          // Try to stop on server (best-effort)
-          try {
-            await supabase.rpc('stop_speech', params: {'p_actor': actor});
-          } catch (_) {
-            // ignore
-          }
           setState(() {
             speechActive = false;
             speechActorId = null;
@@ -89,7 +87,6 @@ class _HomeScreenState extends State<HomeScreen> {
           speechExpiresAt = expires;
         });
       } else {
-        // no row — treat as inactive
         setState(() {
           speechActive = false;
           speechActorId = null;
@@ -97,53 +94,52 @@ class _HomeScreenState extends State<HomeScreen> {
         });
       }
     } catch (e) {
-      // ignore polling errors silently (could log)
+      // Игнорируем ошибки пуллинга (можно логировать)
     }
   }
 
-  // Пользователь нажал кнопку "Речь жизни"
+  // Возвращает true если сейчас в Екатеринбурге >= 20:00
+  bool _isYekaterinburgAtOrAfter20() {
+    final nowUtc = DateTime.now().toUtc();
+    // YEKT = UTC+5
+    final nowYe = nowUtc.add(const Duration(hours: 5));
+    final today20Ye = DateTime(nowYe.year, nowYe.month, nowYe.day, 20, 0);
+    return !nowYe.isBefore(today20Ye);
+  }
+
+  // Определяем, доступна ли кнопка "Речь жизни" для текущего пользователя.
+  // Правило: только политики видят кнопку; если серверный флаг активен,
+  // кнопка становится неактивной для политиков до 20:00 YEKT, после чего клиент снова позволяет нажать.
+  bool get _isSpeechButtonEnabled {
+    if (user.role != 'politician') return false;
+    if (_rpcLoading) return false;
+
+    // Если сервер говорит, что речь неактивна — можно нажать
+    if (!speechActive) return true;
+
+    // speechActive == true: разрешаем нажать снова только после 20:00 YEKT
+    return _isYekaterinburgAtOrAfter20();
+  }
+
+  // Нажатие "Речь жизни" — вызывает серверную функцию start_speech
   Future<void> _onStartSpeechPressed() async {
     if (user.role != 'politician') return;
-    if (speechActive) return;
+    if (!_isSpeechButtonEnabled) return;
 
-    const durationSeconds = 3600; // 1 hour, configurable
+    const durationSeconds = 3600; // длительность события (пример)
 
     setState(() => _rpcLoading = true);
     try {
       await supabase.rpc('start_speech', params: {'p_actor': user.id, 'p_duration_seconds': durationSeconds});
 
-      // update local state immediately for snappy UX — server will reflect in poll shortly
+      // Обновляем локальное состояние для быстрого UI-отклика.
       setState(() {
         speechActive = true;
         speechActorId = user.id;
-        speechExpiresAt = DateTime.now().add(Duration(seconds: durationSeconds));
+        speechExpiresAt = DateTime.now().toUtc().add(Duration(seconds: durationSeconds));
       });
     } on PostgrestException catch (e) {
-      _showMessage(e.message ?? e.toString());
-    } catch (e) {
-      _showMessage(e.toString());
-    } finally {
-      setState(() => _rpcLoading = false);
-    }
-  }
-
-  // Пользователь (инициатор) может остановить свою речь
-  Future<void> _onStopSpeechPressed() async {
-    if (!speechActive) return;
-    if (speechActorId != user.id) {
-      _showMessage('Только инициатор может остановить речь');
-      return;
-    }
-
-    setState(() => _rpcLoading = true);
-    try {
-      await supabase.rpc('stop_speech', params: {'p_actor': user.id});
-      setState(() {
-        speechActive = false;
-        speechActorId = null;
-        speechExpiresAt = null;
-      });
-    } on PostgrestException catch (e) {
+      // Если сервер сказал, что уже активна — оставляем локальное состояние и покажем сообщение
       _showMessage(e.message ?? e.toString());
     } catch (e) {
       _showMessage(e.toString());
@@ -157,11 +153,10 @@ class _HomeScreenState extends State<HomeScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
-  // UI helper: renders the speech button and related info for politicians
   Widget _renderSpeechButton() {
     if (user.role != 'politician') return const SizedBox.shrink();
 
-    final enabled = !speechActive && !_rpcLoading;
+    final enabled = _isSpeechButtonEnabled;
     final actorLabel = speechActorId == user.id ? 'Вы' : (speechActorId ?? '—');
 
     return Column(
@@ -169,7 +164,9 @@ class _HomeScreenState extends State<HomeScreen> {
       children: [
         ElevatedButton(
           onPressed: enabled ? _onStartSpeechPressed : null,
-          style: ElevatedButton.styleFrom(backgroundColor: enabled ? Colors.orange : Colors.grey),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: enabled ? Colors.orange : Colors.grey,
+          ),
           child: Text(enabled ? 'Речь жизни (старт)' : 'Речь жизни (неактивна)'),
         ),
         if (speechActive)
@@ -180,20 +177,18 @@ class _HomeScreenState extends State<HomeScreen> {
               style: const TextStyle(fontSize: 12, color: Colors.grey),
             ),
           ),
-        if (speechActive && speechActorId == user.id)
+        if (!_isYekaterinburgAtOrAfter20() && speechActive)
           Padding(
             padding: const EdgeInsets.only(top: 6.0),
-            child: ElevatedButton(
-              onPressed: _rpcLoading ? null : _onStopSpeechPressed,
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
-              child: _rpcLoading ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Text('Остановить речь'),
+            child: Text(
+              'Кнопка снова станет доступна в 20:00 по времени Екатеринбурга.',
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
             ),
           ),
       ],
     );
   }
 
-  // Balance card and role buttons
   Widget _balanceCard() {
     return Card(
       child: Padding(
