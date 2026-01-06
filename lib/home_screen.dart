@@ -1,10 +1,15 @@
 // lib/home_screen.dart
+//
+// Главное окно — навигация на transfer_v_screen и логика "Речь жизни".
+// Исправлена ошибка: обновление профиля теперь создает новый AppUser,
+// вместо попытки присвоить значения в final-поля firstName/lastName.
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'models/app_user.dart';
 import 'login_screen.dart';
+import 'transfer_v_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final AppUser user;
@@ -18,20 +23,19 @@ class _HomeScreenState extends State<HomeScreen> {
   late AppUser user;
   final supabase = Supabase.instance.client;
 
-  // Состояние речи (серверный флаг)
+  // Speech state
   bool speechActive = false;
   String? speechActorId;
-  DateTime? speechExpiresAt; // в UTC
+  DateTime? speechExpiresAt; // UTC
 
-  // Пуллинг для обновления состояния speech_state
+  // Polling
   Timer? _pollTimer;
 
-  // RPC loading
+  // RPC/loading flags
   bool _rpcLoading = false;
 
-  // NEW: ожидаем подтверждения от сервера после RPC старта (чтобы не перезаписать локальный флаг старым poll)
+  // Waiting for server confirm after start_speech
   bool _waitingForServerConfirm = false;
-  // Опционально: время, до которого ожидаем подтверждения (защита от вечного ожидания)
   DateTime? _waitingTimeoutUtc;
 
   @override
@@ -48,6 +52,45 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
+  // -----------------------
+  // Profile / balance refresh
+  // -----------------------
+  Future<void> _refreshProfile() async {
+    try {
+      final profile = await supabase
+          .from('user_credentials')
+          .select('v_balance, m_balance, first_name, last_name, telegram_username, role')
+          .eq('id', user.id)
+          .maybeSingle();
+
+      if (profile is Map<String, dynamic>) {
+        final v = profile['v_balance'];
+        final m = profile['m_balance'];
+        final fn = profile['first_name'];
+        final ln = profile['last_name'];
+        final uname = profile['telegram_username'];
+        final role = profile['role'];
+
+        setState(() {
+          user = AppUser(
+            id: user.id,
+            username: uname is String ? uname : user.username,
+            role: role is String ? role : user.role,
+            firstName: fn is String ? fn : user.firstName,
+            lastName: ln is String ? ln : user.lastName,
+            vBalance: v is num ? (v as num).toDouble() : user.vBalance,
+            mBalance: m is num ? (m as num).toDouble() : user.mBalance,
+          );
+        });
+      }
+    } catch (_) {
+      // ignore refresh errors
+    }
+  }
+
+  // -----------------------
+  // Polling speech_state
+  // -----------------------
   void _startPollingSpeechState({int seconds = 3}) {
     _pollTimer?.cancel();
     _pollTimer = Timer.periodic(Duration(seconds: seconds), (_) => _fetchSpeechState());
@@ -58,7 +101,6 @@ class _HomeScreenState extends State<HomeScreen> {
     _pollTimer = null;
   }
 
-  // Получить состояние с сервера и актуализировать локальный флаг.
   Future<void> _fetchSpeechState() async {
     try {
       final res = await supabase
@@ -75,9 +117,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
         final nowUtc = DateTime.now().toUtc();
 
-        // Если есть expires_at и оно в прошлом — считаем неактивным
+        // If expires passed - treat as inactive
         if (expires != null && nowUtc.isAfter(expires)) {
-          // Очистка состояний
           setState(() {
             speechActive = false;
             speechActorId = null;
@@ -88,10 +129,8 @@ class _HomeScreenState extends State<HomeScreen> {
           return;
         }
 
-        // NEW: если мы ожидаем подтверждения от сервера, не позволяем poll перезаписать локальный флаг в false,
-        // пока сервер не покажет active == true или не закончится timeout.
+        // If waiting for server confirm, handle specially
         if (_waitingForServerConfirm) {
-          // если сервер уже вернул active == true => подтверждаем и отключаем ожидание
           if (active) {
             setState(() {
               speechActive = true;
@@ -102,7 +141,6 @@ class _HomeScreenState extends State<HomeScreen> {
             });
             return;
           } else {
-            // сервер пока ещё не установил active; если вышел timeout, снимем ожидание и применим текущее состояние сервера
             if (_waitingTimeoutUtc != null && nowUtc.isAfter(_waitingTimeoutUtc!)) {
               setState(() {
                 speechActive = active;
@@ -113,19 +151,17 @@ class _HomeScreenState extends State<HomeScreen> {
               });
               return;
             }
-            // Иначе — игнорируем этот poll (оставляем локальный speechActive без изменений)
+            // else ignore this poll (still waiting)
             return;
           }
         }
 
-        // Обычное поведение (когда мы не ожидаем подтверждения)
         setState(() {
           speechActive = active;
           speechActorId = actor;
           speechExpiresAt = expires;
         });
       } else {
-        // Если строки нет — считаем неактивным
         if (!_waitingForServerConfirm) {
           setState(() {
             speechActive = false;
@@ -134,12 +170,14 @@ class _HomeScreenState extends State<HomeScreen> {
           });
         }
       }
-    } catch (e) {
-      // Игнорируем ошибки пуллинга (можно логировать)
+    } catch (_) {
+      // ignore
     }
   }
 
-  // Вычисляет следующий момент 20:00 по YEKT (UTC+5) в UTC.
+  // -----------------------
+  // YEKT helpers
+  // -----------------------
   DateTime _nextYekaterinburg20Utc() {
     final nowUtc = DateTime.now().toUtc();
     final nowYe = nowUtc.add(const Duration(hours: 5)); // YEKT = UTC+5
@@ -151,7 +189,6 @@ class _HomeScreenState extends State<HomeScreen> {
     return targetYe.subtract(const Duration(hours: 5));
   }
 
-  // Возвращает количество секунд от nowUtc до targetUtc (>=1)
   int _secondsUntilUtc(DateTime targetUtc) {
     final nowUtc = DateTime.now().toUtc();
     final diff = targetUtc.difference(nowUtc);
@@ -159,107 +196,138 @@ class _HomeScreenState extends State<HomeScreen> {
     return secs > 0 ? secs : 0;
   }
 
-  // Доступность кнопки "Речь жизни" для текущего пользователя.
   bool get _isSpeechButtonEnabled {
     if (user.role != 'politician') return false;
     if (_rpcLoading) return false;
 
-    // Если мы локально считаем, что речь активна — кнопка неактивна (пока не истечёт expires)
     if (speechActive) {
       final nowUtc = DateTime.now().toUtc();
       if (speechExpiresAt != null) {
         return nowUtc.isAfter(speechExpiresAt!);
       } else {
-        // без expires: используем next 20:00 rule
-        final next20Utc = _nextYekaterinburg20Utc();
-        return nowUtc.isAfter(next20Utc);
+        final next20 = _nextYekaterinburg20Utc();
+        return nowUtc.isAfter(next20);
       }
     }
 
-    // Если speech не активен и мы ожидаем подтверждение (например, только что нажали) — не позволяем нажать снова
     if (_waitingForServerConfirm) return false;
-
     return true;
   }
 
-  // Нажатие "Речь жизни": вычисляем секунды до следующего YEKT 20:00 и передаём в RPC.
+  // -----------------------
+  // start_speech (uses server RPC and trusts returned JSON)
+  // -----------------------
   Future<void> _onStartSpeechPressed() async {
-  if (user.role != 'politician') return;
-  if (!_isSpeechButtonEnabled) return;
+    if (user.role != 'politician') return;
+    if (!_isSpeechButtonEnabled) return;
 
-  // вычисляем секунды до следующего 20:00 YEKT (как у вас ранее)
-  final target20Utc = _nextYekaterinburg20Utc(); // ваш helper
-  final seconds = _secondsUntilUtc(target20Utc);
-  if (seconds <= 0) {
-    _showMessage('Невозможно вычислить время до 20:00 YEKT');
-    return;
-  }
-
-  setState(() {
-    _rpcLoading = true;
-  });
-
-  try {
-    final dynamic rpcRes = await supabase.rpc('start_speech', params: {
-      'p_actor': user.id,
-      'p_duration_seconds': seconds,
-    });
-
-    // Парсим ответ — ожидаем Map с полями active, actor_id, expires_at
-    Map<String, dynamic>? parsed;
-    if (rpcRes is Map<String, dynamic>) {
-      parsed = rpcRes;
-    } else if (rpcRes is List && rpcRes.isNotEmpty && rpcRes[0] is Map) {
-      parsed = Map<String, dynamic>.from(rpcRes[0] as Map);
-    } else if (rpcRes is String) {
-      // Иногда PostgREST возвращает строку JSON
-      try {
-        parsed = Map<String, dynamic>.from(jsonDecode(rpcRes) as Map);
-      } catch (_) {
-        parsed = null;
-      }
-    } else {
-      parsed = null;
+    final target20Utc = _nextYekaterinburg20Utc();
+    final seconds = _secondsUntilUtc(target20Utc);
+    if (seconds <= 0) {
+      _showMessage('Невозможно вычислить время до 20:00 YEKT');
+      return;
     }
 
-    if (parsed != null) {
-      final active = parsed['active'] as bool? ?? true;
-      final actor = parsed['actor_id']?.toString();
-      final expiresRaw = parsed['expires_at'];
-      final expires = expiresRaw != null ? DateTime.tryParse(expiresRaw.toString()) : target20Utc;
+    setState(() {
+      _rpcLoading = true;
+      // optimistic local lock + wait for server confirm
+      speechActive = true;
+      speechActorId = user.id;
+      speechExpiresAt = target20Utc;
+      _waitingForServerConfirm = true;
+      _waitingTimeoutUtc = DateTime.now().toUtc().add(const Duration(seconds: 10));
+    });
 
+    try {
+      final dynamic rpcRes = await supabase.rpc('start_speech', params: {
+        'p_actor': user.id,
+        'p_duration_seconds': seconds,
+      });
+
+      Map<String, dynamic>? parsed;
+      if (rpcRes is Map<String, dynamic>) {
+        parsed = rpcRes;
+      } else if (rpcRes is List && rpcRes.isNotEmpty && rpcRes[0] is Map) {
+        parsed = Map<String, dynamic>.from(rpcRes[0] as Map);
+      } else if (rpcRes is String) {
+        try {
+          parsed = Map<String, dynamic>.from(jsonDecode(rpcRes) as Map);
+        } catch (_) {
+          parsed = null;
+        }
+      } else {
+        parsed = null;
+      }
+
+      if (parsed != null) {
+        final active = parsed['active'] as bool? ?? true;
+        final actor = parsed['actor_id']?.toString();
+        final expiresRaw = parsed['expires_at'];
+        final expires = expiresRaw != null ? DateTime.tryParse(expiresRaw.toString()) : target20Utc;
+
+        setState(() {
+          speechActive = active;
+          speechActorId = actor;
+          speechExpiresAt = expires;
+          _waitingForServerConfirm = false;
+          _waitingTimeoutUtc = null;
+        });
+      } else {
+        // fallback: force fetch
+        await _fetchSpeechState();
+      }
+
+      _showMessage('Речь запущена до 20:00 по времени Екатеринбурга');
+    } on PostgrestException catch (e) {
+      final msg = e.message ?? e.toString();
+      if (msg.contains('Speech already active')) {
+        await _fetchSpeechState();
+      } else {
+        _showMessage(msg);
+        setState(() {
+          speechActive = false;
+          speechActorId = null;
+          speechExpiresAt = null;
+          _waitingForServerConfirm = false;
+          _waitingTimeoutUtc = null;
+        });
+      }
+    } catch (e) {
+      _showMessage(e.toString());
       setState(() {
-        speechActive = active;
-        speechActorId = actor;
-        speechExpiresAt = expires;
+        speechActive = false;
+        speechActorId = null;
+        speechExpiresAt = null;
         _waitingForServerConfirm = false;
         _waitingTimeoutUtc = null;
       });
-    } else {
-      // Fallback: сделаем immédiate fetch состояния с сервера
-      await _fetchSpeechState();
+    } finally {
+      setState(() => _rpcLoading = false);
     }
-
-    _showMessage('Речь запущена до 20:00 YEKT');
-  } on PostgrestException catch (e) {
-    final msg = e.message ?? e.toString();
-    _showMessage(msg);
-    // Если ошибка "Speech already active", подтянем актуальное состояние
-    if (msg.contains('Speech already active')) {
-      await _fetchSpeechState();
-    }
-  } catch (e) {
-    _showMessage(e.toString());
-  } finally {
-    setState(() => _rpcLoading = false);
   }
-}
 
   void _showMessage(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
+  // -----------------------
+  // Transfer navigation: open transfer_v_screen and refresh profile on success
+  // -----------------------
+  Future<void> _openTransferScreen() async {
+    final res = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => TransferVScreen(user: user)),
+    );
+
+    // If returned true — refresh profile (balances)
+    if (res == true) {
+      await _refreshProfile();
+    }
+  }
+
+  // -----------------------
+  // UI rendering
+  // -----------------------
   Widget _renderSpeechButton() {
     if (user.role != 'politician') return const SizedBox.shrink();
 
@@ -271,9 +339,7 @@ class _HomeScreenState extends State<HomeScreen> {
       children: [
         ElevatedButton(
           onPressed: enabled ? _onStartSpeechPressed : null,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: enabled ? Colors.orange : Colors.grey,
-          ),
+          style: ElevatedButton.styleFrom(backgroundColor: enabled ? Colors.orange : Colors.grey),
           child: Text(enabled ? 'Речь жизни (старт)' : 'Речь жизни (неактивна)'),
         ),
         if (speechActive)
@@ -335,9 +401,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ));
     }
 
-    add('Перевести V/M', () {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Открыть: Перевести')));
-    });
+    add('Перевести V/M', () => _openTransferScreen());
 
     add('Опросы / Аукционы', () {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Открыть: Опросы/Аукционы')));
