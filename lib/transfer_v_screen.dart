@@ -6,34 +6,47 @@
 // в выбранном получателе и использует его при RPC-вызове.
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:intl/intl.dart';
 import 'models/app_user.dart';
+
+// Helpers: convert server timestamptz (ISO8601 or DateTime) to YEKT (Asia/Yekaterinburg) and format.
+String formatToYekaterinburg(dynamic ts) {
+  if (ts == null) return '';
+  DateTime dt;
+  if (ts is DateTime) {
+    dt = ts.toUtc();
+  } else {
+    dt = DateTime.tryParse(ts.toString()) ?? DateTime.parse(ts.toString());
+    dt = dt.toUtc();
+  }
+  final ye = dt.add(const Duration(hours: 5)); // YEKT = UTC+5
+  return DateFormat('yyyy-MM-dd HH:mm:ss').format(ye);
+}
 
 class TransferVScreen extends StatefulWidget {
   final AppUser user;
   const TransferVScreen({Key? key, required this.user}) : super(key: key);
 
   @override
-  State<TransferVScreen> createState() => _TransferVScreenState();
+  _TransferVScreenState createState() => _TransferVScreenState();
 }
 
 class _TransferVScreenState extends State<TransferVScreen> {
-  final _formKey = GlobalKey<FormState>();
-  final _toCtrl = TextEditingController(); // показывает display name, не username
-  final _amountCtrl = TextEditingController();
-  bool _loading = false;
-  String? _error;
-
   final supabase = Supabase.instance.client;
 
-  // полный список получателей (мап содержит id, telegram_username, first_name, last_name)
-  List<Map<String, dynamic>> _allRecipients = [];
-  // видимый список после клиентской фильтрации
-  List<Map<String, dynamic>> _visibleRecipients = [];
+  bool _loading = false;
+  String _error = '';
+
+  // recipients
   bool _recipientsLoading = false;
   String _recipientsError = '';
-
-  // выбранный получатель (содержит telegram_username и id и т.д.)
+  List<Map<String, dynamic>> _allRecipients = [];
+  List<Map<String, dynamic>> _visibleRecipients = [];
   Map<String, dynamic>? _selectedRecipient;
+
+  // controller
+  final TextEditingController _amountController = TextEditingController();
+  final TextEditingController _noteController = TextEditingController();
 
   @override
   void initState() {
@@ -41,66 +54,59 @@ class _TransferVScreenState extends State<TransferVScreen> {
     _loadRecipients();
   }
 
-  @override
-  void dispose() {
-    _toCtrl.dispose();
-    _amountCtrl.dispose();
-    super.dispose();
-  }
-
   Future<void> _loadRecipients() async {
-  setState(() {
-    _recipientsLoading = true;
-    _recipientsError = '';
-  });
+    setState(() {
+      _recipientsLoading = true;
+      _recipientsError = '';
+    });
 
-  try {
-    // Запрашиваем всех пользователей, кроме текущего отправителя,
-    // и всегда исключаем пользователей с ролью 'politician'
-    final dynamic res = await supabase
-        .from('user_credentials')
-        .select('id, telegram_username, first_name, last_name, role')
-        .neq('id', widget.user.id)
-        .neq('role', 'politician')
-        .order('first_name'); // сортируем по имени для удобства
+    try {
+      // Запрашиваем всех пользователей, кроме текущего отправителя,
+      // и всегда исключаем пользователей с ролью 'politician'
+      final dynamic res = await supabase
+          .from('user_credentials')
+          .select('id, telegram_username, first_name, last_name, role')
+          .neq('id', widget.user.id)
+          .neq('role', 'politician')
+          .order('first_name'); // сортируем по имени для удобства
 
-    List<Map<String, dynamic>> list = [];
+      List<Map<String, dynamic>> list = [];
 
-    if (res is List) {
-      list = res
-          .where((e) => e != null)
-          .map<Map<String, dynamic>>((e) {
-            if (e is Map) return Map<String, dynamic>.from(e);
-            return <String, dynamic>{};
-          })
-          .where((m) => m.isNotEmpty)
-          .toList();
-    } else {
-      list = [];
+      if (res is List) {
+        list = res
+            .where((e) => e != null)
+            .map<Map<String, dynamic>>((e) {
+              if (e is Map) return Map<String, dynamic>.from(e);
+              return <String, dynamic>{};
+            })
+            .where((m) => m.isNotEmpty)
+            .toList();
+      } else {
+        list = [];
+      }
+
+      setState(() {
+        _allRecipients = list;
+        _visibleRecipients = List<Map<String, dynamic>>.from(list);
+      });
+    } on PostgrestException catch (e) {
+      setState(() {
+        _recipientsError = 'Ошибка при загрузке получателей: ${e.message}';
+        _allRecipients = [];
+        _visibleRecipients = [];
+      });
+    } catch (e) {
+      setState(() {
+        _recipientsError = 'Ошибка при загрузке получателей: ${e.toString()}';
+        _allRecipients = [];
+        _visibleRecipients = [];
+      });
+    } finally {
+      setState(() {
+        _recipientsLoading = false;
+      });
     }
-
-    setState(() {
-      _allRecipients = list;
-      _visibleRecipients = List<Map<String, dynamic>>.from(list);
-    });
-  } on PostgrestException catch (e) {
-    setState(() {
-      _recipientsError = 'Ошибка при загрузке получателей: ${e.message}';
-      _allRecipients = [];
-      _visibleRecipients = [];
-    });
-  } catch (e) {
-    setState(() {
-      _recipientsError = 'Ошибка при загрузке получателей: ${e.toString()}';
-      _allRecipients = [];
-      _visibleRecipients = [];
-    });
-  } finally {
-    setState(() {
-      _recipientsLoading = false;
-    });
   }
-}
 
   // Показываем modal sheet со списком и поиском
   Future<void> _openRecipientPicker() async {
@@ -119,29 +125,28 @@ class _TransferVScreenState extends State<TransferVScreen> {
       _selectedRecipient = selected;
       final first = (selected['first_name'] ?? '').toString();
       final last = (selected['last_name'] ?? '').toString();
-      final displayName = ('$first $last').trim().isEmpty ? 'Без имени' : '$first $last';
-      _toCtrl.text = displayName;
+      final display = (first + ' ' + last).trim();
+      if (mounted) {
+        setState(() {});
+      }
     }
   }
 
-  // Выполнение перевода: используем telegram_username из _selectedRecipient
-  Future<void> _transfer() async {
-    setState(() => _error = null);
-
-    if (!_formKey.currentState!.validate()) return;
-
-    if (_selectedRecipient == null) {
+  Future<void> _submitTransfer() async {
+    final to = _selectedRecipient;
+    if (to == null) {
       setState(() => _error = 'Выберите получателя');
       return;
     }
 
-    final toUsername = (_selectedRecipient!['telegram_username'] ?? '').toString();
-    if (toUsername.isEmpty) {
-      setState(() => _error = 'У получателя не задан идентификатор, выберите другого получателя');
+    final toUsername = (to['telegram_username'] ?? '').toString();
+    final amountRaw = _amountController.text.trim();
+    if (amountRaw.isEmpty) {
+      setState(() => _error = 'Введите сумму');
       return;
     }
 
-    final amountValue = double.tryParse(_amountCtrl.text.replaceAll(',', '.'));
+    final amountValue = double.tryParse(amountRaw.replaceAll(',', '.'));
     if (amountValue == null) {
       setState(() => _error = 'Неверный формат суммы');
       return;
@@ -176,6 +181,16 @@ class _TransferVScreenState extends State<TransferVScreen> {
         parsed = null;
       }
 
+      // Normalize created_at returned by RPC to YEKT formatted string (if present)
+      if (parsed != null && parsed.containsKey('created_at')) {
+        try {
+          final createdRaw = parsed['created_at'];
+          parsed['created_at_yekat'] = formatToYekaterinburg(createdRaw);
+        } catch (_) {
+          parsed['created_at_yekat'] = '';
+        }
+      }
+
       if (parsed != null && parsed.containsKey('from_balance')) {
         final fb = parsed['from_balance'];
         if (fb is num) widget.user.vBalance = (fb as num).toDouble();
@@ -183,194 +198,158 @@ class _TransferVScreenState extends State<TransferVScreen> {
         // Если RPC не вернул балансы — ре-fetchим профиль отправителя
         final profile = await supabase
             .from('user_credentials')
-            .select('v_balance, m_balance')
+            .select('v_balance')
             .eq('id', widget.user.id)
             .maybeSingle();
-
         if (profile is Map<String, dynamic>) {
-          final v = profile['v_balance'];
-          final m = profile['m_balance'];
-          if (v is num) widget.user.vBalance = (v as num).toDouble();
-          if (m is num) widget.user.mBalance = (m as num).toDouble();
+          final vbal = profile['v_balance'];
+          if (vbal is num) widget.user.vBalance = (vbal as num).toDouble();
         }
       }
 
-      if (!mounted) return;
-      Navigator.of(context).pop(true);
+      // Очистим форму и покажем успех
+      _amountController.clear();
+      _noteController.clear();
+      _selectedRecipient = null;
+      setState(() {
+        _error = '';
+      });
+
+      // Показываем уведомление с локальным временем (если RPC вернул created_at_yekat)
+      String message = 'Перевод выполнен';
+      if (parsed != null && parsed.containsKey('created_at_yekat')) {
+        final cat = parsed['created_at_yekat'] ?? '';
+        if (cat is String && cat.isNotEmpty) {
+          message = 'Перевод выполнен: $cat (YEKT)';
+        }
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+      }
     } on PostgrestException catch (e) {
-      setState(() => _error = e.message ?? e.toString());
+      setState(() {
+        _error = 'Ошибка при переводе: ${e.message}';
+      });
     } catch (e) {
-      setState(() => _error = e.toString());
+      setState(() {
+        _error = 'Ошибка при переводе: ${e.toString()}';
+      });
     } finally {
       setState(() => _loading = false);
     }
   }
 
-  String? _validateAmount(String? v) {
-    if (v == null || v.isEmpty) return 'Введите сумму';
-    final n = double.tryParse(v.replaceAll(',', '.'));
-    if (n == null || n <= 0) return 'Некорректная сумма';
-    if (n > widget.user.vBalance) return 'Сумма превышает ваш баланс';
-    return null;
+  @override
+  void dispose() {
+    _amountController.dispose();
+    _noteController.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final first = widget.user.firstName;
+    final last = widget.user.lastName;
     return Scaffold(
-      appBar: AppBar(title: const Text('Перевод V')),
+      appBar: AppBar(
+        title: Text('Перевести V/M'),
+      ),
       body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Form(
-          key: _formKey,
-          child: Column(children: [
-            GestureDetector(
-              onTap: _openRecipientPicker,
-              child: AbsorbPointer(
-                child: TextFormField(
-                  controller: _toCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Получатель',
-                    suffixIcon: Icon(Icons.expand_more),
-                  ),
-                  validator: (_) {
-                    if (_selectedRecipient == null) return 'Выберите получателя';
-                    return null;
-                  },
-                ),
-              ),
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            Text('Пользователь: ${first} ${last}'),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _amountController,
+              keyboardType: TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(labelText: 'Сумма'),
             ),
             const SizedBox(height: 12),
             TextFormField(
-              controller: _amountCtrl,
-              decoration: const InputDecoration(labelText: 'Количество V'),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              validator: _validateAmount,
+              controller: _noteController,
+              decoration: const InputDecoration(labelText: 'Примечание (необязательно)'),
             ),
             const SizedBox(height: 12),
-            if (_recipientsLoading) const LinearProgressIndicator(),
-            if (_recipientsError.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Text(_recipientsError, style: const TextStyle(color: Colors.red)),
-              ),
-            if (_error != null)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Text(_error!, style: const TextStyle(color: Colors.red)),
-              ),
-            const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: _loading ? null : _transfer,
-                child: _loading
-                    ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Text('Перевести'),
-              ),
+            ElevatedButton(
+              onPressed: _openRecipientPicker,
+              child: Text(_selectedRecipient == null
+                  ? 'Выбрать получателя'
+                  : '${(_selectedRecipient?['first_name'] ?? '')} ${(_selectedRecipient?['last_name'] ?? '')}'),
             ),
-          ]),
+            const SizedBox(height: 12),
+            if (_error.isNotEmpty) Text(_error, style: const TextStyle(color: Colors.red)),
+            const SizedBox(height: 12),
+            ElevatedButton(
+              onPressed: _loading ? null : _submitTransfer,
+              child: _loading ? const CircularProgressIndicator() : const Text('Отправить'),
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-/// Bottom sheet: список и поиск получателей (без упоминания username в UI)
 class RecipientPickerSheet extends StatefulWidget {
   final List<Map<String, dynamic>> recipients;
   const RecipientPickerSheet({Key? key, required this.recipients}) : super(key: key);
 
   @override
-  State<RecipientPickerSheet> createState() => _RecipientPickerSheetState();
+  _RecipientPickerSheetState createState() => _RecipientPickerSheetState();
 }
 
 class _RecipientPickerSheetState extends State<RecipientPickerSheet> {
-  late List<Map<String, dynamic>> _filtered;
-  final _searchCtrl = TextEditingController();
+  List<Map<String, dynamic>> _filtered = [];
+  final TextEditingController _q = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    _filtered = List.from(widget.recipients);
-    _searchCtrl.addListener(_onSearchChanged);
-  }
-
-  @override
-  void dispose() {
-    _searchCtrl.removeListener(_onSearchChanged);
-    _searchCtrl.dispose();
-    super.dispose();
+    _filtered = widget.recipients;
   }
 
   void _onSearchChanged() {
-    final q = _searchCtrl.text.trim().toLowerCase();
+    final q = _q.text.toLowerCase();
     setState(() {
-      if (q.isEmpty) {
-        _filtered = List.from(widget.recipients);
-      } else {
-        _filtered = widget.recipients.where((row) {
-          final username = (row['telegram_username'] ?? '').toString().toLowerCase();
-          final first = (row['first_name'] ?? '').toString().toLowerCase();
-          final last = (row['last_name'] ?? '').toString().toLowerCase();
-          return username.contains(q) || first.contains(q) || last.contains(q);
-        }).toList();
-      }
+      _filtered = widget.recipients.where((r) {
+        final fn = (r['first_name'] ?? '').toString().toLowerCase();
+        final ln = (r['last_name'] ?? '').toString().toLowerCase();
+        final un = (r['telegram_username'] ?? '').toString().toLowerCase();
+        return fn.contains(q) || ln.contains(q) || un.contains(q);
+      }).toList();
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return SafeArea(
       child: FractionallySizedBox(
         heightFactor: 0.85,
         child: Column(
           children: [
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _searchCtrl,
-                      decoration: InputDecoration(
-                        hintText: 'Поиск по имени или фамилии',
-                        prefixIcon: const Icon(Icons.search),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                        isDense: true,
-                        contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  TextButton(
-                    onPressed: () {
-                      _searchCtrl.clear();
-                      FocusScope.of(context).unfocus();
-                    },
-                    child: const Text('Очистить'),
-                  ),
-                ],
+              padding: const EdgeInsets.all(12.0),
+              child: TextField(
+                controller: _q,
+                onChanged: (_) => _onSearchChanged(),
+                decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Поиск'),
               ),
             ),
-            const Divider(height: 0),
             Expanded(
-              child: _filtered.isEmpty
-                  ? Center(child: Text('Ничего не найдено', style: theme.textTheme.bodyLarge))
-                  : ListView.separated(
-                      itemCount: _filtered.length,
-                      separatorBuilder: (_, __) => const Divider(height: 0),
-                      itemBuilder: (context, index) {
-                        final row = _filtered[index];
-                        final first = (row['first_name'] ?? '').toString();
-                        final last = (row['last_name'] ?? '').toString();
-                        final displayName = ('$first $last').trim().isEmpty ? 'Без имени' : '$first $last';
-                        return ListTile(
-                          title: Text(displayName),
-                          onTap: () => Navigator.of(context).pop(row),
-                        );
-                      },
-                    ),
+              child: ListView.builder(
+                itemCount: _filtered.length,
+                itemBuilder: (_, idx) {
+                  final r = _filtered[idx];
+                  final display = ('${r['first_name'] ?? ''} ${r['last_name'] ?? ''}').trim();
+                  return ListTile(
+                    title: Text(display.isEmpty ? (r['telegram_username'] ?? '') : display),
+                    subtitle: Text(r['telegram_username'] ?? ''),
+                    onTap: () => Navigator.of(context).pop(r),
+                  );
+                },
+              ),
             ),
           ],
         ),
