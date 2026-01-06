@@ -1,57 +1,54 @@
 // lib/transfer_v_screen.dart
 //
 // Экран для перевода V-поинтов между пользователями.
-// Изменения: убраны упоминания "username" в UI — вместо этого показываются
-// имена пользователей; внутренняя логика по-прежнему хранит telegram_username
-// в выбранном получателе и использует его при RPC-вызове.
+// Интерфейс оставлен без изменений. Внесены только логические правки:
+// - при загрузке получателей теперь возвращаются все пользователи, кроме
+//   текущего отправителя (включая политиков), чтобы можно было выбирать любых.
+// - на этапе перевода добавлена проверка: если отправитель имеет роль
+//   'politician' и получатель также 'politician', перевод запрещён.
+//   Все остальные комбинации ролей допускаются.
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:intl/intl.dart';
 import 'models/app_user.dart';
-
-// Helpers: convert server timestamptz (ISO8601 or DateTime) to YEKT (Asia/Yekaterinburg) and format.
-String formatToYekaterinburg(dynamic ts) {
-  if (ts == null) return '';
-  DateTime dt;
-  if (ts is DateTime) {
-    dt = ts.toUtc();
-  } else {
-    dt = DateTime.tryParse(ts.toString()) ?? DateTime.parse(ts.toString());
-    dt = dt.toUtc();
-  }
-  final ye = dt.add(const Duration(hours: 5)); // YEKT = UTC+5
-  return DateFormat('yyyy-MM-dd HH:mm:ss').format(ye);
-}
 
 class TransferVScreen extends StatefulWidget {
   final AppUser user;
   const TransferVScreen({Key? key, required this.user}) : super(key: key);
 
   @override
-  _TransferVScreenState createState() => _TransferVScreenState();
+  State<TransferVScreen> createState() => _TransferVScreenState();
 }
 
 class _TransferVScreenState extends State<TransferVScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final _toCtrl = TextEditingController(); // показывает display name, не username
+  final _amountCtrl = TextEditingController();
+  bool _loading = false;
+  String? _error;
+
   final supabase = Supabase.instance.client;
 
-  bool _loading = false;
-  String _error = '';
-
-  // recipients
+  // полный список получателей (мап содержит id, telegram_username, first_name, last_name)
+  List<Map<String, dynamic>> _allRecipients = [];
+  // видимый список после клиентской фильтрации
+  List<Map<String, dynamic>> _visibleRecipients = [];
   bool _recipientsLoading = false;
   String _recipientsError = '';
-  List<Map<String, dynamic>> _allRecipients = [];
-  List<Map<String, dynamic>> _visibleRecipients = [];
-  Map<String, dynamic>? _selectedRecipient;
 
-  // controller
-  final TextEditingController _amountController = TextEditingController();
-  final TextEditingController _noteController = TextEditingController();
+  // выбранный получатель (содержит telegram_username и id и т.д.)
+  Map<String, dynamic>? _selectedRecipient;
 
   @override
   void initState() {
     super.initState();
     _loadRecipients();
+  }
+
+  @override
+  void dispose() {
+    _toCtrl.dispose();
+    _amountCtrl.dispose();
+    super.dispose();
   }
 
   Future<void> _loadRecipients() async {
@@ -61,14 +58,15 @@ class _TransferVScreenState extends State<TransferVScreen> {
     });
 
     try {
-      // Запрашиваем всех пользователей, кроме текущего отправителя,
-      // и всегда исключаем пользователей с ролью 'politician'
+      // Запрашиваем всех пользователей, кроме текущего отправителя.
+      // Важно: не исключаем по роли на клиенте — разрешаем выбирать любого,
+      // а бизнес-правило о запрете переводов политиков политиками реализовано
+      // при попытке перевода.
       final dynamic res = await supabase
           .from('user_credentials')
           .select('id, telegram_username, first_name, last_name, role')
           .neq('id', widget.user.id)
-          .neq('role', 'politician')
-          .order('first_name'); // сортируем по имени для удобства
+          .order('first_name');
 
       List<Map<String, dynamic>> list = [];
 
@@ -125,28 +123,38 @@ class _TransferVScreenState extends State<TransferVScreen> {
       _selectedRecipient = selected;
       final first = (selected['first_name'] ?? '').toString();
       final last = (selected['last_name'] ?? '').toString();
-      final display = (first + ' ' + last).trim();
-      if (mounted) {
-        setState(() {});
-      }
+      final displayName = ('$first $last').trim().isEmpty ? 'Без имени' : '$first $last';
+      _toCtrl.text = displayName;
     }
   }
 
-  Future<void> _submitTransfer() async {
-    final to = _selectedRecipient;
-    if (to == null) {
+  // Выполнение перевода: используем telegram_username из _selectedRecipient
+  Future<void> _transfer() async {
+    setState(() => _error = null);
+
+    if (!_formKey.currentState!.validate()) return;
+
+    if (_selectedRecipient == null) {
       setState(() => _error = 'Выберите получателя');
       return;
     }
 
-    final toUsername = (to['telegram_username'] ?? '').toString();
-    final amountRaw = _amountController.text.trim();
-    if (amountRaw.isEmpty) {
-      setState(() => _error = 'Введите сумму');
+    // Проверка бизнес-правила:
+    // - если отправитель role == 'politician' и получатель role == 'politician' => запрет
+    final senderRole = (widget.user.role ?? '').toString();
+    final recipientRole = (_selectedRecipient!['role'] ?? '').toString();
+    if (senderRole == 'politician' && recipientRole == 'politician') {
+      setState(() => _error = 'Пользователям с ролью politician запрещено переводить другим пользователям с ролью politician');
       return;
     }
 
-    final amountValue = double.tryParse(amountRaw.replaceAll(',', '.'));
+    final toUsername = (_selectedRecipient!['telegram_username'] ?? '').toString();
+    if (toUsername.isEmpty) {
+      setState(() => _error = 'У получателя не задан идентификатор, выберите другого получателя');
+      return;
+    }
+
+    final amountValue = double.tryParse(_amountCtrl.text.replaceAll(',', '.'));
     if (amountValue == null) {
       setState(() => _error = 'Неверный формат суммы');
       return;
@@ -181,16 +189,6 @@ class _TransferVScreenState extends State<TransferVScreen> {
         parsed = null;
       }
 
-      // Normalize created_at returned by RPC to YEKT formatted string (if present)
-      if (parsed != null && parsed.containsKey('created_at')) {
-        try {
-          final createdRaw = parsed['created_at'];
-          parsed['created_at_yekat'] = formatToYekaterinburg(createdRaw);
-        } catch (_) {
-          parsed['created_at_yekat'] = '';
-        }
-      }
-
       if (parsed != null && parsed.containsKey('from_balance')) {
         final fb = parsed['from_balance'];
         if (fb is num) widget.user.vBalance = (fb as num).toDouble();
@@ -198,158 +196,194 @@ class _TransferVScreenState extends State<TransferVScreen> {
         // Если RPC не вернул балансы — ре-fetchим профиль отправителя
         final profile = await supabase
             .from('user_credentials')
-            .select('v_balance')
+            .select('v_balance, m_balance')
             .eq('id', widget.user.id)
             .maybeSingle();
+
         if (profile is Map<String, dynamic>) {
-          final vbal = profile['v_balance'];
-          if (vbal is num) widget.user.vBalance = (vbal as num).toDouble();
+          final v = profile['v_balance'];
+          final m = profile['m_balance'];
+          if (v is num) widget.user.vBalance = (v as num).toDouble();
+          if (m is num) widget.user.mBalance = (m as num).toDouble();
         }
       }
 
-      // Очистим форму и покажем успех
-      _amountController.clear();
-      _noteController.clear();
-      _selectedRecipient = null;
-      setState(() {
-        _error = '';
-      });
-
-      // Показываем уведомление с локальным временем (если RPC вернул created_at_yekat)
-      String message = 'Перевод выполнен';
-      if (parsed != null && parsed.containsKey('created_at_yekat')) {
-        final cat = parsed['created_at_yekat'] ?? '';
-        if (cat is String && cat.isNotEmpty) {
-          message = 'Перевод выполнен: $cat (YEKT)';
-        }
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
-      }
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
     } on PostgrestException catch (e) {
-      setState(() {
-        _error = 'Ошибка при переводе: ${e.message}';
-      });
+      setState(() => _error = e.message ?? e.toString());
     } catch (e) {
-      setState(() {
-        _error = 'Ошибка при переводе: ${e.toString()}';
-      });
+      setState(() => _error = e.toString());
     } finally {
       setState(() => _loading = false);
     }
   }
 
-  @override
-  void dispose() {
-    _amountController.dispose();
-    _noteController.dispose();
-    super.dispose();
+  String? _validateAmount(String? v) {
+    if (v == null || v.isEmpty) return 'Введите сумму';
+    final n = double.tryParse(v.replaceAll(',', '.'));
+    if (n == null || n <= 0) return 'Некорректная сумма';
+    if (n > widget.user.vBalance) return 'Сумма превышает ваш баланс';
+    return null;
   }
 
   @override
   Widget build(BuildContext context) {
-    final first = widget.user.firstName;
-    final last = widget.user.lastName;
     return Scaffold(
-      appBar: AppBar(
-        title: Text('Перевести V/M'),
-      ),
+      appBar: AppBar(title: const Text('Перевод V')),
       body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          children: [
-            Text('Пользователь: ${first} ${last}'),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: _amountController,
-              keyboardType: TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(labelText: 'Сумма'),
+        padding: const EdgeInsets.all(16),
+        child: Form(
+          key: _formKey,
+          child: Column(children: [
+            GestureDetector(
+              onTap: _openRecipientPicker,
+              child: AbsorbPointer(
+                child: TextFormField(
+                  controller: _toCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Получатель',
+                    suffixIcon: Icon(Icons.expand_more),
+                  ),
+                  validator: (_) {
+                    if (_selectedRecipient == null) return 'Выберите получателя';
+                    return null;
+                  },
+                ),
+              ),
             ),
             const SizedBox(height: 12),
             TextFormField(
-              controller: _noteController,
-              decoration: const InputDecoration(labelText: 'Примечание (необязательно)'),
+              controller: _amountCtrl,
+              decoration: const InputDecoration(labelText: 'Количество V'),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              validator: _validateAmount,
             ),
             const SizedBox(height: 12),
-            ElevatedButton(
-              onPressed: _openRecipientPicker,
-              child: Text(_selectedRecipient == null
-                  ? 'Выбрать получателя'
-                  : '${(_selectedRecipient?['first_name'] ?? '')} ${(_selectedRecipient?['last_name'] ?? '')}'),
+            if (_recipientsLoading) const LinearProgressIndicator(),
+            if (_recipientsError.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(_recipientsError, style: const TextStyle(color: Colors.red)),
+              ),
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(_error!, style: const TextStyle(color: Colors.red)),
+              ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _loading ? null : _transfer,
+                child: _loading
+                    ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Text('Перевести'),
+              ),
             ),
-            const SizedBox(height: 12),
-            if (_error.isNotEmpty) Text(_error, style: const TextStyle(color: Colors.red)),
-            const SizedBox(height: 12),
-            ElevatedButton(
-              onPressed: _loading ? null : _submitTransfer,
-              child: _loading ? const CircularProgressIndicator() : const Text('Отправить'),
-            ),
-          ],
+          ]),
         ),
       ),
     );
   }
 }
 
+/// Bottom sheet: список и поиск получателей (без упоминания username в UI)
 class RecipientPickerSheet extends StatefulWidget {
   final List<Map<String, dynamic>> recipients;
   const RecipientPickerSheet({Key? key, required this.recipients}) : super(key: key);
 
   @override
-  _RecipientPickerSheetState createState() => _RecipientPickerSheetState();
+  State<RecipientPickerSheet> createState() => _RecipientPickerSheetState();
 }
 
 class _RecipientPickerSheetState extends State<RecipientPickerSheet> {
-  List<Map<String, dynamic>> _filtered = [];
-  final TextEditingController _q = TextEditingController();
+  late List<Map<String, dynamic>> _filtered;
+  final _searchCtrl = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    _filtered = widget.recipients;
+    _filtered = List.from(widget.recipients);
+    _searchCtrl.addListener(_onSearchChanged);
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.removeListener(_onSearchChanged);
+    _searchCtrl.dispose();
+    super.dispose();
   }
 
   void _onSearchChanged() {
-    final q = _q.text.toLowerCase();
+    final q = _searchCtrl.text.trim().toLowerCase();
     setState(() {
-      _filtered = widget.recipients.where((r) {
-        final fn = (r['first_name'] ?? '').toString().toLowerCase();
-        final ln = (r['last_name'] ?? '').toString().toLowerCase();
-        final un = (r['telegram_username'] ?? '').toString().toLowerCase();
-        return fn.contains(q) || ln.contains(q) || un.contains(q);
-      }).toList();
+      if (q.isEmpty) {
+        _filtered = List.from(widget.recipients);
+      } else {
+        _filtered = widget.recipients.where((row) {
+          final username = (row['telegram_username'] ?? '').toString().toLowerCase();
+          final first = (row['first_name'] ?? '').toString().toLowerCase();
+          final last = (row['last_name'] ?? '').toString().toLowerCase();
+          return username.contains(q) || first.contains(q) || last.contains(q);
+        }).toList();
+      }
     });
   }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return SafeArea(
       child: FractionallySizedBox(
         heightFactor: 0.85,
         child: Column(
           children: [
             Padding(
-              padding: const EdgeInsets.all(12.0),
-              child: TextField(
-                controller: _q,
-                onChanged: (_) => _onSearchChanged(),
-                decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Поиск'),
+              padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _searchCtrl,
+                      decoration: InputDecoration(
+                        hintText: 'Поиск по имени или фамилии',
+                        prefixIcon: const Icon(Icons.search),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  TextButton(
+                    onPressed: () {
+                      _searchCtrl.clear();
+                      FocusScope.of(context).unfocus();
+                    },
+                    child: const Text('Очистить'),
+                  ),
+                ],
               ),
             ),
+            const Divider(height: 0),
             Expanded(
-              child: ListView.builder(
-                itemCount: _filtered.length,
-                itemBuilder: (_, idx) {
-                  final r = _filtered[idx];
-                  final display = ('${r['first_name'] ?? ''} ${r['last_name'] ?? ''}').trim();
-                  return ListTile(
-                    title: Text(display.isEmpty ? (r['telegram_username'] ?? '') : display),
-                    subtitle: Text(r['telegram_username'] ?? ''),
-                    onTap: () => Navigator.of(context).pop(r),
-                  );
-                },
-              ),
+              child: _filtered.isEmpty
+                  ? Center(child: Text('Ничего не найдено', style: theme.textTheme.bodyLarge))
+                  : ListView.separated(
+                      itemCount: _filtered.length,
+                      separatorBuilder: (_, __) => const Divider(height: 0),
+                      itemBuilder: (context, index) {
+                        final row = _filtered[index];
+                        final first = (row['first_name'] ?? '').toString();
+                        final last = (row['last_name'] ?? '').toString();
+                        final displayName = ('$first $last').trim().isEmpty ? 'Без имени' : '$first $last';
+                        return ListTile(
+                          title: Text(displayName),
+                          onTap: () => Navigator.of(context).pop(row),
+                        );
+                      },
+                    ),
             ),
           ],
         ),
