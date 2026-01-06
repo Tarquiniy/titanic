@@ -49,61 +49,58 @@ class _TransferVScreenState extends State<TransferVScreen> {
   }
 
   Future<void> _loadRecipients() async {
-    setState(() {
-      _recipientsLoading = true;
-      _recipientsError = '';
-    });
+  setState(() {
+    _recipientsLoading = true;
+    _recipientsError = '';
+  });
 
-    try {
-      // Запрашиваем всех пользователей, кроме текущего отправителя
-      final dynamic res = await supabase
-          .from('user_credentials')
-          .select('id, telegram_username, first_name, last_name')
-          .neq('id', widget.user.id)
-          .order('first_name'); // сортируем по имени для удобства
+  try {
+    // Запрашиваем всех пользователей, кроме текущего отправителя,
+    // и всегда исключаем пользователей с ролью 'politician'
+    final dynamic res = await supabase
+        .from('user_credentials')
+        .select('id, telegram_username, first_name, last_name, role')
+        .neq('id', widget.user.id)
+        .neq('role', 'politician')
+        .order('first_name'); // сортируем по имени для удобства
 
-      List<Map<String, dynamic>> list = [];
+    List<Map<String, dynamic>> list = [];
 
-      if (res is List) {
-        list = res
-            .where((e) => e != null)
-            .map<Map<String, dynamic>>((e) {
-              if (e is Map) return Map<String, dynamic>.from(e);
-              return <String, dynamic>{};
-            })
-            .where((m) => m.isNotEmpty)
-            .toList();
-      } else {
-        list = [];
-      }
-
-      // Клиентская фильтрация: если отправитель — politician, то исключаем политиков
-      final visible = (widget.user.role == 'politician')
-          ? list.where((r) => (r['role']?.toString() ?? '') != 'politician').toList()
-          : List<Map<String, dynamic>>.from(list);
-
-      setState(() {
-        _allRecipients = list;
-        _visibleRecipients = visible;
-      });
-    } on PostgrestException catch (e) {
-      setState(() {
-        _recipientsError = 'Ошибка при загрузке получателей: ${e.message}';
-        _allRecipients = [];
-        _visibleRecipients = [];
-      });
-    } catch (e) {
-      setState(() {
-        _recipientsError = 'Ошибка при загрузке получателей: ${e.toString()}';
-        _allRecipients = [];
-        _visibleRecipients = [];
-      });
-    } finally {
-      setState(() {
-        _recipientsLoading = false;
-      });
+    if (res is List) {
+      list = res
+          .where((e) => e != null)
+          .map<Map<String, dynamic>>((e) {
+            if (e is Map) return Map<String, dynamic>.from(e);
+            return <String, dynamic>{};
+          })
+          .where((m) => m.isNotEmpty)
+          .toList();
+    } else {
+      list = [];
     }
+
+    setState(() {
+      _allRecipients = list;
+      _visibleRecipients = List<Map<String, dynamic>>.from(list);
+    });
+  } on PostgrestException catch (e) {
+    setState(() {
+      _recipientsError = 'Ошибка при загрузке получателей: ${e.message}';
+      _allRecipients = [];
+      _visibleRecipients = [];
+    });
+  } catch (e) {
+    setState(() {
+      _recipientsError = 'Ошибка при загрузке получателей: ${e.toString()}';
+      _allRecipients = [];
+      _visibleRecipients = [];
+    });
+  } finally {
+    setState(() {
+      _recipientsLoading = false;
+    });
   }
+}
 
   // Показываем modal sheet со списком и поиском
   Future<void> _openRecipientPicker() async {

@@ -1,10 +1,8 @@
 // lib/home_screen.dart
 //
-// Главный экран — навигация на transfer_v_screen.dart при нажатии
-// кнопки "Перевести V/M". После возврата экрана баланс пользователя обновляется
-// (ре-fetch из таблицы user_credentials).
-//
-// Содержит логику "Речь жизни" (оптимистичный локальный блок + подтверждение от сервера).
+// Главное окно — навигация на transfer_v_screen и логика "Речь жизни".
+// Исправлена ошибка: обновление профиля теперь создает новый AppUser,
+// вместо попытки присвоить значения в final-поля firstName/lastName.
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -403,7 +401,6 @@ class _HomeScreenState extends State<HomeScreen> {
       ));
     }
 
-    // Навигация на экран перевода
     add('Перевести V/M', () => _openTransferScreen());
 
     add('Опросы / Аукционы', () {
