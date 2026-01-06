@@ -10,6 +10,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'models/app_user.dart';
 import 'login_screen.dart';
 import 'transfer_v_screen.dart';
+import 'inventory_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final AppUser user;
@@ -451,7 +452,18 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Главная'),
-        actions: [IconButton(onPressed: _logout, icon: const Icon(Icons.logout))],
+        actions: [
+          IconButton(
+            tooltip: 'Инвентарь',
+            icon: const Icon(Icons.inventory_2),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => InventoryScreen(user: user)),
+              );
+            },
+          ),
+          IconButton(onPressed: _logout, icon: const Icon(Icons.logout)),
+        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(12),
