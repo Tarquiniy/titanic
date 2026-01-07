@@ -37,17 +37,13 @@ class _LoginScreenState extends State<LoginScreen> {
 
     setState(() => _loading = true);
     try {
-      // --- Правильный современный вызов Supabase ---
-      // .select(...) без generic, затем .eq(...).maybeSingle()
       final data = await _supabase
           .from('user_credentials')
           .select('id, telegram_username, role, first_name, last_name, v_balance, m_balance')
           .eq('telegram_username', username)
           .eq('password', password)
-          .maybeSingle(); // вернёт Map<String, dynamic>? или null
+          .maybeSingle();
 
-      // Если ошибка соединения / сервера — SDK обычно бросит исключение,
-      // поэтому мы ловим исключения в catch.
       if (data == null) {
         setState(() => _error = 'Неверный username или пароль');
         return;

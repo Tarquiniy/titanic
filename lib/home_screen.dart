@@ -1,13 +1,14 @@
 // lib/home_screen.dart
 //
 // Главное окно — навигация на transfer_v_screen и логика "Речь жизни".
-// Исправлена логика: клиент теперь сбрасывает локальный lock, если сервер сообщает active = false.
-// Также добавлен upsert состояния при старте речи (как было ранее).
+// Добавлено отображение "цвета" пользователя под ролью — цвет берётся из
+// столбца `color` таблицы user_credentials. Цвет отображается как текст
+// и как маленький цветовой квадратик (если значение хранится в виде HEX,
+// например "#RRGGBB" или "#AARRGGBB").
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:titanic/enterprises_screen.dart';
 import 'models/app_user.dart';
 import 'login_screen.dart';
 import 'transfer_v_screen.dart';
@@ -30,6 +31,9 @@ class _HomeScreenState extends State<HomeScreen> {
   String? speechActorId;
   DateTime? speechExpiresAt; // UTC - client lock/unlock time
 
+  // Поле цвета пользователя (из колонки color в user_credentials)
+  String? _userColor;
+
   // Polling
   Timer? _pollTimer;
 
@@ -46,6 +50,8 @@ class _HomeScreenState extends State<HomeScreen> {
     user = widget.user;
     _fetchSpeechState();
     _startPollingSpeechState();
+    // Подтянем профиль (включая color) при инициализации
+    _refreshProfile();
   }
 
   @override
@@ -55,13 +61,13 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // -----------------------
-  // Profile / balance refresh
+  // Profile / balance refresh (now also loads `color`)
   // -----------------------
   Future<void> _refreshProfile() async {
     try {
       final profile = await supabase
           .from('user_credentials')
-          .select('v_balance, m_balance, first_name, last_name, telegram_username, role')
+          .select('v_balance, m_balance, first_name, last_name, telegram_username, role, color')
           .eq('id', user.id)
           .maybeSingle();
 
@@ -72,6 +78,7 @@ class _HomeScreenState extends State<HomeScreen> {
         final ln = profile['last_name'];
         final uname = profile['telegram_username'];
         final role = profile['role'];
+        final color = profile['color'];
 
         setState(() {
           user = AppUser(
@@ -83,6 +90,7 @@ class _HomeScreenState extends State<HomeScreen> {
             vBalance: v is num ? (v as num).toDouble() : user.vBalance,
             mBalance: m is num ? (m as num).toDouble() : user.mBalance,
           );
+          _userColor = color is String ? color : null;
         });
       }
     } catch (_) {
@@ -134,7 +142,6 @@ class _HomeScreenState extends State<HomeScreen> {
         // Если мы ожидаем подтверждение от сервера — обрабатываем отдельной логикой
         if (_waitingForServerConfirm) {
           if (active) {
-            // сервер подтвердил активацию — используем серверный expires (если есть)
             final clientNextSlotUtc = _nextYekaterinburg12or20Utc();
             DateTime applyExpires = expires ?? clientNextSlotUtc;
             if (clientNextSlotUtc.isAfter(applyExpires)) applyExpires = clientNextSlotUtc;
@@ -148,7 +155,6 @@ class _HomeScreenState extends State<HomeScreen> {
             });
             return;
           } else {
-            // если сервер говорит inactive в период ожидания — разлочим кнопку
             setState(() {
               speechActive = false;
               speechActorId = null;
@@ -174,7 +180,6 @@ class _HomeScreenState extends State<HomeScreen> {
         setState(() {
           speechActive = true;
           speechActorId = actor;
-          // если сервер вернул expires, используем его; иначе оставляем null
           speechExpiresAt = expires;
         });
       } else {
@@ -240,7 +245,6 @@ class _HomeScreenState extends State<HomeScreen> {
     // Если есть локальный expiry — блокируем до этого времени
     if (speechExpiresAt != null) {
       if (nowUtc.isBefore(speechExpiresAt!)) return false;
-      // если время прошло — разрешаем
     }
 
     // Если сервер сообщает активность (speechActive == true) и её expiry в будущем — блокируем
@@ -385,16 +389,23 @@ class _HomeScreenState extends State<HomeScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
+  // -----------------------
+  // Transfer navigation: open transfer_v_screen and refresh profile on success
+  // -----------------------
   Future<void> _openTransferScreen() async {
     final res = await Navigator.of(context).push<bool>(
       MaterialPageRoute(builder: (_) => TransferVScreen(user: user)),
     );
 
+    // If returned true — refresh profile (balances)
     if (res == true) {
       await _refreshProfile();
     }
   }
 
+  // -----------------------
+  // UI rendering
+  // -----------------------
   Widget _renderSpeechButton() {
     if (user.role != 'politician') return const SizedBox.shrink();
 
@@ -429,7 +440,31 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Color? _parseHexColor(String? s) {
+    if (s == null) return null;
+    final str = s.trim();
+    if (!str.startsWith('#')) return null;
+    String hex = str.substring(1);
+    if (hex.length == 6) {
+      hex = 'FF' + hex; // add alpha
+    } else if (hex.length == 3) {
+      // shortcut #RGB -> expand
+      final r = hex[0];
+      final g = hex[1];
+      final b = hex[2];
+      hex = 'FF' + r + r + g + g + b + b;
+    } else if (hex.length == 8) {
+      // ARGB or AARRGGBB? assume AARRGGBB
+    } else {
+      return null;
+    }
+    final intVal = int.tryParse(hex, radix: 16);
+    if (intVal == null) return null;
+    return Color(intVal);
+  }
+
   Widget _balanceCard() {
+    final parsedColor = _parseHexColor(_userColor);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12.0),
@@ -437,14 +472,33 @@ class _HomeScreenState extends State<HomeScreen> {
           Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('${user.firstName} ${user.lastName}', style: const TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 4),
-            Text('Роль: ${user.role}'),
+            Row(
+              children: [
+                Text('Роль: ${user.role}'),
+                if (_userColor != null && _userColor!.isNotEmpty) const SizedBox(width: 12),
+                if (parsedColor != null)
+                  Container(
+                    width: 16,
+                    height: 16,
+                    decoration: BoxDecoration(
+                      color: parsedColor,
+                      borderRadius: BorderRadius.circular(3),
+                      border: Border.all(color: Colors.black12),
+                    ),
+                  ),
+                if (parsedColor != null) const SizedBox(width: 6),
+                if (_userColor != null && _userColor!.isNotEmpty)
+                  Text('Цвет: ${_userColor}', style: const TextStyle(color: Colors.grey)),
+              ],
+            ),
             const SizedBox(height: 4),
           ]),
           Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
             Text('V: ${user.vBalance.toStringAsFixed(2)}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             const SizedBox(height: 4),
             Text('M: ${user.mBalance.toStringAsFixed(2)}', style: const TextStyle(fontSize: 14)),
-          ]),        ]),
+          ]),
+        ]),
       ),
     );
   }
@@ -524,16 +578,6 @@ class _HomeScreenState extends State<HomeScreen> {
             onPressed: () {
               Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => InventoryScreen(user: user)),
-              );
-            },
-          ),
-          if (widget.user.role == 'politician') 
-          IconButton(
-            tooltip: 'Предприятия',
-            icon: const Icon(Icons.factory),
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => EnterprisesScreen(user: user)),
               );
             },
           ),
