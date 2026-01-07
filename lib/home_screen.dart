@@ -1,11 +1,8 @@
 // lib/home_screen.dart
 //
 // Главное окно — навигация на transfer_v_screen и логика "Речь жизни".
-// Исправлена логика записи в таблицу speech_state: теперь при старте речи
-// мы пытаемся записать запись в таблицу (upsert id = 1) с active=true, actor_id и expires_at.
-// Это обеспечивает, что состояние сохраняется на сервере и кнопка блокируется
-// корректно для всех клиентов. Также добавлена обработка ошибок записи и
-// надёжное применение клиентского лок-таймаута, если запись на сервере не проходит.
+// Исправлена логика: клиент теперь сбрасывает локальный lock, если сервер сообщает active = false.
+// Также добавлен upsert состояния при старте речи (как было ранее).
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -30,7 +27,7 @@ class _HomeScreenState extends State<HomeScreen> {
   // Speech state
   bool speechActive = false;
   String? speechActorId;
-  DateTime? speechExpiresAt; // UTC - the client-side lock/unlock time
+  DateTime? speechExpiresAt; // UTC - client lock/unlock time
 
   // Polling
   Timer? _pollTimer;
@@ -121,21 +118,22 @@ class _HomeScreenState extends State<HomeScreen> {
 
         final nowUtc = DateTime.now().toUtc();
 
-        // If expires passed - treat as inactive (but do not clear client-side planned lock)
+        // Если сервер сообщает, что expired (expires в прошлом) -> считаем неактивным
         if (expires != null && nowUtc.isAfter(expires)) {
           setState(() {
             speechActive = false;
             speechActorId = null;
+            speechExpiresAt = null; // сбрасываем локальный lock
             _waitingForServerConfirm = false;
             _waitingTimeoutUtc = null;
           });
           return;
         }
 
-        // If waiting for server confirm, handle specially
+        // Если мы ожидаем подтверждение от сервера — обрабатываем отдельной логикой
         if (_waitingForServerConfirm) {
           if (active) {
-            // server confirmed; apply server values but ensure client-side lock to next 12/20 YEKT
+            // сервер подтвердил активацию — используем серверный expires (если есть)
             final clientNextSlotUtc = _nextYekaterinburg12or20Utc();
             DateTime applyExpires = expires ?? clientNextSlotUtc;
             if (clientNextSlotUtc.isAfter(applyExpires)) applyExpires = clientNextSlotUtc;
@@ -149,47 +147,53 @@ class _HomeScreenState extends State<HomeScreen> {
             });
             return;
           } else {
-            if (_waitingTimeoutUtc != null && nowUtc.isAfter(_waitingTimeoutUtc!)) {
-              // timed out waiting — accept server inactive state, but still set client lock until next slot
-              final clientNextSlotUtc = _nextYekaterinburg12or20Utc();
-              setState(() {
-                speechActive = active;
-                speechActorId = actor;
-                speechExpiresAt = clientNextSlotUtc;
-                _waitingForServerConfirm = false;
-                _waitingTimeoutUtc = null;
-              });
-              return;
-            }
-            // else ignore this poll (still waiting)
+            // если сервер говорит inactive в период ожидания — разлочим кнопку
+            setState(() {
+              speechActive = false;
+              speechActorId = null;
+              speechExpiresAt = null;
+              _waitingForServerConfirm = false;
+              _waitingTimeoutUtc = null;
+            });
             return;
           }
         }
 
+        // Обычная ветка: если сервер говорит inactive — сбрасываем локальный lock
+        if (!active) {
+          setState(() {
+            speechActive = false;
+            speechActorId = null;
+            speechExpiresAt = null; // **важно** — доверяем серверу и включаем кнопку
+          });
+          return;
+        }
+
+        // Если сервер сообщает active = true — применяем значения сервера
         setState(() {
-          speechActive = active;
+          speechActive = true;
           speechActorId = actor;
-          // prefer server-provided expires if present; otherwise leave client lock unchanged
-          if (expires != null) speechExpiresAt = expires;
+          // если сервер вернул expires, используем его; иначе оставляем null
+          speechExpiresAt = expires;
         });
       } else {
+        // ничего нет — считаем inactive и сбрасываем локально
         if (!_waitingForServerConfirm) {
           setState(() {
             speechActive = false;
             speechActorId = null;
-            // do not clear client-side lock here; leave speechExpiresAt as it was
+            speechExpiresAt = null;
           });
         }
       }
     } catch (_) {
-      // ignore
+      // ignore errors — оставляем текущее состояние
     }
   }
 
   // -----------------------
   // YEKT helpers
   // -----------------------
-  // next 20:00 YEKT -> return UTC
   DateTime _nextYekaterinburg20Utc() {
     final nowUtc = DateTime.now().toUtc();
     final nowYe = nowUtc.add(const Duration(hours: 5)); // YEKT = UTC+5
@@ -201,11 +205,10 @@ class _HomeScreenState extends State<HomeScreen> {
     return targetYe.subtract(const Duration(hours: 5));
   }
 
-  // next slot: next occurrence of 12:00 or 20:00 YEKT -> return UTC
   DateTime _nextYekaterinburg12or20Utc() {
     final nowUtc = DateTime.now().toUtc();
-    final nowYe = nowUtc.add(const Duration(hours: 5)); // YEKT
-    final today12 = DateTime(nowYe.year, nowYe.month, nowYe.day, 12, 59);
+    final nowYe = nowUtc.add(const Duration(hours: 5));
+    final today12 = DateTime(nowYe.year, nowYe.month, nowYe.day, 12, 0);
     final today20 = DateTime(nowYe.year, nowYe.month, nowYe.day, 20, 0);
 
     DateTime nextYe;
@@ -217,7 +220,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final tomorrow = nowYe.add(const Duration(days: 1));
       nextYe = DateTime(tomorrow.year, tomorrow.month, tomorrow.day, 12, 0);
     }
-    return nextYe.subtract(const Duration(hours: 5)); // convert back to UTC
+    return nextYe.subtract(const Duration(hours: 5));
   }
 
   int _secondsUntilUtc(DateTime targetUtc) {
@@ -233,18 +236,17 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final nowUtc = DateTime.now().toUtc();
 
-    // If a client-side lock time exists (speechExpiresAt), button is disabled until that time
+    // Если есть локальный expiry — блокируем до этого времени
     if (speechExpiresAt != null) {
       if (nowUtc.isBefore(speechExpiresAt!)) return false;
-      // if now is after speechExpiresAt, allow button (unless other conditions)
+      // если время прошло — разрешаем
     }
 
-    // If server-side says speechActive and its expiry is in future, keep button disabled
+    // Если сервер сообщает активность (speechActive == true) и её expiry в будущем — блокируем
     if (speechActive) {
       if (speechExpiresAt != null) {
         return nowUtc.isAfter(speechExpiresAt!);
       } else {
-        // fallback: compute next 20:00 YEKT
         final next20 = _nextYekaterinburg20Utc();
         return nowUtc.isAfter(next20);
       }
@@ -255,14 +257,12 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // -----------------------
-  // start_speech (uses server RPC and trusts returned JSON where appropriate)
-  // Also performs an upsert into speech_state to persist the state for other clients.
+  // start_speech
   // -----------------------
   Future<void> _onStartSpeechPressed() async {
     if (user.role != 'politician') return;
     if (!_isSpeechButtonEnabled) return;
 
-    // For RPC compatibility we still compute duration until next 20:00 YEKT
     final target20Utc = _nextYekaterinburg20Utc();
     final secondsForRpc = _secondsUntilUtc(target20Utc);
     if (secondsForRpc <= 0) {
@@ -270,24 +270,21 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    // Client-side lock: next slot 12:00 or 20:00 YEKT (UTC)
     final clientNextSlotUtc = _nextYekaterinburg12or20Utc();
 
     setState(() {
       _rpcLoading = true;
-      // optimistic local lock + wait for server confirm
       speechActive = true;
       speechActorId = user.id;
-      // set client-side expiry to next slot (this will disable the button until that time)
-      speechExpiresAt = clientNextSlotUtc;
+      speechExpiresAt = clientNextSlotUtc; // временная локальная блокировка
       _waitingForServerConfirm = true;
       _waitingTimeoutUtc = DateTime.now().toUtc().add(const Duration(seconds: 10));
     });
 
-    DateTime? applyExpires = clientNextSlotUtc; // final expiry to persist (UTC)
+    DateTime? applyExpires = clientNextSlotUtc;
 
     try {
-      // Call server RPC (if exists) — keep for existing server logic
+      // Вызов серверного RPC (если есть)
       final dynamic rpcRes = await supabase.rpc('start_speech', params: {
         'p_actor': user.id,
         'p_duration_seconds': secondsForRpc,
@@ -311,12 +308,10 @@ class _HomeScreenState extends State<HomeScreen> {
       if (parsed != null) {
         final serverExpiresRaw = parsed['expires_at'];
         final serverExpires = serverExpiresRaw != null ? DateTime.tryParse(serverExpiresRaw.toString()) : null;
-        // Ensure client-side lock does not end earlier than clientNextSlotUtc
         DateTime chosen = serverExpires ?? clientNextSlotUtc;
         if (clientNextSlotUtc.isAfter(chosen)) chosen = clientNextSlotUtc;
         applyExpires = chosen;
 
-        // Update client state
         setState(() {
           speechActive = parsed?['active'] as bool? ?? true;
           speechActorId = parsed?['actor_id']?.toString();
@@ -325,8 +320,7 @@ class _HomeScreenState extends State<HomeScreen> {
           _waitingTimeoutUtc = null;
         });
       } else {
-        // RPC returned nothing meaningful — still proceed to upsert to ensure persistence
-        // fetch server state as fallback
+        // RPC ничего не вернул — продолжаем и сохраняем в таблицу speech_state (upsert)
         await _fetchSpeechState();
         setState(() {
           if (speechExpiresAt == null || clientNextSlotUtc.isAfter(speechExpiresAt!)) {
@@ -337,22 +331,17 @@ class _HomeScreenState extends State<HomeScreen> {
         });
       }
 
-      // Persist state into speech_state table (upsert id = 1).
-      // This guarantees other clients / future app instances see the lock.
+      // Persist state into speech_state (upsert id = 1)
       try {
         final upsertObj = {
           'id': 1,
           'active': true,
           'actor_id': user.id,
-          // store ISO string in UTC
           'expires_at': applyExpires!.toUtc().toIso8601String(),
         };
-
-        // Use upsert + select to get result (maybeSingle)
         await supabase.from('speech_state').upsert(upsertObj).select().maybeSingle();
       } catch (e) {
-        // If upsert fails (RLS, permissions), don't block — keep client-side lock
-        _showMessage('Не удалось сохранить состояние речи на сервере (права). Кнопка всё равно будет заблокирована локально.');
+        _showMessage('Не удалось сохранить состояние речи на сервере (права). Кнопка всё равно будет локально заблокирована.');
       }
 
       _showMessage('Речь запущена. Кнопка будет недоступна до ${_formatYe(applyExpires!)} (YEKT)');
@@ -365,9 +354,9 @@ class _HomeScreenState extends State<HomeScreen> {
         setState(() {
           speechActive = false;
           speechActorId = null;
-          // still keep client lock until next slot to avoid immediate re-press
           _waitingForServerConfirm = false;
           _waitingTimeoutUtc = null;
+          speechExpiresAt = null;
         });
       }
     } catch (e) {
@@ -377,6 +366,7 @@ class _HomeScreenState extends State<HomeScreen> {
         speechActorId = null;
         _waitingForServerConfirm = false;
         _waitingTimeoutUtc = null;
+        speechExpiresAt = null;
       });
     } finally {
       setState(() => _rpcLoading = false);
@@ -394,23 +384,16 @@ class _HomeScreenState extends State<HomeScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
-  // -----------------------
-  // Transfer navigation: open transfer_v_screen and refresh profile on success
-  // -----------------------
   Future<void> _openTransferScreen() async {
     final res = await Navigator.of(context).push<bool>(
       MaterialPageRoute(builder: (_) => TransferVScreen(user: user)),
     );
 
-    // If returned true — refresh profile (balances)
     if (res == true) {
       await _refreshProfile();
     }
   }
 
-  // -----------------------
-  // UI rendering
-  // -----------------------
   Widget _renderSpeechButton() {
     if (user.role != 'politician') return const SizedBox.shrink();
 
@@ -460,8 +443,7 @@ class _HomeScreenState extends State<HomeScreen> {
             Text('V: ${user.vBalance.toStringAsFixed(2)}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             const SizedBox(height: 4),
             Text('M: ${user.mBalance.toStringAsFixed(2)}', style: const TextStyle(fontSize: 14)),
-          ]),
-        ]),
+          ]),        ]),
       ),
     );
   }
