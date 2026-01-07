@@ -1,9 +1,11 @@
 // lib/home_screen.dart
 //
 // Главное окно — навигация на transfer_v_screen и логика "Речь жизни".
-// Изменена логика блокировки кнопки "Речь жизни": после нажатия кнопка
-// становится неактивной до следующего таймслота 12:00 или 20:00 по времени Екатеринбурга.
-// Серверный RPC по-прежнему вызывается с рассчитанным временем до 20:00 (совместимость).
+// Исправлена логика записи в таблицу speech_state: теперь при старте речи
+// мы пытаемся записать запись в таблицу (upsert id = 1) с active=true, actor_id и expires_at.
+// Это обеспечивает, что состояние сохраняется на сервере и кнопка блокируется
+// корректно для всех клиентов. Также добавлена обработка ошибок записи и
+// надёжное применение клиентского лок-таймаута, если запись на сервере не проходит.
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -119,12 +121,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
         final nowUtc = DateTime.now().toUtc();
 
-        // If expires passed - treat as inactive
+        // If expires passed - treat as inactive (but do not clear client-side planned lock)
         if (expires != null && nowUtc.isAfter(expires)) {
           setState(() {
             speechActive = false;
             speechActorId = null;
-            // keep any client-side lock (speechExpiresAt) intact; server expired
             _waitingForServerConfirm = false;
             _waitingTimeoutUtc = null;
           });
@@ -204,7 +205,7 @@ class _HomeScreenState extends State<HomeScreen> {
   DateTime _nextYekaterinburg12or20Utc() {
     final nowUtc = DateTime.now().toUtc();
     final nowYe = nowUtc.add(const Duration(hours: 5)); // YEKT
-    final today12 = DateTime(nowYe.year, nowYe.month, nowYe.day, 17, 10);
+    final today12 = DateTime(nowYe.year, nowYe.month, nowYe.day, 17, 50);
     final today20 = DateTime(nowYe.year, nowYe.month, nowYe.day, 20, 0);
 
     DateTime nextYe;
@@ -255,6 +256,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // -----------------------
   // start_speech (uses server RPC and trusts returned JSON where appropriate)
+  // Also performs an upsert into speech_state to persist the state for other clients.
   // -----------------------
   Future<void> _onStartSpeechPressed() async {
     if (user.role != 'politician') return;
@@ -268,7 +270,7 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    // Client-side lock: next slot 12:00 or 20:00 YEKT
+    // Client-side lock: next slot 12:00 or 20:00 YEKT (UTC)
     final clientNextSlotUtc = _nextYekaterinburg12or20Utc();
 
     setState(() {
@@ -282,7 +284,10 @@ class _HomeScreenState extends State<HomeScreen> {
       _waitingTimeoutUtc = DateTime.now().toUtc().add(const Duration(seconds: 10));
     });
 
+    DateTime? applyExpires = clientNextSlotUtc; // final expiry to persist (UTC)
+
     try {
+      // Call server RPC (if exists) — keep for existing server logic
       final dynamic rpcRes = await supabase.rpc('start_speech', params: {
         'p_actor': user.id,
         'p_duration_seconds': secondsForRpc,
@@ -304,24 +309,24 @@ class _HomeScreenState extends State<HomeScreen> {
       }
 
       if (parsed != null) {
-        final active = parsed['active'] as bool? ?? true;
-        final actor = parsed['actor_id']?.toString();
-        final expiresRaw = parsed['expires_at'];
-        final serverExpires = expiresRaw != null ? DateTime.tryParse(expiresRaw.toString()) : null;
-
+        final serverExpiresRaw = parsed['expires_at'];
+        final serverExpires = serverExpiresRaw != null ? DateTime.tryParse(serverExpiresRaw.toString()) : null;
         // Ensure client-side lock does not end earlier than clientNextSlotUtc
-        DateTime applyExpires = serverExpires ?? clientNextSlotUtc;
-        if (clientNextSlotUtc.isAfter(applyExpires)) applyExpires = clientNextSlotUtc;
+        DateTime chosen = serverExpires ?? clientNextSlotUtc;
+        if (clientNextSlotUtc.isAfter(chosen)) chosen = clientNextSlotUtc;
+        applyExpires = chosen;
 
+        // Update client state
         setState(() {
-          speechActive = active;
-          speechActorId = actor;
+          speechActive = parsed?['active'] as bool? ?? true;
+          speechActorId = parsed?['actor_id']?.toString();
           speechExpiresAt = applyExpires;
           _waitingForServerConfirm = false;
           _waitingTimeoutUtc = null;
         });
       } else {
-        // fallback: force fetch and ensure client-side lock at least until next slot
+        // RPC returned nothing meaningful — still proceed to upsert to ensure persistence
+        // fetch server state as fallback
         await _fetchSpeechState();
         setState(() {
           if (speechExpiresAt == null || clientNextSlotUtc.isAfter(speechExpiresAt!)) {
@@ -332,7 +337,25 @@ class _HomeScreenState extends State<HomeScreen> {
         });
       }
 
-      _showMessage('Речь запущена. Кнопка будет недоступна до ${_formatYe(clientNextSlotUtc)} (YEKT)');
+      // Persist state into speech_state table (upsert id = 1).
+      // This guarantees other clients / future app instances see the lock.
+      try {
+        final upsertObj = {
+          'id': 1,
+          'active': true,
+          'actor_id': user.id,
+          // store ISO string in UTC
+          'expires_at': applyExpires!.toUtc().toIso8601String(),
+        };
+
+        // Use upsert + select to get result (maybeSingle)
+        await supabase.from('speech_state').upsert(upsertObj).select().maybeSingle();
+      } catch (e) {
+        // If upsert fails (RLS, permissions), don't block — keep client-side lock
+        _showMessage('Не удалось сохранить состояние речи на сервере (права). Кнопка всё равно будет заблокирована локально.');
+      }
+
+      _showMessage('Речь запущена. Кнопка будет недоступна до ${_formatYe(applyExpires!)} (YEKT)');
     } on PostgrestException catch (e) {
       final msg = e.message ?? e.toString();
       if (msg.contains('Speech already active')) {
@@ -343,7 +366,6 @@ class _HomeScreenState extends State<HomeScreen> {
           speechActive = false;
           speechActorId = null;
           // still keep client lock until next slot to avoid immediate re-press
-          // (client already set speechExpiresAt)
           _waitingForServerConfirm = false;
           _waitingTimeoutUtc = null;
         });
