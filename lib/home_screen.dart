@@ -204,7 +204,7 @@ class _HomeScreenState extends State<HomeScreen> {
   DateTime _nextYekaterinburg12or20Utc() {
     final nowUtc = DateTime.now().toUtc();
     final nowYe = nowUtc.add(const Duration(hours: 5)); // YEKT
-    final today12 = DateTime(nowYe.year, nowYe.month, nowYe.day, 15, 5);
+    final today12 = DateTime(nowYe.year, nowYe.month, nowYe.day, 17, 10);
     final today20 = DateTime(nowYe.year, nowYe.month, nowYe.day, 20, 0);
 
     DateTime nextYe;
