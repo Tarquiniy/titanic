@@ -7,6 +7,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:titanic/enterprises_screen.dart';
 import 'models/app_user.dart';
 import 'login_screen.dart';
 import 'transfer_v_screen.dart';
@@ -523,6 +524,16 @@ class _HomeScreenState extends State<HomeScreen> {
             onPressed: () {
               Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => InventoryScreen(user: user)),
+              );
+            },
+          ),
+          if (widget.user.role == 'politician') 
+          IconButton(
+            tooltip: 'Предприятия',
+            icon: const Icon(Icons.factory),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => EnterprisesScreen(user: user)),
               );
             },
           ),
