@@ -1,8 +1,9 @@
 // lib/home_screen.dart
 //
 // Главное окно — навигация на transfer_v_screen и логика "Речь жизни".
-// Исправлена ошибка: обновление профиля теперь создает новый AppUser,
-// вместо попытки присвоить значения в final-поля firstName/lastName.
+// Изменена логика блокировки кнопки "Речь жизни": после нажатия кнопка
+// становится неактивной до следующего таймслота 12:00 или 20:00 по времени Екатеринбурга.
+// Серверный RPC по-прежнему вызывается с рассчитанным временем до 20:00 (совместимость).
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -27,7 +28,7 @@ class _HomeScreenState extends State<HomeScreen> {
   // Speech state
   bool speechActive = false;
   String? speechActorId;
-  DateTime? speechExpiresAt; // UTC
+  DateTime? speechExpiresAt; // UTC - the client-side lock/unlock time
 
   // Polling
   Timer? _pollTimer;
@@ -123,7 +124,7 @@ class _HomeScreenState extends State<HomeScreen> {
           setState(() {
             speechActive = false;
             speechActorId = null;
-            speechExpiresAt = null;
+            // keep any client-side lock (speechExpiresAt) intact; server expired
             _waitingForServerConfirm = false;
             _waitingTimeoutUtc = null;
           });
@@ -133,20 +134,27 @@ class _HomeScreenState extends State<HomeScreen> {
         // If waiting for server confirm, handle specially
         if (_waitingForServerConfirm) {
           if (active) {
+            // server confirmed; apply server values but ensure client-side lock to next 12/20 YEKT
+            final clientNextSlotUtc = _nextYekaterinburg12or20Utc();
+            DateTime applyExpires = expires ?? clientNextSlotUtc;
+            if (clientNextSlotUtc.isAfter(applyExpires)) applyExpires = clientNextSlotUtc;
+
             setState(() {
               speechActive = true;
               speechActorId = actor;
-              speechExpiresAt = expires;
+              speechExpiresAt = applyExpires;
               _waitingForServerConfirm = false;
               _waitingTimeoutUtc = null;
             });
             return;
           } else {
             if (_waitingTimeoutUtc != null && nowUtc.isAfter(_waitingTimeoutUtc!)) {
+              // timed out waiting — accept server inactive state, but still set client lock until next slot
+              final clientNextSlotUtc = _nextYekaterinburg12or20Utc();
               setState(() {
                 speechActive = active;
                 speechActorId = actor;
-                speechExpiresAt = expires;
+                speechExpiresAt = clientNextSlotUtc;
                 _waitingForServerConfirm = false;
                 _waitingTimeoutUtc = null;
               });
@@ -160,14 +168,15 @@ class _HomeScreenState extends State<HomeScreen> {
         setState(() {
           speechActive = active;
           speechActorId = actor;
-          speechExpiresAt = expires;
+          // prefer server-provided expires if present; otherwise leave client lock unchanged
+          if (expires != null) speechExpiresAt = expires;
         });
       } else {
         if (!_waitingForServerConfirm) {
           setState(() {
             speechActive = false;
             speechActorId = null;
-            speechExpiresAt = null;
+            // do not clear client-side lock here; leave speechExpiresAt as it was
           });
         }
       }
@@ -179,6 +188,7 @@ class _HomeScreenState extends State<HomeScreen> {
   // -----------------------
   // YEKT helpers
   // -----------------------
+  // next 20:00 YEKT -> return UTC
   DateTime _nextYekaterinburg20Utc() {
     final nowUtc = DateTime.now().toUtc();
     final nowYe = nowUtc.add(const Duration(hours: 5)); // YEKT = UTC+5
@@ -188,6 +198,25 @@ class _HomeScreenState extends State<HomeScreen> {
       targetYe = DateTime(tomorrow.year, tomorrow.month, tomorrow.day, 20, 0);
     }
     return targetYe.subtract(const Duration(hours: 5));
+  }
+
+  // next slot: next occurrence of 12:00 or 20:00 YEKT -> return UTC
+  DateTime _nextYekaterinburg12or20Utc() {
+    final nowUtc = DateTime.now().toUtc();
+    final nowYe = nowUtc.add(const Duration(hours: 5)); // YEKT
+    final today12 = DateTime(nowYe.year, nowYe.month, nowYe.day, 15, 5);
+    final today20 = DateTime(nowYe.year, nowYe.month, nowYe.day, 20, 0);
+
+    DateTime nextYe;
+    if (nowYe.isBefore(today12)) {
+      nextYe = today12;
+    } else if (nowYe.isBefore(today20)) {
+      nextYe = today20;
+    } else {
+      final tomorrow = nowYe.add(const Duration(days: 1));
+      nextYe = DateTime(tomorrow.year, tomorrow.month, tomorrow.day, 12, 0);
+    }
+    return nextYe.subtract(const Duration(hours: 5)); // convert back to UTC
   }
 
   int _secondsUntilUtc(DateTime targetUtc) {
@@ -201,11 +230,20 @@ class _HomeScreenState extends State<HomeScreen> {
     if (user.role != 'politician') return false;
     if (_rpcLoading) return false;
 
+    final nowUtc = DateTime.now().toUtc();
+
+    // If a client-side lock time exists (speechExpiresAt), button is disabled until that time
+    if (speechExpiresAt != null) {
+      if (nowUtc.isBefore(speechExpiresAt!)) return false;
+      // if now is after speechExpiresAt, allow button (unless other conditions)
+    }
+
+    // If server-side says speechActive and its expiry is in future, keep button disabled
     if (speechActive) {
-      final nowUtc = DateTime.now().toUtc();
       if (speechExpiresAt != null) {
         return nowUtc.isAfter(speechExpiresAt!);
       } else {
+        // fallback: compute next 20:00 YEKT
         final next20 = _nextYekaterinburg20Utc();
         return nowUtc.isAfter(next20);
       }
@@ -216,25 +254,30 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // -----------------------
-  // start_speech (uses server RPC and trusts returned JSON)
+  // start_speech (uses server RPC and trusts returned JSON where appropriate)
   // -----------------------
   Future<void> _onStartSpeechPressed() async {
     if (user.role != 'politician') return;
     if (!_isSpeechButtonEnabled) return;
 
+    // For RPC compatibility we still compute duration until next 20:00 YEKT
     final target20Utc = _nextYekaterinburg20Utc();
-    final seconds = _secondsUntilUtc(target20Utc);
-    if (seconds <= 0) {
+    final secondsForRpc = _secondsUntilUtc(target20Utc);
+    if (secondsForRpc <= 0) {
       _showMessage('Невозможно вычислить время до 20:00 YEKT');
       return;
     }
+
+    // Client-side lock: next slot 12:00 or 20:00 YEKT
+    final clientNextSlotUtc = _nextYekaterinburg12or20Utc();
 
     setState(() {
       _rpcLoading = true;
       // optimistic local lock + wait for server confirm
       speechActive = true;
       speechActorId = user.id;
-      speechExpiresAt = target20Utc;
+      // set client-side expiry to next slot (this will disable the button until that time)
+      speechExpiresAt = clientNextSlotUtc;
       _waitingForServerConfirm = true;
       _waitingTimeoutUtc = DateTime.now().toUtc().add(const Duration(seconds: 10));
     });
@@ -242,7 +285,7 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final dynamic rpcRes = await supabase.rpc('start_speech', params: {
         'p_actor': user.id,
-        'p_duration_seconds': seconds,
+        'p_duration_seconds': secondsForRpc,
       });
 
       Map<String, dynamic>? parsed;
@@ -264,21 +307,32 @@ class _HomeScreenState extends State<HomeScreen> {
         final active = parsed['active'] as bool? ?? true;
         final actor = parsed['actor_id']?.toString();
         final expiresRaw = parsed['expires_at'];
-        final expires = expiresRaw != null ? DateTime.tryParse(expiresRaw.toString()) : target20Utc;
+        final serverExpires = expiresRaw != null ? DateTime.tryParse(expiresRaw.toString()) : null;
+
+        // Ensure client-side lock does not end earlier than clientNextSlotUtc
+        DateTime applyExpires = serverExpires ?? clientNextSlotUtc;
+        if (clientNextSlotUtc.isAfter(applyExpires)) applyExpires = clientNextSlotUtc;
 
         setState(() {
           speechActive = active;
           speechActorId = actor;
-          speechExpiresAt = expires;
+          speechExpiresAt = applyExpires;
           _waitingForServerConfirm = false;
           _waitingTimeoutUtc = null;
         });
       } else {
-        // fallback: force fetch
+        // fallback: force fetch and ensure client-side lock at least until next slot
         await _fetchSpeechState();
+        setState(() {
+          if (speechExpiresAt == null || clientNextSlotUtc.isAfter(speechExpiresAt!)) {
+            speechExpiresAt = clientNextSlotUtc;
+          }
+          _waitingForServerConfirm = false;
+          _waitingTimeoutUtc = null;
+        });
       }
 
-      _showMessage('Речь запущена до 20:00 по времени Екатеринбурга');
+      _showMessage('Речь запущена. Кнопка будет недоступна до ${_formatYe(clientNextSlotUtc)} (YEKT)');
     } on PostgrestException catch (e) {
       final msg = e.message ?? e.toString();
       if (msg.contains('Speech already active')) {
@@ -288,7 +342,8 @@ class _HomeScreenState extends State<HomeScreen> {
         setState(() {
           speechActive = false;
           speechActorId = null;
-          speechExpiresAt = null;
+          // still keep client lock until next slot to avoid immediate re-press
+          // (client already set speechExpiresAt)
           _waitingForServerConfirm = false;
           _waitingTimeoutUtc = null;
         });
@@ -298,13 +353,18 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         speechActive = false;
         speechActorId = null;
-        speechExpiresAt = null;
         _waitingForServerConfirm = false;
         _waitingTimeoutUtc = null;
       });
     } finally {
       setState(() => _rpcLoading = false);
     }
+  }
+
+  String _formatYe(DateTime utc) {
+    final ye = utc.toUtc().add(const Duration(hours: 5));
+    String z(int n) => n.toString().padLeft(2, '0');
+    return '${z(ye.day)}.${z(ye.month)} ${z(ye.hour)}:${z(ye.minute)}';
   }
 
   void _showMessage(String message) {
@@ -343,7 +403,7 @@ class _HomeScreenState extends State<HomeScreen> {
           style: ElevatedButton.styleFrom(backgroundColor: enabled ? Colors.orange : Colors.grey),
           child: Text(enabled ? 'Речь жизни (старт)' : 'Речь жизни (неактивна)'),
         ),
-        if (speechActive)
+        if (speechActive || (speechExpiresAt != null && DateTime.now().toUtc().isBefore(speechExpiresAt!)))
           Padding(
             padding: const EdgeInsets.only(top: 6.0),
             child: Text(
@@ -351,11 +411,11 @@ class _HomeScreenState extends State<HomeScreen> {
               style: const TextStyle(fontSize: 12, color: Colors.grey),
             ),
           ),
-        if (speechActive)
+        if (speechExpiresAt != null && DateTime.now().toUtc().isBefore(speechExpiresAt!))
           Padding(
             padding: const EdgeInsets.only(top: 6.0),
             child: Text(
-              'Кнопка снова станет доступна в 20:00 по времени Екатеринбурга.',
+              'Кнопка снова станет доступна в ${_formatYe(speechExpiresAt!)} (YEKT).',
               style: const TextStyle(fontSize: 12, color: Colors.grey),
             ),
           ),
