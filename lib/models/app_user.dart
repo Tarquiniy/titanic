@@ -4,8 +4,10 @@ class AppUser {
   final String role;
   final String firstName;
   final String lastName;
+  final String color;
   double vBalance;
   double mBalance;
+
 
   AppUser({
     required this.id,
@@ -15,5 +17,6 @@ class AppUser {
     required this.lastName,
     this.vBalance = 0,
     this.mBalance = 0,
+    required this.color,
   });
 }

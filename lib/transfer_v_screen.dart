@@ -29,7 +29,6 @@ class _TransferVScreenState extends State<TransferVScreen> {
   final supabase = Supabase.instance.client;
 
   // полный список получателей (мап содержит id, telegram_username, first_name, last_name)
-  List<Map<String, dynamic>> _allRecipients = [];
   // видимый список после клиентской фильтрации
   List<Map<String, dynamic>> _visibleRecipients = [];
   bool _recipientsLoading = false;
@@ -84,19 +83,16 @@ class _TransferVScreenState extends State<TransferVScreen> {
       }
 
       setState(() {
-        _allRecipients = list;
         _visibleRecipients = List<Map<String, dynamic>>.from(list);
       });
     } on PostgrestException catch (e) {
       setState(() {
         _recipientsError = 'Ошибка при загрузке получателей: ${e.message}';
-        _allRecipients = [];
         _visibleRecipients = [];
       });
     } catch (e) {
       setState(() {
         _recipientsError = 'Ошибка при загрузке получателей: ${e.toString()}';
-        _allRecipients = [];
         _visibleRecipients = [];
       });
     } finally {
@@ -141,7 +137,7 @@ class _TransferVScreenState extends State<TransferVScreen> {
 
     // Проверка бизнес-правила:
     // - если отправитель role == 'politician' и получатель role == 'politician' => запрет
-    final senderRole = (widget.user.role ?? '').toString();
+    final senderRole = (widget.user.role).toString();
     final recipientRole = (_selectedRecipient!['role'] ?? '').toString();
     if (senderRole == 'politician' && recipientRole == 'politician') {
       setState(() => _error = 'Пользователям с ролью politician запрещено переводить другим пользователям с ролью politician');
@@ -191,7 +187,7 @@ class _TransferVScreenState extends State<TransferVScreen> {
 
       if (parsed != null && parsed.containsKey('from_balance')) {
         final fb = parsed['from_balance'];
-        if (fb is num) widget.user.vBalance = (fb as num).toDouble();
+        if (fb is num) widget.user.vBalance = (fb).toDouble();
       } else {
         // Если RPC не вернул балансы — ре-fetchим профиль отправителя
         final profile = await supabase
@@ -203,15 +199,15 @@ class _TransferVScreenState extends State<TransferVScreen> {
         if (profile is Map<String, dynamic>) {
           final v = profile['v_balance'];
           final m = profile['m_balance'];
-          if (v is num) widget.user.vBalance = (v as num).toDouble();
-          if (m is num) widget.user.mBalance = (m as num).toDouble();
+          if (v is num) widget.user.vBalance = (v).toDouble();
+          if (m is num) widget.user.mBalance = (m).toDouble();
         }
       }
 
       if (!mounted) return;
       Navigator.of(context).pop(true);
     } on PostgrestException catch (e) {
-      setState(() => _error = e.message ?? e.toString());
+      setState(() => _error = e.message);
     } catch (e) {
       setState(() => _error = e.toString());
     } finally {

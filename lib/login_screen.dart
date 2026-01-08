@@ -1,8 +1,11 @@
 // lib/login_screen.dart
+import 'dart:convert';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'models/app_user.dart';
 import 'home_screen.dart';
+import 'admin_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({Key? key}) : super(key: key);
@@ -26,6 +29,11 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
+  String _hashPassword(String password) {
+    final bytes = utf8.encode(password);
+    return sha256.convert(bytes).toString();
+  }
+
   Future<void> _signIn() async {
     setState(() {
       _error = null;
@@ -39,9 +47,8 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       final data = await _supabase
           .from('user_credentials')
-          .select('id, telegram_username, role, first_name, last_name, v_balance, m_balance')
+          .select('id, telegram_username, role, first_name, last_name, v_balance, m_balance, password_hash, color')
           .eq('telegram_username', username)
-          .eq('password', password)
           .maybeSingle();
 
       if (data == null) {
@@ -52,26 +59,37 @@ class _LoginScreenState extends State<LoginScreen> {
       // Приведение типов: data — динамический Map
       final row = Map<String, dynamic>.from(data as Map);
 
+      final storedHash = (row['password_hash'] ?? '').toString();
+      final givenHash = _hashPassword(password);
+
+      if (storedHash.isEmpty || storedHash != givenHash) {
+        setState(() => _error = 'Неверный username или пароль');
+        return;
+      }
+
       final user = AppUser(
         id: row['id']?.toString() ?? '',
-        username: row['telegram_username'] ?? username,
-        role: row['role'] ?? 'public_figure',
-        firstName: row['first_name'] ?? '',
-        lastName: row['last_name'] ?? '',
+        username: row['telegram_username']?.toString() ?? username,
+        role: row['role']?.toString() ?? 'public_figure',
+        firstName: row['first_name']?.toString() ?? '',
+        lastName: row['last_name']?.toString() ?? '',
         vBalance: (row['v_balance'] is num) ? (row['v_balance'] as num).toDouble() : 0.0,
         mBalance: (row['m_balance'] is num) ? (row['m_balance'] as num).toDouble() : 0.0,
+        color: row['color']!.toString(),
       );
 
       if (!mounted) return;
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => HomeScreen(user: user)),
-      );
+
+      final role = (row['role'] ?? '').toString().toLowerCase();
+
+      if (role == 'admin') {
+        Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const AdminScreen()));
+      } else {
+        Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => HomeScreen(user: user)));
+      }
     } on PostgrestException catch (e) {
-      // PostgrestException может присутствовать в некоторых версиях SDK
       setState(() => _error = 'Ошибка сервера: ${e.message}');
-    } catch (e, st) {
-      // Общая обработка ошибок (сетевая ошибка и т.д.)
-      // В продакшне логируйте st в ваш Sentry/логгер
+    } catch (e) {
       setState(() => _error = 'Ошибка: ${e.toString()}');
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -132,10 +150,6 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  Text(
-                    'Примечание: username хранится без @. Пароли в таблице — plain/demo (рекомендуется заменить на хэширование).',
-                    style: TextStyle(fontSize: 12, color: Colors.grey[700]),
-                  ),
                 ]),
               ),
             ),

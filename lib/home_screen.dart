@@ -42,7 +42,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // Waiting for server confirm after start_speech
   bool _waitingForServerConfirm = false;
-  DateTime? _waitingTimeoutUtc;
 
   @override
   void initState() {
@@ -87,8 +86,9 @@ class _HomeScreenState extends State<HomeScreen> {
             role: role is String ? role : user.role,
             firstName: fn is String ? fn : user.firstName,
             lastName: ln is String ? ln : user.lastName,
-            vBalance: v is num ? (v as num).toDouble() : user.vBalance,
-            mBalance: m is num ? (m as num).toDouble() : user.mBalance,
+            vBalance: v is num ? (v).toDouble() : user.vBalance,
+            mBalance: m is num ? (m).toDouble() : user.mBalance,
+            color: color is String ? color:user.color,
           );
           _userColor = color is String ? color : null;
         });
@@ -134,7 +134,6 @@ class _HomeScreenState extends State<HomeScreen> {
             speechActorId = null;
             speechExpiresAt = null; // сбрасываем локальный lock
             _waitingForServerConfirm = false;
-            _waitingTimeoutUtc = null;
           });
           return;
         }
@@ -151,7 +150,6 @@ class _HomeScreenState extends State<HomeScreen> {
               speechActorId = actor;
               speechExpiresAt = applyExpires;
               _waitingForServerConfirm = false;
-              _waitingTimeoutUtc = null;
             });
             return;
           } else {
@@ -160,7 +158,6 @@ class _HomeScreenState extends State<HomeScreen> {
               speechActorId = null;
               speechExpiresAt = null;
               _waitingForServerConfirm = false;
-              _waitingTimeoutUtc = null;
             });
             return;
           }
@@ -283,7 +280,6 @@ class _HomeScreenState extends State<HomeScreen> {
       speechActorId = user.id;
       speechExpiresAt = clientNextSlotUtc; // временная локальная блокировка
       _waitingForServerConfirm = true;
-      _waitingTimeoutUtc = DateTime.now().toUtc().add(const Duration(seconds: 10));
     });
 
     DateTime? applyExpires = clientNextSlotUtc;
@@ -322,7 +318,6 @@ class _HomeScreenState extends State<HomeScreen> {
           speechActorId = parsed?['actor_id']?.toString();
           speechExpiresAt = applyExpires;
           _waitingForServerConfirm = false;
-          _waitingTimeoutUtc = null;
         });
       } else {
         // RPC ничего не вернул — продолжаем и сохраняем в таблицу speech_state (upsert)
@@ -332,7 +327,6 @@ class _HomeScreenState extends State<HomeScreen> {
             speechExpiresAt = clientNextSlotUtc;
           }
           _waitingForServerConfirm = false;
-          _waitingTimeoutUtc = null;
         });
       }
 
@@ -342,16 +336,16 @@ class _HomeScreenState extends State<HomeScreen> {
           'id': 1,
           'active': true,
           'actor_id': user.id,
-          'expires_at': applyExpires!.toUtc().toIso8601String(),
+          'expires_at': applyExpires.toUtc().toIso8601String(),
         };
         await supabase.from('speech_state').upsert(upsertObj).select().maybeSingle();
       } catch (e) {
         _showMessage('Не удалось сохранить состояние речи на сервере (права). Кнопка всё равно будет локально заблокирована.');
       }
 
-      _showMessage('Речь запущена. Кнопка будет недоступна до ${_formatYe(applyExpires!)} (YEKT)');
+      _showMessage('Речь запущена. Кнопка будет недоступна до ${_formatYe(applyExpires)} (YEKT)');
     } on PostgrestException catch (e) {
-      final msg = e.message ?? e.toString();
+      final msg = e.message;
       if (msg.contains('Speech already active')) {
         await _fetchSpeechState();
       } else {
@@ -360,7 +354,6 @@ class _HomeScreenState extends State<HomeScreen> {
           speechActive = false;
           speechActorId = null;
           _waitingForServerConfirm = false;
-          _waitingTimeoutUtc = null;
           speechExpiresAt = null;
         });
       }
@@ -370,7 +363,6 @@ class _HomeScreenState extends State<HomeScreen> {
         speechActive = false;
         speechActorId = null;
         _waitingForServerConfirm = false;
-        _waitingTimeoutUtc = null;
         speechExpiresAt = null;
       });
     } finally {
@@ -488,7 +480,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 if (parsedColor != null) const SizedBox(width: 6),
                 if (_userColor != null && _userColor!.isNotEmpty)
-                  Text('Цвет: ${_userColor}', style: const TextStyle(color: Colors.grey)),
+                  Text('Цвет: ${_userColor}', style: const TextStyle(color: Colors.black)),
               ],
             ),
             const SizedBox(height: 4),
