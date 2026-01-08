@@ -47,7 +47,7 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       final data = await _supabase
           .from('user_credentials')
-          .select('id, telegram_username, role, first_name, last_name, v_balance, m_balance, password_hash, color')
+          .select('id, telegram_username, role, first_name, last_name, v_balance, m_balance, password, color')
           .eq('telegram_username', username)
           .maybeSingle();
 
