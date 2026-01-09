@@ -15,13 +15,39 @@ class _AdminScreenState extends State<AdminScreen> {
 
   int _tabIndex = 0;
 
+  // GlobalKeys для доступа к методам состояний табов
+  final GlobalKey<_PollsAuctionsTabState> _pollsKey = GlobalKey<_PollsAuctionsTabState>();
+  final GlobalKey<_EnterprisesTabState> _enterprisesKey = GlobalKey<_EnterprisesTabState>();
+
+  void _openCreatePoll() {
+    // переключаемся на таб и вызываем метод создания опроса
+    setState(() => _tabIndex = 1);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _pollsKey.currentState?._createPoll();
+    });
+  }
+
+  void _openCreateAuction() {
+    setState(() => _tabIndex = 1);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _pollsKey.currentState?._createAuction();
+    });
+  }
+
+  void _openCreateEnterprise() {
+    setState(() => _tabIndex = 3);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _enterprisesKey.currentState?._openCreateEnterpriseDialog();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final tabs = [
       const UsersTab(),
-      const PollsAuctionsTab(),
+      PollsAuctionsTab(key: _pollsKey),
       const InventoryTab(),
-      const EnterprisesTab(),
+      EnterprisesTab(key: _enterprisesKey),
       const BulkTab(),
     ];
 
@@ -30,10 +56,26 @@ class _AdminScreenState extends State<AdminScreen> {
         title: const Text('Admin — Панель управления'),
         actions: [
           IconButton(
+            tooltip: 'Создать опрос',
+            icon: const Icon(Icons.how_to_vote),
+            onPressed: _openCreatePoll,
+          ),
+          IconButton(
+            tooltip: 'Создать аукцион',
+            icon: const Icon(Icons.gavel),
+            onPressed: _openCreateAuction,
+          ),
+          IconButton(
+            tooltip: 'Создать предприятие',
+            icon: const Icon(Icons.apartment),
+            onPressed: _openCreateEnterprise,
+          ),
+          const SizedBox(width: 8),
+          IconButton(
             tooltip: 'Выйти',
             icon: const Icon(Icons.logout),
             onPressed: () {
-              // Просто возвращаемся на экран логина (в проекте нет Supabase Auth)
+              // Возврат на экран логина (в текущей архитектуре нет Supabase Auth)
               Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const LoginScreen()));
             },
           ),
@@ -339,6 +381,7 @@ class _PollsAuctionsTabState extends State<PollsAuctionsTab> {
     }
   }
 
+  // эти методы вызываются также из AppBar через GlobalKey
   Future<void> _createPoll() async {
     final payload = await showDialog<Map<String, dynamic>>(context: context, builder: (_) => const _CreatePollDialog());
     if (payload == null) return;
@@ -441,7 +484,6 @@ class _PollsAuctionsTabState extends State<PollsAuctionsTab> {
             TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Закрыть')),
             TextButton(
                 onPressed: () async {
-                  // удалить опрос (и варианты/голоса каскадом, если настроено в БД)
                   try {
                     await supabase.from('polls').delete().eq('id', pollId);
                     await _loadPolls();
@@ -522,9 +564,9 @@ class _PollsAuctionsTabState extends State<PollsAuctionsTab> {
       padding: const EdgeInsets.all(12.0),
       child: Column(children: [
         Row(children: [
-          ElevatedButton(onPressed: _createPoll, child: const Text('Создать опрос')),
+          ElevatedButton.icon(onPressed: _createPoll, icon: const Icon(Icons.add), label: const Text('Создать опрос')),
           const SizedBox(width: 8),
-          ElevatedButton(onPressed: _createAuction, child: const Text('Создать аукцион')),
+          ElevatedButton.icon(onPressed: _createAuction, icon: const Icon(Icons.add_shopping_cart), label: const Text('Создать аукцион')),
           const Spacer(),
           IconButton(
             tooltip: 'Обновить',
@@ -621,6 +663,12 @@ class _CreatePollDialogState extends State<_CreatePollDialog> {
     });
   }
 
+  void _removeOptionAt(int index) {
+    setState(() {
+      _options.removeAt(index);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
@@ -628,14 +676,25 @@ class _CreatePollDialogState extends State<_CreatePollDialog> {
       content: SingleChildScrollView(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           TextField(controller: _title, decoration: const InputDecoration(labelText: 'Заголовок')),
+          const SizedBox(height: 8),
           Row(children: [
             Expanded(child: TextField(controller: _optionCtrl, decoration: const InputDecoration(hintText: 'Вариант'))),
             IconButton(icon: const Icon(Icons.add), onPressed: _addOption),
           ]),
           const SizedBox(height: 8),
-          ..._options.map((o) => ListTile(title: Text(o))).toList(),
+          if (_options.isEmpty) const Text('Варианты ещё не добавлены'),
+          ..._options.asMap().entries.map((e) {
+            final idx = e.key;
+            final val = e.value;
+            return ListTile(
+              title: Text(val),
+              trailing: IconButton(icon: const Icon(Icons.delete), onPressed: () => _removeOptionAt(idx)),
+            );
+          }).toList(),
+          const SizedBox(height: 8),
           Row(children: [
             const Text('Закрытый (только админ смотрит результаты)'),
+            const SizedBox(width: 8),
             Switch(value: _isClosed, onChanged: (v) => setState(() => _isClosed = v)),
           ]),
         ]),
@@ -696,7 +755,9 @@ class _CreateAuctionDialogState extends State<_CreateAuctionDialog> {
       content: SingleChildScrollView(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           TextField(controller: _title, decoration: const InputDecoration(labelText: 'Заголовок')),
+          const SizedBox(height: 8),
           TextField(controller: _item, decoration: const InputDecoration(labelText: 'Item JSON (пример: {"name":"sword","count":1})')),
+          const SizedBox(height: 12),
           Row(children: [
             ElevatedButton(onPressed: () => _pickDate(true), child: Text(_startsAt == null ? 'Выбрать старт' : _startsAt!.toString())),
             const SizedBox(width: 8),
@@ -832,27 +893,41 @@ class _EnterprisesTabState extends State<EnterprisesTab> {
     }
   }
 
-  Future<void> _createEnterprise() async {
-    final name = _nameCtrl.text.trim();
+  Future<void> _openCreateEnterpriseDialog() async {
+    final payload = await showDialog<Map<String, dynamic>>(context: context, builder: (_) => const _CreateEnterpriseDialog());
+    if (payload == null) return;
+    await _createEnterprise(payload);
+  }
+
+  Future<void> _createEnterprise(Map<String, dynamic> payload) async {
+    final name = payload['title']?.toString() ?? '';
+    final shares = payload['shares'] as List<dynamic>? ?? [];
     if (name.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Имя предприятия нужно')));
       return;
     }
+
     try {
-      final List parsed = jsonDecode(_sharesController.text);
       final ent = await supabase.from('enterprises').insert({'title': name}).select().maybeSingle();
       if (ent == null) throw 'Не удалось создать предприятие';
       final entId = ent['id'];
-      for (final sh in parsed) {
-        final username = sh['user']?.toString();
-        final pct = (sh['pct'] is num) ? sh['pct'] : double.tryParse(sh['pct'].toString());
-        if (username == null || pct == null) continue;
-        final u = await supabase.from('user_credentials').select('id').eq('telegram_username', username).maybeSingle();
+      // Prepare shares batch: resolve usernames to user ids
+      final List<Map<String, dynamic>> sharesBatch = [];
+      for (final s in shares) {
+        final username = s['user']?.toString();
+        final pctRaw = s['pct'];
+        if (username == null || pctRaw == null) continue;
+        final pct = (pctRaw is num) ? pctRaw : double.tryParse(pctRaw.toString());
+        if (pct == null) continue;
+        final u = await supabase.from('user_credentials').select('id, telegram_username').eq('telegram_username', username).maybeSingle();
         if (u == null) continue;
-        await supabase.from('enterprise_shares').insert({'enterprise_id': entId, 'user_id': u['id'], 'percent': pct});
+        sharesBatch.add({'enterprise_id': entId, 'user_id': u['id'], 'percent': pct});
       }
-      _nameCtrl.clear();
-      _sharesController.clear();
+
+      if (sharesBatch.isNotEmpty) {
+        await supabase.from('enterprise_shares').insert(sharesBatch);
+      }
+
       await _loadEnterprises();
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Предприятие создано')));
     } catch (e) {
@@ -938,17 +1013,8 @@ class _EnterprisesTabState extends State<EnterprisesTab> {
     return Padding(
       padding: const EdgeInsets.all(12.0),
       child: Column(children: [
-        TextField(controller: _nameCtrl, decoration: const InputDecoration(labelText: 'Название предприятия')),
-        const SizedBox(height: 8),
-        TextField(
-          controller: _sharesController,
-          minLines: 3,
-          maxLines: 6,
-          decoration: const InputDecoration(labelText: 'Доли (JSON): [{"user":"alice","pct":50},{"user":"bob","pct":50}]'),
-        ),
-        const SizedBox(height: 8),
         Row(children: [
-          ElevatedButton(onPressed: _createEnterprise, child: const Text('Создать предприятие и распределить доли')),
+          ElevatedButton.icon(onPressed: _openCreateEnterpriseDialog, icon: const Icon(Icons.add_business), label: const Text('Создать предприятие')),
           const SizedBox(width: 12),
           ElevatedButton(onPressed: _loadEnterprises, child: const Text('Обновить список')),
         ]),
@@ -1052,6 +1118,67 @@ class _BulkJsonDialogState extends State<_BulkJsonDialog> {
       actions: [
         TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Отмена')),
         ElevatedButton(onPressed: () => Navigator.of(context).pop(_ctrl.text), child: const Text('OK')),
+      ],
+    );
+  }
+}
+
+// ----------------- Create Enterprise Dialog -----------------
+class _CreateEnterpriseDialog extends StatefulWidget {
+  const _CreateEnterpriseDialog({Key? key}) : super(key: key);
+  @override
+  State<_CreateEnterpriseDialog> createState() => _CreateEnterpriseDialogState();
+}
+
+class _CreateEnterpriseDialogState extends State<_CreateEnterpriseDialog> {
+  final _titleCtrl = TextEditingController();
+  final _sharesCtrl = TextEditingController(text: '[{"user":"alice","pct":50},{"user":"bob","pct":50}]');
+
+  @override
+  void dispose() {
+    _titleCtrl.dispose();
+    _sharesCtrl.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final title = _titleCtrl.text.trim();
+    if (title.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Название предприятия нужно')));
+      return;
+    }
+
+    try {
+      final parsed = jsonDecode(_sharesCtrl.text);
+      if (parsed is! List) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Доли должны быть списком объектов')));
+        return;
+      }
+      Navigator.of(context).pop({'title': title, 'shares': parsed});
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка парсинга JSON: $e')));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Создать предприятие и распределить доли'),
+      content: SingleChildScrollView(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(controller: _titleCtrl, decoration: const InputDecoration(labelText: 'Название предприятия')),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _sharesCtrl,
+            minLines: 4,
+            maxLines: 8,
+            decoration: const InputDecoration(labelText: 'Доли (JSON) пример [{"user":"alice","pct":50}]'),
+          ),
+        ]),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Отмена')),
+        ElevatedButton(onPressed: _submit, child: const Text('Создать')),
       ],
     );
   }
