@@ -384,9 +384,18 @@ class _PollsAuctionsTabState extends State<PollsAuctionsTab> {
   Future<void> _loadAuctions() async {
     setState(() => _loadingAuctions = true);
     try {
-      final res = await supabase.from('auctions').select('id, title, starts_at, ends_at, is_closed, created_at').order('created_at', ascending: false);
+      // now select item as well so we can display name/count
+      final res = await supabase.from('auctions').select('id, title, item, starts_at, ends_at, is_closed, created_at').order('created_at', ascending: false);
       if (res is List) {
-        _auctions = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+        _auctions = res.map((e) {
+          final m = Map<String, dynamic>.from(e as Map);
+          if (m['item'] is String) {
+            try {
+              m['item'] = jsonDecode(m['item']);
+            } catch (_) {}
+          }
+          return m;
+        }).toList();
       } else {
         _auctions = [];
       }
@@ -400,7 +409,6 @@ class _PollsAuctionsTabState extends State<PollsAuctionsTab> {
 
   // создание опроса — открывает диалог с возможностью выбора пользователей
   Future<void> _createPoll() async {
-    // перед открытием диалога убедимся, что список пользователей загружен
     if (_users.isEmpty) await _loadUsers();
 
     final payload = await showDialog<Map<String, dynamic>>(
@@ -427,7 +435,6 @@ class _PollsAuctionsTabState extends State<PollsAuctionsTab> {
       }
 
       if (participants.isNotEmpty) {
-        // participants — список user_id
         final List<Map<String, dynamic>> pBatch = participants.map((u) => {'poll_id': pollId, 'user_id': u}).toList();
         await supabase.from('poll_participants').insert(pBatch);
       }
@@ -471,7 +478,28 @@ class _PollsAuctionsTabState extends State<PollsAuctionsTab> {
       }
 
       await _loadAuctions();
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Аукцион создан')));
+
+      // показать подробности созданного аукциона
+      final created = await supabase.from('auctions').select('id, title, item, starts_at, ends_at, is_closed, created_at').eq('id', auctionId).maybeSingle();
+      Map<String, dynamic>? createdMap;
+      if (created != null) {
+        try {
+          // безопасно сконвертировать PostgrestMap/динамический ответ в Map<String, dynamic>
+          createdMap = Map<String, dynamic>.from(jsonDecode(jsonEncode(created)));
+        } catch (_) {
+          createdMap = null;
+        }
+      }
+      if (createdMap != null) {
+        if (createdMap['item'] is String) {
+          try {
+            createdMap['item'] = jsonDecode(createdMap['item']);
+          } catch (_) {}
+        }
+        await _viewAuctionDetails(createdMap);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Аукцион создан')));
+      }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка создания аукциона: $e')));
     }
@@ -485,7 +513,6 @@ class _PollsAuctionsTabState extends State<PollsAuctionsTab> {
       final options = (optionsRes is List) ? optionsRes.map((e) => Map<String, dynamic>.from(e as Map)).toList() : <Map<String, dynamic>>[];
       final votes = (votesRes is List) ? votesRes.map((e) => Map<String, dynamic>.from(e as Map)).toList() : <Map<String, dynamic>>[];
 
-      // Count votes per option
       final Map<dynamic, int> counts = {};
       for (final v in votes) {
         final opt = v['option_id'];
@@ -556,39 +583,88 @@ class _PollsAuctionsTabState extends State<PollsAuctionsTab> {
     final auctionId = auction['id'];
     try {
       final bidsRes = await supabase.from('auction_bids').select('id, user_id, bid, created_at').eq('auction_id', auctionId).order('created_at', ascending: false);
+      final participantsRes = await supabase.from('auction_participants').select('user_id').eq('auction_id', auctionId);
       final bids = (bidsRes is List) ? bidsRes.map((e) => Map<String, dynamic>.from(e as Map)).toList() : <Map<String, dynamic>>[];
+      final participants = (participantsRes is List) ? participantsRes.map((e) => (e as Map)['user_id']).toList() : <dynamic>[];
+
+      final List<String> participantNames = [];
+      if (participants.isNotEmpty) {
+        try {
+          // Построим or-запрос вида "id.eq.1,id.eq.2" — это совместимо с postgrest `.or(...)`
+          final ids = participants.map((p) => p.toString()).toList();
+          final orQuery = ids.map((id) => 'id.eq.$id').join(',');
+          final res = await supabase.from('user_credentials').select('id, telegram_username, first_name, last_name').or(orQuery);
+          if (res is List) {
+            for (final u in res) {
+              final um = Map<String, dynamic>.from(u as Map);
+              final display = (um['first_name'] ?? '').toString().isNotEmpty ? '${um['first_name']} ${um['last_name'] ?? ''} (${um['telegram_username'] ?? um['id']})' : (um['telegram_username'] ?? um['id']).toString();
+              participantNames.add(display);
+            }
+          }
+        } catch (_) {
+          // если or не поддерживается или что-то пошло не так, оставим список пустым
+        }
+      }
+
+      dynamic item = auction['item'];
+      if (item is String) {
+        try {
+          item = jsonDecode(item);
+        } catch (_) {}
+      }
 
       await showDialog<void>(
         context: context,
-        builder: (_) => AlertDialog(
-          title: Text('Аукцион: ${auction['title']}'),
-          content: SizedBox(
-            width: double.maxFinite,
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Text('Начало: ${auction['starts_at'] ?? '-'}'),
-              Text('Конец: ${auction['ends_at'] ?? '-'}'),
-              const SizedBox(height: 12),
-              if (bids.isEmpty) const Text('Ставок нет'),
-              if (bids.isNotEmpty)
-                SizedBox(
-                  height: 220,
-                  child: ListView.builder(
-                    itemCount: bids.length,
-                    itemBuilder: (context, i) {
-                      final b = bids[i];
-                      return ListTile(
-                        title: Text('Bid: ${b['bid']}'),
-                        subtitle: Text('user: ${b['user_id']}'),
-                        trailing: Text(b['created_at']?.toString() ?? ''),
-                      );
-                    },
-                  ),
-                ),
-            ]),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Закрыть')),
-            TextButton(
+        builder: (_) => StatefulBuilder(builder: (context, setStateDialog) {
+          return AlertDialog(
+            title: Text('Аукцион: ${auction['title']}'),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: SingleChildScrollView(
+                child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('ID: ${auction['id']}'),
+                  const SizedBox(height: 8),
+                  Text('Заголовок: ${auction['title'] ?? '-'}'),
+                  const SizedBox(height: 8),
+                  Text('Item: ${item is Map ? '${item['name'] ?? '-'} x${item['count'] ?? '-'}' : item.toString()}'),
+                  const SizedBox(height: 8),
+                  Text('Старт: ${auction['starts_at'] ?? '-'}'),
+                  Text('Конец: ${auction['ends_at'] ?? '-'}'),
+                  const SizedBox(height: 12),
+                  const Text('Участники:'),
+                  if (participantNames.isEmpty) const Text('— нет участников'),
+                  if (participantNames.isNotEmpty) ...participantNames.map((n) => pad(n)).toList(),
+                  const SizedBox(height: 12),
+                  const Text('Ставки:'),
+                  if (bids.isEmpty) const Text('— нет ставок'),
+                  if (bids.isNotEmpty)
+                    SizedBox(
+                      height: 180,
+                      child: ListView.builder(
+                        itemCount: bids.length,
+                        itemBuilder: (context, i) {
+                          final b = bids[i];
+                          return ListTile(
+                            title: Text('Bid: ${b['bid']}'),
+                            subtitle: Text('user: ${b['user_id']}'),
+                            trailing: Text(b['created_at']?.toString() ?? ''),
+                          );
+                        },
+                      ),
+                    ),
+                ]),
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Закрыть')),
+              TextButton(
+                onPressed: () async {
+                  Navigator.of(context).pop();
+                  await _editAuction(auction);
+                },
+                child: const Text('Редактировать'),
+              ),
+              TextButton(
                 onPressed: () async {
                   try {
                     await supabase.from('auctions').delete().eq('id', auctionId);
@@ -599,14 +675,81 @@ class _PollsAuctionsTabState extends State<PollsAuctionsTab> {
                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка удаления: $e')));
                   }
                 },
-                child: const Text('Удалить аукцион')),
-          ],
-        ),
+                child: const Text('Удалить аукцион'),
+              ),
+            ],
+          );
+        }),
       );
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка получения ставок: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка получения ставок/участников: $e')));
     }
   }
+
+  // Edit auction: open dialog prefilled, then update auctions row + participants table
+  Future<void> _editAuction(Map<String, dynamic> auction) async {
+    if (_users.isEmpty) await _loadUsers();
+
+    dynamic item = auction['item'];
+    if (item is String) {
+      try {
+        item = jsonDecode(item);
+      } catch (_) {}
+    }
+    final initial = {
+      'title': auction['title'] ?? '',
+      'itemName': (item is Map) ? (item['name'] ?? '') : (item?.toString() ?? ''),
+      'itemCount': (item is Map) ? (item['count'] ?? 1) : 1,
+      'startsAt': auction['starts_at'] != null ? DateTime.tryParse(auction['starts_at'].toString()) : null,
+      'endsAt': auction['ends_at'] != null ? DateTime.tryParse(auction['ends_at'].toString()) : null,
+      'participants': <dynamic>[],
+    };
+
+    try {
+      final partsRes = await supabase.from('auction_participants').select('user_id').eq('auction_id', auction['id']);
+      if (partsRes is List) {
+        initial['participants'] = partsRes.map((e) => (e as Map)['user_id']).toList();
+      }
+    } catch (_) {
+      initial['participants'] = <dynamic>[];
+    }
+
+    final payload = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (_) => _EditAuctionDialog(availableUsers: _users, initial: initial),
+    );
+    if (payload == null) return;
+
+    try {
+      final auctionId = auction['id'];
+      final itemName = (payload['itemName'] ?? '').toString();
+      final itemCountRaw = payload['itemCount'];
+      final int itemCount = (itemCountRaw is int) ? itemCountRaw : int.tryParse(itemCountRaw?.toString() ?? '') ?? 1;
+      final updateMap = {
+        'title': payload['title'],
+        'item': {'name': itemName, 'count': itemCount},
+        'starts_at': payload['startsAt']?.toIso8601String(),
+        'ends_at': payload['endsAt']?.toIso8601String(),
+      };
+
+      await supabase.from('auctions').update(updateMap).eq('id', auctionId);
+
+      await supabase.from('auction_participants').delete().eq('auction_id', auctionId);
+      final List participants = payload['participants'] ?? [];
+      if (participants.isNotEmpty) {
+        final List<Map<String, dynamic>> pBatch = participants.map((u) => {'auction_id': auctionId, 'user_id': u}).toList();
+        await supabase.from('auction_participants').insert(pBatch);
+      }
+
+      await _loadAuctions();
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Аукцион обновлён')));
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка обновления аукциона: $e')));
+    }
+  }
+
+  // helper to pad widgets
+  static Widget pad(String text) => Padding(padding: const EdgeInsets.symmetric(vertical: 2.0), child: Text(text));
 
   @override
   Widget build(BuildContext context) {
@@ -667,10 +810,16 @@ class _PollsAuctionsTabState extends State<PollsAuctionsTab> {
                             separatorBuilder: (_, __) => const Divider(height: 0),
                             itemBuilder: (context, i) {
                               final a = _auctions[i];
+                              final item = a['item'];
+                              final itemLabel = (item is Map) ? '${item['name'] ?? '-'} x${item['count'] ?? '-'}' : (item?.toString() ?? '-');
                               return ListTile(
                                 title: Text(a['title'] ?? 'Без названия'),
-                                subtitle: Text('id: ${a['id']}  до: ${a['ends_at'] ?? '-'}'),
+                                subtitle: Text('id: ${a['id']}  item: $itemLabel  до: ${a['ends_at'] ?? '-'}'),
                                 onTap: () => _viewAuctionDetails(a),
+                                trailing: IconButton(
+                                  icon: const Icon(Icons.edit),
+                                  onPressed: () => _editAuction(a),
+                                ),
                               );
                             },
                           ),
@@ -698,7 +847,6 @@ class _CreatePollDialogState extends State<_CreatePollDialog> {
   final _optionCtrl = TextEditingController();
   List<String> _options = [];
   bool _isClosed = true;
-  // participants — список user_id
   final Set<dynamic> _participants = {};
 
   @override
@@ -920,6 +1068,138 @@ class _CreateAuctionDialogState extends State<_CreateAuctionDialog> {
             });
           },
           child: const Text('Создать'),
+        ),
+      ],
+    );
+  }
+}
+
+/// ДИАЛОГ РЕДАКТИРОВАНИЯ АУКЦИОНА
+class _EditAuctionDialog extends StatefulWidget {
+  final List<Map<String, dynamic>> availableUsers;
+  final Map<String, dynamic> initial;
+  const _EditAuctionDialog({required this.availableUsers, required this.initial, Key? key}) : super(key: key);
+  @override
+  State<_EditAuctionDialog> createState() => _EditAuctionDialogState();
+}
+
+class _EditAuctionDialogState extends State<_EditAuctionDialog> {
+  late TextEditingController _title;
+  late TextEditingController _itemName;
+  late TextEditingController _itemCountCtrl;
+  DateTime? _startsAt;
+  DateTime? _endsAt;
+  final Set<dynamic> _participants = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _title = TextEditingController(text: widget.initial['title']?.toString() ?? '');
+    _itemName = TextEditingController(text: widget.initial['itemName']?.toString() ?? '');
+    _itemCountCtrl = TextEditingController(text: widget.initial['itemCount']?.toString() ?? '1');
+    _startsAt = widget.initial['startsAt'] as DateTime?;
+    _endsAt = widget.initial['endsAt'] as DateTime?;
+    final initialParts = widget.initial['participants'] as List<dynamic>? ?? [];
+    _participants.addAll(initialParts);
+  }
+
+  @override
+  void dispose() {
+    _title.dispose();
+    _itemName.dispose();
+    _itemCountCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickDate(bool isStart) async {
+    final now = DateTime.now();
+    final pick = await showDatePicker(context: context, initialDate: isStart ? (_startsAt ?? now) : (_endsAt ?? now), firstDate: now.subtract(const Duration(days: 3650)), lastDate: now.add(const Duration(days: 3650)));
+    if (pick == null) return;
+    final time = await showTimePicker(context: context, initialTime: TimeOfDay.fromDateTime(isStart ? (_startsAt ?? now) : (_endsAt ?? now)));
+    if (time == null) return;
+    final dt = DateTime(pick.year, pick.month, pick.day, time.hour, time.minute);
+    setState(() {
+      if (isStart) _startsAt = dt;
+      else _endsAt = dt;
+    });
+  }
+
+  void _toggleParticipant(dynamic id) {
+    setState(() {
+      if (_participants.contains(id)) _participants.remove(id);
+      else _participants.add(id);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final users = widget.availableUsers;
+    return AlertDialog(
+      title: const Text('Редактировать аукцион'),
+      content: SingleChildScrollView(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(controller: _title, decoration: const InputDecoration(labelText: 'Заголовок аукциона')),
+          const SizedBox(height: 8),
+          TextField(controller: _itemName, decoration: const InputDecoration(labelText: 'Название предмета')),
+          const SizedBox(height: 8),
+          TextField(controller: _itemCountCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Количество (целое)')),
+          const SizedBox(height: 12),
+          Row(children: [
+            ElevatedButton(onPressed: () => _pickDate(true), child: Text(_startsAt == null ? 'Выбрать старт' : _startsAt!.toString())),
+            const SizedBox(width: 8),
+            ElevatedButton(onPressed: () => _pickDate(false), child: Text(_endsAt == null ? 'Выбрать конец' : _endsAt!.toString())),
+          ]),
+          const Divider(),
+          const Align(alignment: Alignment.centerLeft, child: Text('Участники (отметьте кто участвует):')),
+          SizedBox(
+            height: 200,
+            width: double.maxFinite,
+            child: users.isEmpty
+                ? const Center(child: Text('Пользователи не загружены'))
+                : ListView.builder(
+                    itemCount: users.length,
+                    itemBuilder: (context, i) {
+                      final u = users[i];
+                      final display = (u['first_name'] ?? '').toString().isNotEmpty
+                          ? '${u['first_name']} ${u['last_name'] ?? ''} (${u['telegram_username'] ?? u['id']})'
+                          : (u['telegram_username'] ?? u['id']).toString();
+                      final id = u['id'];
+                      return CheckboxListTile(
+                        dense: true,
+                        value: _participants.contains(id),
+                        title: Text(display),
+                        onChanged: (_) => _toggleParticipant(id),
+                      );
+                    },
+                  ),
+          ),
+        ]),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Отмена')),
+        ElevatedButton(
+          onPressed: () {
+            final title = _title.text.trim();
+            final itemName = _itemName.text.trim();
+            final itemCount = int.tryParse(_itemCountCtrl.text.trim()) ?? 1;
+            if (title.isEmpty) {
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Заголовок обязателен')));
+              return;
+            }
+            if (itemName.isEmpty) {
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Название предмета обязательно')));
+              return;
+            }
+            Navigator.of(context).pop({
+              'title': title,
+              'itemName': itemName,
+              'itemCount': itemCount,
+              'startsAt': _startsAt,
+              'endsAt': _endsAt,
+              'participants': _participants.toList(),
+            });
+          },
+          child: const Text('Сохранить'),
         ),
       ],
     );
