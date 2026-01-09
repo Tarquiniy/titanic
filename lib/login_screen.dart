@@ -1,6 +1,4 @@
 // lib/login_screen.dart
-import 'dart:convert';
-import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'models/app_user.dart';
@@ -29,11 +27,6 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  String _hashPassword(String password) {
-    final bytes = utf8.encode(password);
-    return sha256.convert(bytes).toString();
-  }
-
   Future<void> _signIn() async {
     setState(() {
       _error = null;
@@ -59,10 +52,10 @@ class _LoginScreenState extends State<LoginScreen> {
       // Приведение типов: data — динамический Map
       final row = Map<String, dynamic>.from(data as Map);
 
-      final storedHash = (row['password_hash'] ?? '').toString();
-      final givenHash = _hashPassword(password);
+      final storedPassword = (row['password'] ?? '').toString();
 
-      if (storedHash.isEmpty || storedHash != givenHash) {
+      // СРАВНЕНИЕ ПАРОЛЕЙ БЕЗ ХЕШИРОВАНИЯ (пароль хранится как plain string)
+      if (storedPassword.isEmpty || storedPassword != password) {
         setState(() => _error = 'Неверный username или пароль');
         return;
       }
