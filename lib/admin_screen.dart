@@ -20,7 +20,6 @@ class _AdminScreenState extends State<AdminScreen> {
   final GlobalKey<_EnterprisesTabState> _enterprisesKey = GlobalKey<_EnterprisesTabState>();
 
   void _openCreatePoll() {
-    // переключаемся на таб и вызываем метод создания опроса
     setState(() => _tabIndex = 1);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _pollsKey.currentState?._createPoll();
@@ -75,7 +74,6 @@ class _AdminScreenState extends State<AdminScreen> {
             tooltip: 'Выйти',
             icon: const Icon(Icons.logout),
             onPressed: () {
-              // Возврат на экран логина (в текущей архитектуре нет Supabase Auth)
               Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const LoginScreen()));
             },
           ),
@@ -127,7 +125,7 @@ class _UsersTabState extends State<UsersTab> {
           .order('first_name');
       if (res is List) {
         setState(() {
-          _users = List<Map<String, dynamic>>.from(res.map((e) => Map<String, dynamic>.from(e)));
+          _users = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
         });
       } else {
         setState(() => _users = []);
@@ -166,14 +164,14 @@ class _UsersTabState extends State<UsersTab> {
         final inv = entry.value;
         final profile = await supabase.from('user_credentials').select('id, inventory').eq('telegram_username', username).maybeSingle();
         if (profile == null) continue;
-        final id = profile['id'].toString();
+        final id = (profile as Map)['id'].toString();
         // Получаем текущее inventory и объединяем
-        dynamic cur = profile['inventory'];
+        dynamic cur = (profile as Map)['inventory'];
         Map merged = {};
         if (cur != null) {
           try {
             if (cur is String) cur = jsonDecode(cur);
-            if (cur is Map) merged.addAll(Map<String, dynamic>.from(cur));
+            if (cur is Map) merged.addAll(Map<String, dynamic>.from(cur as Map));
           } catch (_) {}
         }
         if (inv is Map) {
@@ -352,7 +350,7 @@ class _PollsAuctionsTabState extends State<PollsAuctionsTab> {
     try {
       final res = await supabase.from('polls').select('id, title, is_closed, created_at').order('created_at', ascending: false);
       if (res is List) {
-        _polls = List<Map<String, dynamic>>.from(res.map((e) => Map<String, dynamic>.from(e)));
+        _polls = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
       } else {
         _polls = [];
       }
@@ -369,7 +367,7 @@ class _PollsAuctionsTabState extends State<PollsAuctionsTab> {
     try {
       final res = await supabase.from('auctions').select('id, title, starts_at, ends_at, is_closed, created_at').order('created_at', ascending: false);
       if (res is List) {
-        _auctions = List<Map<String, dynamic>>.from(res.map((e) => Map<String, dynamic>.from(e)));
+        _auctions = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
       } else {
         _auctions = [];
       }
@@ -393,7 +391,7 @@ class _PollsAuctionsTabState extends State<PollsAuctionsTab> {
       };
       final pollRes = await supabase.from('polls').insert(pollInsert).select().maybeSingle();
       if (pollRes == null) throw 'Не удалось создать опрос';
-      final pollId = pollRes['id'];
+      final pollId = (pollRes as Map)['id'];
       final List options = payload['options'] ?? [];
 
       if (options.isNotEmpty) {
@@ -432,10 +430,9 @@ class _PollsAuctionsTabState extends State<PollsAuctionsTab> {
     try {
       final optionsRes = await supabase.from('poll_options').select('id, label').eq('poll_id', pollId).order('id');
       final votesRes = await supabase.from('poll_votes').select('id, option_id, user_id, created_at').eq('poll_id', pollId);
-      final options = (optionsRes is List) ? List<Map<String, dynamic>>.from(optionsRes.map((e) => Map<String, dynamic>.from(e))) : <Map<String, dynamic>>[];
-      final votes = (votesRes is List) ? List<Map<String, dynamic>>.from(votesRes.map((e) => Map<String, dynamic>.from(e))) : <Map<String, dynamic>>[];
+      final options = (optionsRes is List) ? optionsRes.map((e) => Map<String, dynamic>.from(e as Map)).toList() : <Map<String, dynamic>>[];
+      final votes = (votesRes is List) ? votesRes.map((e) => Map<String, dynamic>.from(e as Map)).toList() : <Map<String, dynamic>>[];
 
-      // Count votes per option
       final Map<dynamic, int> counts = {};
       for (final v in votes) {
         final opt = v['option_id'];
@@ -506,7 +503,7 @@ class _PollsAuctionsTabState extends State<PollsAuctionsTab> {
     final auctionId = auction['id'];
     try {
       final bidsRes = await supabase.from('auction_bids').select('id, user_id, bid, created_at').eq('auction_id', auctionId).order('created_at', ascending: false);
-      final bids = (bidsRes is List) ? List<Map<String, dynamic>>.from(bidsRes.map((e) => Map<String, dynamic>.from(e))) : <Map<String, dynamic>>[];
+      final bids = (bidsRes is List) ? bidsRes.map((e) => Map<String, dynamic>.from(e as Map)).toList() : <Map<String, dynamic>>[];
 
       await showDialog<void>(
         context: context,
@@ -802,9 +799,30 @@ class _InventoryTabState extends State<InventoryTab> {
   Future<void> _loadProfile() async {
     setState(() => _loading = true);
     try {
-      final row = await supabase.from('user_credentials').select('id, telegram_username, inventory').eq('telegram_username', _usernameCtrl.text.trim()).maybeSingle();
-      setState(() => _profile = row is Map ? Map.from(row!) : null);
+      final row = await supabase
+          .from('user_credentials')
+          .select('id, telegram_username, inventory')
+          .eq('telegram_username', _usernameCtrl.text.trim())
+          .maybeSingle();
+
+      // Безопасное преобразование PostgrestMap -> Map<String, dynamic>
+      Map<String, dynamic>? profile;
+      if (row == null) {
+        profile = null;
+      } else if (row is Map) {
+        profile = Map<String, dynamic>.from(row as Map);
+      } else {
+        // fallback через сериализацию, если тип необычный
+        try {
+          profile = Map<String, dynamic>.from(jsonDecode(jsonEncode(row)));
+        } catch (_) {
+          profile = null;
+        }
+      }
+
+      setState(() => _profile = profile);
     } catch (e) {
+      setState(() => _profile = null);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
     } finally {
       setState(() => _loading = false);
@@ -881,7 +899,7 @@ class _EnterprisesTabState extends State<EnterprisesTab> {
     try {
       final res = await supabase.from('enterprises').select('id, title, created_at').order('created_at', ascending: false);
       if (res is List) {
-        _enterprises = List<Map<String, dynamic>>.from(res.map((e) => Map<String, dynamic>.from(e)));
+        _enterprises = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
       } else {
         _enterprises = [];
       }
@@ -910,8 +928,7 @@ class _EnterprisesTabState extends State<EnterprisesTab> {
     try {
       final ent = await supabase.from('enterprises').insert({'title': name}).select().maybeSingle();
       if (ent == null) throw 'Не удалось создать предприятие';
-      final entId = ent['id'];
-      // Prepare shares batch: resolve usernames to user ids
+      final entId = (ent as Map)['id'];
       final List<Map<String, dynamic>> sharesBatch = [];
       for (final s in shares) {
         final username = s['user']?.toString();
@@ -921,7 +938,7 @@ class _EnterprisesTabState extends State<EnterprisesTab> {
         if (pct == null) continue;
         final u = await supabase.from('user_credentials').select('id, telegram_username').eq('telegram_username', username).maybeSingle();
         if (u == null) continue;
-        sharesBatch.add({'enterprise_id': entId, 'user_id': u['id'], 'percent': pct});
+        sharesBatch.add({'enterprise_id': entId, 'user_id': (u as Map)['id'], 'percent': pct});
       }
 
       if (sharesBatch.isNotEmpty) {
@@ -939,7 +956,7 @@ class _EnterprisesTabState extends State<EnterprisesTab> {
     final entId = ent['id'];
     try {
       final sharesRes = await supabase.from('enterprise_shares').select('id, user_id, percent, meta, created_at').eq('enterprise_id', entId);
-      final shares = (sharesRes is List) ? List<Map<String, dynamic>>.from(sharesRes.map((e) => Map<String, dynamic>.from(e))) : <Map<String, dynamic>>[];
+      final shares = (sharesRes is List) ? sharesRes.map((e) => Map<String, dynamic>.from(e as Map)).toList() : <Map<String, dynamic>>[];
 
       await showDialog<void>(
         context: context,
@@ -1056,7 +1073,6 @@ class _BulkTabState extends State<BulkTab> {
     if (text.isEmpty) return;
     try {
       final doc = jsonDecode(text);
-      // Ожидаемый формат: [{ "username":"alice", "set": { "v_balance": 10, "inventory": {...} } }, ...]
       if (doc is List) {
         for (final el in doc) {
           final username = el['username']?.toString();
