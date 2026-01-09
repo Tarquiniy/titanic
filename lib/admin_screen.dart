@@ -332,8 +332,10 @@ class _PollsAuctionsTabState extends State<PollsAuctionsTab> {
 
   List<Map<String, dynamic>> _polls = [];
   List<Map<String, dynamic>> _auctions = [];
+  List<Map<String, dynamic>> _users = []; // для выбора участников
   bool _loadingPolls = false;
   bool _loadingAuctions = false;
+  bool _loadingUsers = false;
 
   @override
   void initState() {
@@ -342,7 +344,24 @@ class _PollsAuctionsTabState extends State<PollsAuctionsTab> {
   }
 
   Future<void> _refreshAll() async {
-    await Future.wait([_loadPolls(), _loadAuctions()]);
+    await Future.wait([_loadUsers(), _loadPolls(), _loadAuctions()]);
+  }
+
+  Future<void> _loadUsers() async {
+    setState(() => _loadingUsers = true);
+    try {
+      final res = await supabase.from('user_credentials').select('id, telegram_username, first_name, last_name').order('telegram_username');
+      if (res is List) {
+        _users = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      } else {
+        _users = [];
+      }
+    } catch (e) {
+      _users = [];
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка загрузки пользователей: $e')));
+    } finally {
+      setState(() => _loadingUsers = false);
+    }
   }
 
   Future<void> _loadPolls() async {
@@ -379,10 +398,17 @@ class _PollsAuctionsTabState extends State<PollsAuctionsTab> {
     }
   }
 
-  // эти методы вызываются также из AppBar через GlobalKey
+  // создание опроса — открывает диалог с возможностью выбора пользователей
   Future<void> _createPoll() async {
-    final payload = await showDialog<Map<String, dynamic>>(context: context, builder: (_) => const _CreatePollDialog());
+    // перед открытием диалога убедимся, что список пользователей загружен
+    if (_users.isEmpty) await _loadUsers();
+
+    final payload = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (_) => _CreatePollDialog(availableUsers: _users),
+    );
     if (payload == null) return;
+
     try {
       final pollInsert = {
         'title': payload['title'],
@@ -393,10 +419,17 @@ class _PollsAuctionsTabState extends State<PollsAuctionsTab> {
       if (pollRes == null) throw 'Не удалось создать опрос';
       final pollId = (pollRes as Map)['id'];
       final List options = payload['options'] ?? [];
+      final List participants = payload['participants'] ?? [];
 
       if (options.isNotEmpty) {
         final List<Map<String, dynamic>> batch = options.map((o) => {'poll_id': pollId, 'label': o}).toList();
         await supabase.from('poll_options').insert(batch);
+      }
+
+      if (participants.isNotEmpty) {
+        // participants — список user_id
+        final List<Map<String, dynamic>> pBatch = participants.map((u) => {'poll_id': pollId, 'user_id': u}).toList();
+        await supabase.from('poll_participants').insert(pBatch);
       }
 
       await _loadPolls();
@@ -406,18 +439,37 @@ class _PollsAuctionsTabState extends State<PollsAuctionsTab> {
     }
   }
 
+  // создание аукциона — открывает диалог с выбором участников и указанием предмета + количества
   Future<void> _createAuction() async {
-    final payload = await showDialog<Map<String, dynamic>>(context: context, builder: (_) => const _CreateAuctionDialog());
+    if (_users.isEmpty) await _loadUsers();
+
+    final payload = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (_) => _CreateAuctionDialog(availableUsers: _users),
+    );
     if (payload == null) return;
+
     try {
-      final auction = {
+      final itemName = (payload['itemName'] ?? '').toString();
+      final itemCountRaw = payload['itemCount'];
+      final int itemCount = (itemCountRaw is int) ? itemCountRaw : int.tryParse(itemCountRaw?.toString() ?? '') ?? 1;
+      final auctionInsert = {
         'title': payload['title'],
-        'item': payload['item'] ?? {},
+        'item': {'name': itemName, 'count': itemCount},
         'starts_at': payload['startsAt']?.toIso8601String(),
         'ends_at': payload['endsAt']?.toIso8601String(),
         'is_closed': true,
       };
-      await supabase.from('auctions').insert(auction);
+      final auctionRes = await supabase.from('auctions').insert(auctionInsert).select().maybeSingle();
+      if (auctionRes == null) throw 'Не удалось создать аукцион';
+      final auctionId = (auctionRes as Map)['id'];
+      final List participants = payload['participants'] ?? [];
+
+      if (participants.isNotEmpty) {
+        final List<Map<String, dynamic>> pBatch = participants.map((u) => {'auction_id': auctionId, 'user_id': u}).toList();
+        await supabase.from('auction_participants').insert(pBatch);
+      }
+
       await _loadAuctions();
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Аукцион создан')));
     } catch (e) {
@@ -433,6 +485,7 @@ class _PollsAuctionsTabState extends State<PollsAuctionsTab> {
       final options = (optionsRes is List) ? optionsRes.map((e) => Map<String, dynamic>.from(e as Map)).toList() : <Map<String, dynamic>>[];
       final votes = (votesRes is List) ? votesRes.map((e) => Map<String, dynamic>.from(e as Map)).toList() : <Map<String, dynamic>>[];
 
+      // Count votes per option
       final Map<dynamic, int> counts = {};
       for (final v in votes) {
         final opt = v['option_id'];
@@ -632,8 +685,10 @@ class _PollsAuctionsTabState extends State<PollsAuctionsTab> {
   }
 }
 
+/// ДИАЛОГ СОЗДАНИЯ ОПРОСА
 class _CreatePollDialog extends StatefulWidget {
-  const _CreatePollDialog({Key? key}) : super(key: key);
+  final List<Map<String, dynamic>> availableUsers;
+  const _CreatePollDialog({required this.availableUsers, Key? key}) : super(key: key);
   @override
   State<_CreatePollDialog> createState() => _CreatePollDialogState();
 }
@@ -643,6 +698,8 @@ class _CreatePollDialogState extends State<_CreatePollDialog> {
   final _optionCtrl = TextEditingController();
   List<String> _options = [];
   bool _isClosed = true;
+  // participants — список user_id
+  final Set<dynamic> _participants = {};
 
   @override
   void dispose() {
@@ -666,8 +723,16 @@ class _CreatePollDialogState extends State<_CreatePollDialog> {
     });
   }
 
+  void _toggleParticipant(dynamic id) {
+    setState(() {
+      if (_participants.contains(id)) _participants.remove(id);
+      else _participants.add(id);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
+    final users = widget.availableUsers;
     return AlertDialog(
       title: const Text('Создать опрос'),
       content: SingleChildScrollView(
@@ -688,6 +753,30 @@ class _CreatePollDialogState extends State<_CreatePollDialog> {
               trailing: IconButton(icon: const Icon(Icons.delete), onPressed: () => _removeOptionAt(idx)),
             );
           }).toList(),
+          const Divider(),
+          const Align(alignment: Alignment.centerLeft, child: Text('Выбрать участников (необязательно):')),
+          SizedBox(
+            height: 200,
+            width: double.maxFinite,
+            child: users.isEmpty
+                ? const Center(child: Text('Пользователи не загружены'))
+                : ListView.builder(
+                    itemCount: users.length,
+                    itemBuilder: (context, i) {
+                      final u = users[i];
+                      final display = (u['first_name'] ?? '').toString().isNotEmpty
+                          ? '${u['first_name']} ${u['last_name'] ?? ''} (${u['telegram_username'] ?? u['id']})'
+                          : (u['telegram_username'] ?? u['id']).toString();
+                      final id = u['id'];
+                      return CheckboxListTile(
+                        dense: true,
+                        value: _participants.contains(id),
+                        title: Text(display),
+                        onChanged: (_) => _toggleParticipant(id),
+                      );
+                    },
+                  ),
+          ),
           const SizedBox(height: 8),
           Row(children: [
             const Text('Закрытый (только админ смотрит результаты)'),
@@ -704,7 +793,12 @@ class _CreatePollDialogState extends State<_CreatePollDialog> {
               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Название и варианты обязательны')));
               return;
             }
-            Navigator.of(context).pop({'title': _title.text.trim(), 'options': _options, 'isClosed': _isClosed});
+            Navigator.of(context).pop({
+              'title': _title.text.trim(),
+              'options': _options,
+              'isClosed': _isClosed,
+              'participants': _participants.toList(),
+            });
           },
           child: const Text('Создать'),
         ),
@@ -713,22 +807,27 @@ class _CreatePollDialogState extends State<_CreatePollDialog> {
   }
 }
 
+/// ДИАЛОГ СОЗДАНИЯ АУКЦИОНА
 class _CreateAuctionDialog extends StatefulWidget {
-  const _CreateAuctionDialog({Key? key}) : super(key: key);
+  final List<Map<String, dynamic>> availableUsers;
+  const _CreateAuctionDialog({required this.availableUsers, Key? key}) : super(key: key);
   @override
   State<_CreateAuctionDialog> createState() => _CreateAuctionDialogState();
 }
 
 class _CreateAuctionDialogState extends State<_CreateAuctionDialog> {
   final _title = TextEditingController();
-  final _item = TextEditingController();
+  final _itemName = TextEditingController();
+  final _itemCountCtrl = TextEditingController(text: '1');
   DateTime? _startsAt;
   DateTime? _endsAt;
+  final Set<dynamic> _participants = {};
 
   @override
   void dispose() {
     _title.dispose();
-    _item.dispose();
+    _itemName.dispose();
+    _itemCountCtrl.dispose();
     super.dispose();
   }
 
@@ -745,36 +844,80 @@ class _CreateAuctionDialogState extends State<_CreateAuctionDialog> {
     });
   }
 
+  void _toggleParticipant(dynamic id) {
+    setState(() {
+      if (_participants.contains(id)) _participants.remove(id);
+      else _participants.add(id);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
+    final users = widget.availableUsers;
     return AlertDialog(
       title: const Text('Создать аукцион'),
       content: SingleChildScrollView(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          TextField(controller: _title, decoration: const InputDecoration(labelText: 'Заголовок')),
+          TextField(controller: _title, decoration: const InputDecoration(labelText: 'Заголовок аукциона')),
           const SizedBox(height: 8),
-          TextField(controller: _item, decoration: const InputDecoration(labelText: 'Item JSON (пример: {"name":"sword","count":1})')),
+          TextField(controller: _itemName, decoration: const InputDecoration(labelText: 'Название предмета')),
+          const SizedBox(height: 8),
+          TextField(controller: _itemCountCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Количество (целое)')),
           const SizedBox(height: 12),
           Row(children: [
             ElevatedButton(onPressed: () => _pickDate(true), child: Text(_startsAt == null ? 'Выбрать старт' : _startsAt!.toString())),
             const SizedBox(width: 8),
             ElevatedButton(onPressed: () => _pickDate(false), child: Text(_endsAt == null ? 'Выбрать конец' : _endsAt!.toString())),
           ]),
+          const Divider(),
+          const Align(alignment: Alignment.centerLeft, child: Text('Выбрать участников (необязательно):')),
+          SizedBox(
+            height: 200,
+            width: double.maxFinite,
+            child: users.isEmpty
+                ? const Center(child: Text('Пользователи не загружены'))
+                : ListView.builder(
+                    itemCount: users.length,
+                    itemBuilder: (context, i) {
+                      final u = users[i];
+                      final display = (u['first_name'] ?? '').toString().isNotEmpty
+                          ? '${u['first_name']} ${u['last_name'] ?? ''} (${u['telegram_username'] ?? u['id']})'
+                          : (u['telegram_username'] ?? u['id']).toString();
+                      final id = u['id'];
+                      return CheckboxListTile(
+                        dense: true,
+                        value: _participants.contains(id),
+                        title: Text(display),
+                        onChanged: (_) => _toggleParticipant(id),
+                      );
+                    },
+                  ),
+          ),
         ]),
       ),
       actions: [
         TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Отмена')),
         ElevatedButton(
           onPressed: () {
-            if (_title.text.trim().isEmpty) {
+            final title = _title.text.trim();
+            final itemName = _itemName.text.trim();
+            final itemCount = int.tryParse(_itemCountCtrl.text.trim()) ?? 1;
+            if (title.isEmpty) {
               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Заголовок обязателен')));
               return;
             }
-            Map itemJson = {};
-            try {
-              itemJson = jsonDecode(_item.text);
-            } catch (_) {}
-            Navigator.of(context).pop({'title': _title.text.trim(), 'item': itemJson, 'startsAt': _startsAt, 'endsAt': _endsAt});
+            if (itemName.isEmpty) {
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Название предмета обязательно')));
+              return;
+            }
+            Navigator.of(context).pop({
+              'title': title,
+              'itemName': itemName,
+              'itemCount': itemCount,
+              'startsAt': _startsAt,
+              'endsAt': _endsAt,
+              'participants': _participants.toList(),
+            });
           },
           child: const Text('Создать'),
         ),
@@ -805,14 +948,12 @@ class _InventoryTabState extends State<InventoryTab> {
           .eq('telegram_username', _usernameCtrl.text.trim())
           .maybeSingle();
 
-      // Безопасное преобразование PostgrestMap -> Map<String, dynamic>
       Map<String, dynamic>? profile;
       if (row == null) {
         profile = null;
       } else if (row is Map) {
         profile = Map<String, dynamic>.from(row as Map);
       } else {
-        // fallback через сериализацию, если тип необычный
         try {
           profile = Map<String, dynamic>.from(jsonDecode(jsonEncode(row)));
         } catch (_) {
