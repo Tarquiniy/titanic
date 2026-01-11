@@ -446,6 +446,60 @@ class _PollsAuctionsTabState extends State<PollsAuctionsTab> {
     }
   }
 
+  Future<void> _editPoll(Map<String, dynamic> poll) async {
+    if (_users.isEmpty) await _loadUsers();
+
+    // load existing options & participants
+    final pollId = poll['id'];
+    List<Map<String, dynamic>> options = [];
+    List<dynamic> participants = [];
+    try {
+      final optsRes = await supabase.from('poll_options').select('id, label').eq('poll_id', pollId).order('id');
+      if (optsRes is List) options = optsRes.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      final partsRes = await supabase.from('poll_participants').select('user_id').eq('poll_id', pollId);
+      if (partsRes is List) participants = partsRes.map((e) => (e as Map)['user_id']).toList();
+    } catch (_) {}
+
+    final initial = {
+      'title': poll['title'] ?? '',
+      'options': options.map((o) => o['label'].toString()).toList(),
+      'participants': participants,
+      'isClosed': poll['is_closed'] ?? true,
+    };
+
+    final payload = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (_) => _EditPollDialog(availableUsers: _users, initial: initial),
+    );
+    if (payload == null) return;
+
+    try {
+      // update poll row
+      await supabase.from('polls').update({'title': payload['title'], 'is_closed': payload['isClosed']}).eq('id', pollId);
+
+      // replace options
+      await supabase.from('poll_options').delete().eq('poll_id', pollId);
+      final List opts = payload['options'] ?? [];
+      if (opts.isNotEmpty) {
+        final batch = opts.map((o) => {'poll_id': pollId, 'label': o}).toList();
+        await supabase.from('poll_options').insert(batch);
+      }
+
+      // replace participants
+      await supabase.from('poll_participants').delete().eq('poll_id', pollId);
+      final List parts = payload['participants'] ?? [];
+      if (parts.isNotEmpty) {
+        final pBatch = parts.map((u) => {'poll_id': pollId, 'user_id': u}).toList();
+        await supabase.from('poll_participants').insert(pBatch);
+      }
+
+      await _loadPolls();
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Опрос обновлён')));
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка обновления опроса: $e')));
+    }
+  }
+
   // создание аукциона — открывает диалог с выбором участников и указанием предмета + количества
   Future<void> _createAuction() async {
     if (_users.isEmpty) await _loadUsers();
@@ -479,12 +533,11 @@ class _PollsAuctionsTabState extends State<PollsAuctionsTab> {
 
       await _loadAuctions();
 
-      // показать подробности созданного аукциона
+      // показать подробности созданного аукциона (конвертируем безопасно)
       final created = await supabase.from('auctions').select('id, title, item, starts_at, ends_at, is_closed, created_at').eq('id', auctionId).maybeSingle();
       Map<String, dynamic>? createdMap;
       if (created != null) {
         try {
-          // безопасно сконвертировать PostgrestMap/динамический ответ в Map<String, dynamic>
           createdMap = Map<String, dynamic>.from(jsonDecode(jsonEncode(created)));
         } catch (_) {
           createdMap = null;
@@ -513,10 +566,30 @@ class _PollsAuctionsTabState extends State<PollsAuctionsTab> {
       final options = (optionsRes is List) ? optionsRes.map((e) => Map<String, dynamic>.from(e as Map)).toList() : <Map<String, dynamic>>[];
       final votes = (votesRes is List) ? votesRes.map((e) => Map<String, dynamic>.from(e as Map)).toList() : <Map<String, dynamic>>[];
 
+      // Count votes per option
       final Map<dynamic, int> counts = {};
       for (final v in votes) {
         final opt = v['option_id'];
         counts[opt] = (counts[opt] ?? 0) + 1;
+      }
+
+      // participants list
+      final partsRes = await supabase.from('poll_participants').select('user_id').eq('poll_id', pollId);
+      final participants = (partsRes is List) ? partsRes.map((e) => (e as Map)['user_id']).toList() : <dynamic>[];
+      final List<String> participantNames = [];
+      if (participants.isNotEmpty) {
+        try {
+          final ids = participants.map((p) => p.toString()).toList();
+          final orQuery = ids.map((id) => 'id.eq.$id').join(',');
+          final res = await supabase.from('user_credentials').select('id, telegram_username, first_name, last_name').or(orQuery);
+          if (res is List) {
+            for (final u in res) {
+              final um = Map<String, dynamic>.from(u as Map);
+              final display = (um['first_name'] ?? '').toString().isNotEmpty ? '${um['first_name']} ${um['last_name'] ?? ''} (${um['telegram_username'] ?? um['id']})' : (um['telegram_username'] ?? um['id']).toString();
+              participantNames.add(display);
+            }
+          }
+        } catch (_) {}
       }
 
       await showDialog<void>(
@@ -537,11 +610,15 @@ class _PollsAuctionsTabState extends State<PollsAuctionsTab> {
                 );
               }).toList(),
               const Divider(),
+              Text('Участники (${participantNames.length}):'),
+              if (participantNames.isEmpty) const Text('— нет участников (открытый опрос)'),
+              if (participantNames.isNotEmpty) ...participantNames.map((n) => Padding(padding: const EdgeInsets.symmetric(vertical: 2.0), child: Text(n))).toList(),
+              const Divider(),
               Text('Всего голосов: ${votes.length}'),
               if (votes.isNotEmpty) const SizedBox(height: 8),
               if (votes.isNotEmpty)
                 SizedBox(
-                  height: 200,
+                  height: 160,
                   child: ListView.builder(
                     itemCount: votes.length,
                     itemBuilder: (context, i) {
@@ -559,6 +636,13 @@ class _PollsAuctionsTabState extends State<PollsAuctionsTab> {
           ),
           actions: [
             TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Закрыть')),
+            TextButton(
+              onPressed: () async {
+                Navigator.of(context).pop();
+                await _editPoll(poll);
+              },
+              child: const Text('Редактировать'),
+            ),
             TextButton(
                 onPressed: () async {
                   try {
@@ -590,7 +674,6 @@ class _PollsAuctionsTabState extends State<PollsAuctionsTab> {
       final List<String> participantNames = [];
       if (participants.isNotEmpty) {
         try {
-          // Построим or-запрос вида "id.eq.1,id.eq.2" — это совместимо с postgrest `.or(...)`
           final ids = participants.map((p) => p.toString()).toList();
           final orQuery = ids.map((id) => 'id.eq.$id').join(',');
           final res = await supabase.from('user_credentials').select('id, telegram_username, first_name, last_name').or(orQuery);
@@ -601,9 +684,7 @@ class _PollsAuctionsTabState extends State<PollsAuctionsTab> {
               participantNames.add(display);
             }
           }
-        } catch (_) {
-          // если or не поддерживается или что-то пошло не так, оставим список пустым
-        }
+        } catch (_) {}
       }
 
       dynamic item = auction['item'];
@@ -788,6 +869,9 @@ class _PollsAuctionsTabState extends State<PollsAuctionsTab> {
                                 title: Text(p['title'] ?? 'Без названия'),
                                 subtitle: Text('id: ${p['id']}  closed: ${p['is_closed'] ?? true}'),
                                 onTap: () => _viewPollDetails(p),
+                                trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                                  IconButton(icon: const Icon(Icons.edit), onPressed: () => _editPoll(p)),
+                                ]),
                               );
                             },
                           ),
@@ -847,6 +931,7 @@ class _CreatePollDialogState extends State<_CreatePollDialog> {
   final _optionCtrl = TextEditingController();
   List<String> _options = [];
   bool _isClosed = true;
+  // participants — список user_id
   final Set<dynamic> _participants = {};
 
   @override
@@ -949,6 +1034,139 @@ class _CreatePollDialogState extends State<_CreatePollDialog> {
             });
           },
           child: const Text('Создать'),
+        ),
+      ],
+    );
+  }
+}
+
+/// ДИАЛОГ РЕДАКТИРОВАНИЯ ОПРОСА
+class _EditPollDialog extends StatefulWidget {
+  final List<Map<String, dynamic>> availableUsers;
+  final Map<String, dynamic> initial;
+  const _EditPollDialog({required this.availableUsers, required this.initial, Key? key}) : super(key: key);
+  @override
+  State<_EditPollDialog> createState() => _EditPollDialogState();
+}
+
+class _EditPollDialogState extends State<_EditPollDialog> {
+  late TextEditingController _title;
+  final _optionCtrl = TextEditingController();
+  List<String> _options = [];
+  final Set<dynamic> _participants = {};
+  bool _isClosed = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _title = TextEditingController(text: widget.initial['title']?.toString() ?? '');
+    final opts = widget.initial['options'] as List<dynamic>? ?? [];
+    _options = opts.map((e) => e.toString()).toList();
+    final parts = widget.initial['participants'] as List<dynamic>? ?? [];
+    _participants.addAll(parts);
+    _isClosed = widget.initial['isClosed'] ?? true;
+  }
+
+  @override
+  void dispose() {
+    _title.dispose();
+    _optionCtrl.dispose();
+    super.dispose();
+  }
+
+  void _addOption() {
+    final t = _optionCtrl.text.trim();
+    if (t.isEmpty) return;
+    setState(() {
+      _options.add(t);
+      _optionCtrl.clear();
+    });
+  }
+
+  void _removeOptionAt(int index) {
+    setState(() {
+      _options.removeAt(index);
+    });
+  }
+
+  void _toggleParticipant(dynamic id) {
+    setState(() {
+      if (_participants.contains(id)) _participants.remove(id);
+      else _participants.add(id);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final users = widget.availableUsers;
+    return AlertDialog(
+      title: const Text('Редактировать опрос'),
+      content: SingleChildScrollView(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(controller: _title, decoration: const InputDecoration(labelText: 'Заголовок')),
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(child: TextField(controller: _optionCtrl, decoration: const InputDecoration(hintText: 'Вариант'))),
+            IconButton(icon: const Icon(Icons.add), onPressed: _addOption),
+          ]),
+          const SizedBox(height: 8),
+          if (_options.isEmpty) const Text('Варианты отсутствуют'),
+          ..._options.asMap().entries.map((e) {
+            final idx = e.key;
+            final val = e.value;
+            return ListTile(
+              title: Text(val),
+              trailing: IconButton(icon: const Icon(Icons.delete), onPressed: () => _removeOptionAt(idx)),
+            );
+          }).toList(),
+          const Divider(),
+          const Align(alignment: Alignment.centerLeft, child: Text('Участники (необязательно)')),
+          SizedBox(
+            height: 200,
+            width: double.maxFinite,
+            child: users.isEmpty
+                ? const Center(child: Text('Пользователи не загружены'))
+                : ListView.builder(
+                    itemCount: users.length,
+                    itemBuilder: (context, i) {
+                      final u = users[i];
+                      final display = (u['first_name'] ?? '').toString().isNotEmpty
+                          ? '${u['first_name']} ${u['last_name'] ?? ''} (${u['telegram_username'] ?? u['id']})'
+                          : (u['telegram_username'] ?? u['id']).toString();
+                      final id = u['id'];
+                      return CheckboxListTile(
+                        dense: true,
+                        value: _participants.contains(id),
+                        title: Text(display),
+                        onChanged: (_) => _toggleParticipant(id),
+                      );
+                    },
+                  ),
+          ),
+          const SizedBox(height: 8),
+          Row(children: [
+            const Text('Закрытый (только админ смотрит результаты)'),
+            const SizedBox(width: 8),
+            Switch(value: _isClosed, onChanged: (v) => setState(() => _isClosed = v)),
+          ]),
+        ]),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Отмена')),
+        ElevatedButton(
+          onPressed: () {
+            if (_title.text.trim().isEmpty || _options.isEmpty) {
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Название и варианты обязательны')));
+              return;
+            }
+            Navigator.of(context).pop({
+              'title': _title.text.trim(),
+              'options': _options,
+              'participants': _participants.toList(),
+              'isClosed': _isClosed,
+            });
+          },
+          child: const Text('Сохранить'),
         ),
       ],
     );
@@ -1305,7 +1523,6 @@ class EnterprisesTab extends StatefulWidget {
 class _EnterprisesTabState extends State<EnterprisesTab> {
   final supabase = Supabase.instance.client;
   final _nameCtrl = TextEditingController();
-  final _sharesController = TextEditingController(); // ожидаем JSON [{ "user":"username","pct":50 }, ...]
   bool _loading = false;
   List<Map<String, dynamic>> _enterprises = [];
 
@@ -1333,7 +1550,8 @@ class _EnterprisesTabState extends State<EnterprisesTab> {
   }
 
   Future<void> _openCreateEnterpriseDialog() async {
-    final payload = await showDialog<Map<String, dynamic>>(context: context, builder: (_) => const _CreateEnterpriseDialog());
+    // dialog will fetch users itself
+    final payload = await showDialog<Map<String, dynamic>>(context: context, builder: (_) => _CreateEnterpriseDialog());
     if (payload == null) return;
     await _createEnterprise(payload);
   }
@@ -1352,14 +1570,12 @@ class _EnterprisesTabState extends State<EnterprisesTab> {
       final entId = (ent as Map)['id'];
       final List<Map<String, dynamic>> sharesBatch = [];
       for (final s in shares) {
-        final username = s['user']?.toString();
+        final userId = s['user_id'];
         final pctRaw = s['pct'];
-        if (username == null || pctRaw == null) continue;
+        if (userId == null || pctRaw == null) continue;
         final pct = (pctRaw is num) ? pctRaw : double.tryParse(pctRaw.toString());
         if (pct == null) continue;
-        final u = await supabase.from('user_credentials').select('id, telegram_username').eq('telegram_username', username).maybeSingle();
-        if (u == null) continue;
-        sharesBatch.add({'enterprise_id': entId, 'user_id': (u as Map)['id'], 'percent': pct});
+        sharesBatch.add({'enterprise_id': entId, 'user_id': userId, 'percent': pct});
       }
 
       if (sharesBatch.isNotEmpty) {
@@ -1373,11 +1589,58 @@ class _EnterprisesTabState extends State<EnterprisesTab> {
     }
   }
 
+  Future<void> _editEnterprise(Map<String, dynamic> ent) async {
+    // load shares and users
+    try {
+      final sharesRes = await supabase.from('enterprise_shares').select('id, user_id, percent').eq('enterprise_id', ent['id']);
+      List<Map<String, dynamic>> shares = (sharesRes is List) ? sharesRes.map((e) => Map<String, dynamic>.from(e as Map)).toList() : [];
+      final payload = await showDialog<Map<String, dynamic>>(
+        context: context,
+        builder: (_) => _EditEnterpriseDialog(initialTitle: ent['title'] ?? '', initialShares: shares),
+      );
+      if (payload == null) return;
+      // update title
+      await supabase.from('enterprises').update({'title': payload['title']}).eq('id', ent['id']);
+      // replace shares
+      await supabase.from('enterprise_shares').delete().eq('enterprise_id', ent['id']);
+      final List sharesList = payload['shares'] ?? [];
+      if (sharesList.isNotEmpty) {
+        final batch = sharesList.map((s) => {'enterprise_id': ent['id'], 'user_id': s['user_id'], 'percent': s['pct']}).toList();
+        await supabase.from('enterprise_shares').insert(batch);
+      }
+      await _loadEnterprises();
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Предприятие обновлено')));
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка редактирования предприятия: $e')));
+    }
+  }
+
   Future<void> _viewEnterpriseDetails(Map<String, dynamic> ent) async {
     final entId = ent['id'];
     try {
       final sharesRes = await supabase.from('enterprise_shares').select('id, user_id, percent, meta, created_at').eq('enterprise_id', entId);
       final shares = (sharesRes is List) ? sharesRes.map((e) => Map<String, dynamic>.from(e as Map)).toList() : <Map<String, dynamic>>[];
+
+      // load user names for shares
+      final List<String> lines = [];
+      if (shares.isNotEmpty) {
+        final userIds = shares.map((s) => s['user_id'].toString()).toList();
+        final orQuery = userIds.map((id) => 'id.eq.$id').join(',');
+        final usersRes = await supabase.from('user_credentials').select('id, telegram_username, first_name, last_name').or(orQuery);
+        Map<dynamic, Map<String, dynamic>> userById = {};
+        if (usersRes is List) {
+          for (final u in usersRes) {
+            final um = Map<String, dynamic>.from(u as Map);
+            userById[um['id']] = um;
+          }
+        }
+        for (final s in shares) {
+          final uid = s['user_id'];
+          final u = userById[uid];
+          final name = (u != null && (u['first_name'] ?? '').toString().isNotEmpty) ? '${u['first_name']} ${u['last_name'] ?? ''} (${u['telegram_username'] ?? u['id']})' : (u != null ? (u['telegram_username'] ?? u['id']).toString() : uid.toString());
+          lines.add('$name — ${s['percent']}%');
+        }
+      }
 
       await showDialog<void>(
         context: context,
@@ -1391,26 +1654,11 @@ class _EnterprisesTabState extends State<EnterprisesTab> {
                 SizedBox(
                   height: 240,
                   child: ListView.builder(
-                    itemCount: shares.length,
+                    itemCount: lines.length,
                     itemBuilder: (context, i) {
-                      final s = shares[i];
+                      final line = lines[i];
                       return ListTile(
-                        title: Text('user id: ${s['user_id']}'),
-                        subtitle: Text('percent: ${s['percent']}'),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.delete_forever),
-                          onPressed: () async {
-                            try {
-                              await supabase.from('enterprise_shares').delete().eq('id', s['id']);
-                              Navigator.of(context).pop();
-                              await _viewEnterpriseDetails(ent); // reopen to refresh
-                              await _loadEnterprises();
-                              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Доля удалена')));
-                            } catch (e) {
-                              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка удаления: $e')));
-                            }
-                          },
-                        ),
+                        title: Text(line),
                       );
                     },
                   ),
@@ -1419,6 +1667,12 @@ class _EnterprisesTabState extends State<EnterprisesTab> {
           ),
           actions: [
             TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Закрыть')),
+            TextButton(
+                onPressed: () async {
+                  Navigator.of(context).pop();
+                  await _editEnterprise(ent);
+                },
+                child: const Text('Редактировать')),
             TextButton(
                 onPressed: () async {
                   try {
@@ -1442,7 +1696,6 @@ class _EnterprisesTabState extends State<EnterprisesTab> {
   @override
   void dispose() {
     _nameCtrl.dispose();
-    _sharesController.dispose();
     super.dispose();
   }
 
@@ -1469,6 +1722,7 @@ class _EnterprisesTabState extends State<EnterprisesTab> {
                       title: Text(e['title'] ?? 'Без названия'),
                       subtitle: Text('id: ${e['id']}'),
                       onTap: () => _viewEnterpriseDetails(e),
+                      trailing: IconButton(icon: const Icon(Icons.edit), onPressed: () => _editEnterprise(e)),
                     );
                   },
                 ),
@@ -1560,7 +1814,7 @@ class _BulkJsonDialogState extends State<_BulkJsonDialog> {
   }
 }
 
-// ----------------- Create Enterprise Dialog -----------------
+// ----------------- Create Enterprise Dialog (friendly UI) -----------------
 class _CreateEnterpriseDialog extends StatefulWidget {
   const _CreateEnterpriseDialog({Key? key}) : super(key: key);
   @override
@@ -1568,14 +1822,53 @@ class _CreateEnterpriseDialog extends StatefulWidget {
 }
 
 class _CreateEnterpriseDialogState extends State<_CreateEnterpriseDialog> {
+  final supabase = Supabase.instance.client;
   final _titleCtrl = TextEditingController();
-  final _sharesCtrl = TextEditingController(text: '[{"user":"alice","pct":50},{"user":"bob","pct":50}]');
+  List<Map<String, dynamic>> _users = [];
+  bool _loading = true;
+  final Map<dynamic, TextEditingController> _pctCtrls = {};
+  final Set<dynamic> _selected = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchUsers();
+  }
+
+  Future<void> _fetchUsers() async {
+    setState(() => _loading = true);
+    try {
+      final res = await supabase.from('user_credentials').select('id, telegram_username, first_name, last_name').order('telegram_username');
+      if (res is List) {
+        _users = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      } else {
+        _users = [];
+      }
+    } catch (_) {
+      _users = [];
+    } finally {
+      setState(() => _loading = false);
+    }
+  }
 
   @override
   void dispose() {
     _titleCtrl.dispose();
-    _sharesCtrl.dispose();
+    for (final c in _pctCtrls.values) {
+      c.dispose();
+    }
     super.dispose();
+  }
+
+  void _toggleSelect(dynamic id) {
+    setState(() {
+      if (_selected.contains(id)) {
+        _selected.remove(id);
+      } else {
+        _selected.add(id);
+        _pctCtrls[id] = TextEditingController(text: '0');
+      }
+    });
   }
 
   void _submit() {
@@ -1584,38 +1877,185 @@ class _CreateEnterpriseDialogState extends State<_CreateEnterpriseDialog> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Название предприятия нужно')));
       return;
     }
-
-    try {
-      final parsed = jsonDecode(_sharesCtrl.text);
-      if (parsed is! List) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Доли должны быть списком объектов')));
-        return;
-      }
-      Navigator.of(context).pop({'title': title, 'shares': parsed});
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка парсинга JSON: $e')));
+    final List shares = [];
+    for (final id in _selected) {
+      final ctrl = _pctCtrls[id];
+      final pct = double.tryParse(ctrl?.text.replaceAll(',', '.') ?? '') ?? 0.0;
+      if (pct <= 0) continue;
+      shares.add({'user_id': id, 'pct': pct});
     }
+    if (shares.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Необходимо указать хотя бы одну долю > 0')));
+      return;
+    }
+    Navigator.of(context).pop({'title': title, 'shares': shares});
   }
 
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Создать предприятие и распределить доли'),
-      content: SingleChildScrollView(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          TextField(controller: _titleCtrl, decoration: const InputDecoration(labelText: 'Название предприятия')),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _sharesCtrl,
-            minLines: 4,
-            maxLines: 8,
-            decoration: const InputDecoration(labelText: 'Доли (JSON) пример [{"user":"alice","pct":50}]'),
-          ),
-        ]),
+      title: const Text('Создать предприятие (удобный интерфейс)'),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: _loading
+            ? const SizedBox(height: 120, child: Center(child: CircularProgressIndicator()))
+            : SingleChildScrollView(
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  TextField(controller: _titleCtrl, decoration: const InputDecoration(labelText: 'Название предприятия')),
+                  const SizedBox(height: 12),
+                  const Align(alignment: Alignment.centerLeft, child: Text('Отметьте пользователей и укажите %:')),
+                  const SizedBox(height: 8),
+                  if (_users.isEmpty) const Text('Нет пользователей'),
+                  ..._users.map((u) {
+                    final id = u['id'];
+                    final display = (u['first_name'] ?? '').toString().isNotEmpty ? '${u['first_name']} ${u['last_name'] ?? ''} (${u['telegram_username'] ?? id})' : (u['telegram_username'] ?? id).toString();
+                    final selected = _selected.contains(id);
+                    final ctrl = _pctCtrls[id] ?? TextEditingController(text: '0');
+                    if (!_pctCtrls.containsKey(id)) _pctCtrls[id] = ctrl;
+                    return Row(children: [
+                      Checkbox(value: selected, onChanged: (_) => _toggleSelect(id)),
+                      Expanded(child: Text(display)),
+                      SizedBox(width: 96, child: TextField(controller: ctrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(suffixText: '%'))),
+                    ]);
+                  }).toList(),
+                ]),
+              ),
       ),
       actions: [
         TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Отмена')),
         ElevatedButton(onPressed: _submit, child: const Text('Создать')),
+      ],
+    );
+  }
+}
+
+// ----------------- Edit Enterprise Dialog -----------------
+class _EditEnterpriseDialog extends StatefulWidget {
+  final String initialTitle;
+  final List<Map<String, dynamic>> initialShares; // {id, user_id, percent}
+  const _EditEnterpriseDialog({required this.initialTitle, required this.initialShares, Key? key}) : super(key: key);
+  @override
+  State<_EditEnterpriseDialog> createState() => _EditEnterpriseDialogState();
+}
+
+class _EditEnterpriseDialogState extends State<_EditEnterpriseDialog> {
+  final supabase = Supabase.instance.client;
+  late TextEditingController _titleCtrl;
+  List<Map<String, dynamic>> _users = [];
+  bool _loading = true;
+
+  // shares editor: each element { user_id, pct }
+  List<Map<String, dynamic>> _shares = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _titleCtrl = TextEditingController(text: widget.initialTitle);
+    _shares = widget.initialShares.map((s) => {'user_id': s['user_id'], 'pct': s['percent']}).toList();
+    _fetchUsers();
+  }
+
+  Future<void> _fetchUsers() async {
+    setState(() => _loading = true);
+    try {
+      final res = await supabase.from('user_credentials').select('id, telegram_username, first_name, last_name').order('telegram_username');
+      if (res is List) {
+        _users = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      } else {
+        _users = [];
+      }
+    } catch (_) {
+      _users = [];
+    } finally {
+      setState(() => _loading = false);
+    }
+  }
+
+  void _addEmptyShare() {
+    setState(() => _shares.add({'user_id': null, 'pct': 0}));
+  }
+
+  void _removeShare(int idx) {
+    setState(() => _shares.removeAt(idx));
+  }
+
+  void _submit() {
+    final title = _titleCtrl.text.trim();
+    if (title.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Название предприятия нужно')));
+      return;
+    }
+    final List out = [];
+    for (final s in _shares) {
+      final uid = s['user_id'];
+      final pctRaw = s['pct'];
+      final pct = (pctRaw is num) ? pctRaw : double.tryParse(pctRaw.toString()) ?? 0.0;
+      if (uid == null || pct <= 0) continue;
+      out.add({'user_id': uid, 'pct': pct});
+    }
+    if (out.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Добавьте хотя бы одну долю > 0')));
+      return;
+    }
+    Navigator.of(context).pop({'title': title, 'shares': out});
+  }
+
+  @override
+  void dispose() {
+    _titleCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Редактировать предприятие'),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: _loading
+            ? const SizedBox(height: 120, child: Center(child: CircularProgressIndicator()))
+            : SingleChildScrollView(
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  TextField(controller: _titleCtrl, decoration: const InputDecoration(labelText: 'Название предприятия')),
+                  const SizedBox(height: 12),
+                  const Align(alignment: Alignment.centerLeft, child: Text('Доли:')),
+                  const SizedBox(height: 8),
+                  ..._shares.asMap().entries.map((entry) {
+                    final idx = entry.key;
+                    final s = entry.value;
+                    final selectedUserId = s['user_id'];
+                    return Row(children: [
+                      Expanded(
+                        child: DropdownButtonFormField<dynamic>(
+                          value: selectedUserId,
+                          items: [
+                            const DropdownMenuItem(value: null, child: Text('- выбрать пользователя -')),
+                            ..._users.map((u) => DropdownMenuItem(value: u['id'], child: Text((u['first_name'] ?? '').toString().isNotEmpty ? '${u['first_name']} ${u['last_name'] ?? ''} (${u['telegram_username'] ?? u['id']})' : (u['telegram_username'] ?? u['id']).toString())))
+                          ],
+                          onChanged: (v) => setState(() => s['user_id'] = v),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      SizedBox(
+                        width: 96,
+                        child: TextFormField(
+                          initialValue: s['pct'].toString(),
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          onChanged: (v) => s['pct'] = double.tryParse(v.replaceAll(',', '.')) ?? 0.0,
+                          decoration: const InputDecoration(suffixText: '%'),
+                        ),
+                      ),
+                      IconButton(icon: const Icon(Icons.delete), onPressed: () => _removeShare(idx)),
+                    ]);
+                  }).toList(),
+                  const SizedBox(height: 8),
+                  Align(alignment: Alignment.centerLeft, child: ElevatedButton(onPressed: _addEmptyShare, child: const Text('Добавить долю'))),
+                ]),
+              ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Отмена')),
+        ElevatedButton(onPressed: _submit, child: const Text('Сохранить')),
       ],
     );
   }
