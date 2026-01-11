@@ -31,6 +31,9 @@ class _HomeScreenState extends State<HomeScreen> {
   String? speechActorId;
   DateTime? speechExpiresAt; // UTC - client lock/unlock time
 
+  // Active life_speech record id (needed for listen RPC)
+  int? _activeSpeechId;
+
   // Поле цвета пользователя (из колонки color в user_credentials)
   String? _userColor;
 
@@ -42,6 +45,15 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // Waiting for server confirm after start_speech
   bool _waitingForServerConfirm = false;
+
+  // Listen state: whether current user already listened to this active speech
+  bool _listenedToThisSpeech = false;
+
+  // Session-level flag: "Нажимал кнопку 'Прослушал речь жизни' в этой сессии" (in-memory)
+  bool _sessionListened = false;
+
+  // while checking or performing listen RPC
+  bool _checkingListen = false;
 
   @override
   void initState() {
@@ -88,7 +100,7 @@ class _HomeScreenState extends State<HomeScreen> {
             lastName: ln is String ? ln : user.lastName,
             vBalance: v is num ? (v).toDouble() : user.vBalance,
             mBalance: m is num ? (m).toDouble() : user.mBalance,
-            color: color is String ? color:user.color,
+            color: color is String ? color : user.color,
           );
           _userColor = color is String ? color : null;
         });
@@ -134,6 +146,8 @@ class _HomeScreenState extends State<HomeScreen> {
             speechActorId = null;
             speechExpiresAt = null; // сбрасываем локальный lock
             _waitingForServerConfirm = false;
+            _activeSpeechId = null;
+            _listenedToThisSpeech = false;
           });
           return;
         }
@@ -141,8 +155,23 @@ class _HomeScreenState extends State<HomeScreen> {
         // Если мы ожидаем подтверждение от сервера — обрабатываем отдельной логикой
         if (_waitingForServerConfirm) {
           if (active) {
+            final life = await supabase
+                .from('life_speeches')
+                .select('id, politician_id, started_at, expires_at')
+                .gte('expires_at', DateTime.now().toIso8601String())
+                .order('started_at', ascending: false)
+                .limit(1)
+                .maybeSingle();
+
+            int? speechId;
+            DateTime? serverExpires;
+            if (life is Map<String, dynamic>) {
+              speechId = (life['id'] is int) ? (life['id'] as int) : int.tryParse(life['id']?.toString() ?? '');
+              serverExpires = life['expires_at'] != null ? DateTime.tryParse(life['expires_at'].toString()) : null;
+            }
+
             final clientNextSlotUtc = _nextYekaterinburg12or20Utc();
-            DateTime applyExpires = expires ?? clientNextSlotUtc;
+            DateTime applyExpires = serverExpires ?? clientNextSlotUtc;
             if (clientNextSlotUtc.isAfter(applyExpires)) applyExpires = clientNextSlotUtc;
 
             setState(() {
@@ -150,7 +179,10 @@ class _HomeScreenState extends State<HomeScreen> {
               speechActorId = actor;
               speechExpiresAt = applyExpires;
               _waitingForServerConfirm = false;
+              _activeSpeechId = speechId;
             });
+
+            await _checkIfListened();
             return;
           } else {
             setState(() {
@@ -158,6 +190,8 @@ class _HomeScreenState extends State<HomeScreen> {
               speechActorId = null;
               speechExpiresAt = null;
               _waitingForServerConfirm = false;
+              _activeSpeechId = null;
+              _listenedToThisSpeech = false;
             });
             return;
           }
@@ -169,16 +203,40 @@ class _HomeScreenState extends State<HomeScreen> {
             speechActive = false;
             speechActorId = null;
             speechExpiresAt = null; // **важно** — доверяем серверу и включаем кнопку
+            _activeSpeechId = null;
+            _listenedToThisSpeech = false;
           });
           return;
         }
 
         // Если сервер сообщает active = true — применяем значения сервера
+        int? speechId;
+        DateTime? serverExpires;
+        try {
+          final life = await supabase
+              .from('life_speeches')
+              .select('id, politician_id, started_at, expires_at')
+              .gte('expires_at', DateTime.now().toIso8601String())
+              .order('started_at', ascending: false)
+              .limit(1)
+              .maybeSingle();
+
+          if (life is Map<String, dynamic>) {
+            speechId = (life['id'] is int) ? (life['id'] as int) : int.tryParse(life['id']?.toString() ?? '');
+            serverExpires = life['expires_at'] != null ? DateTime.tryParse(life['expires_at'].toString()) : expires;
+          }
+        } catch (_) {
+          // ignore
+        }
+
         setState(() {
           speechActive = true;
           speechActorId = actor;
-          speechExpiresAt = expires;
+          speechExpiresAt = serverExpires ?? expires;
+          _activeSpeechId = speechId;
         });
+
+        await _checkIfListened();
       } else {
         // ничего нет — считаем inactive и сбрасываем локально
         if (!_waitingForServerConfirm) {
@@ -186,11 +244,38 @@ class _HomeScreenState extends State<HomeScreen> {
             speechActive = false;
             speechActorId = null;
             speechExpiresAt = null;
+            _activeSpeechId = null;
+            _listenedToThisSpeech = false;
           });
         }
       }
     } catch (_) {
       // ignore errors — оставляем текущее состояние
+    }
+  }
+
+  // -----------------------
+  // Check if current user already listened to current active speech
+  // -----------------------
+  Future<void> _checkIfListened() async {
+    final sid = _activeSpeechId;
+    if (sid == null) {
+      setState(() => _listenedToThisSpeech = false);
+      return;
+    }
+    try {
+      final res = await supabase
+          .from('life_speech_listeners')
+          .select('id')
+          .eq('speech_id', sid)
+          .eq('user_id', user.id)
+          .limit(1)
+          .maybeSingle();
+      setState(() {
+        _listenedToThisSpeech = res != null;
+      });
+    } catch (_) {
+      // ignore
     }
   }
 
@@ -336,7 +421,7 @@ class _HomeScreenState extends State<HomeScreen> {
           'id': 1,
           'active': true,
           'actor_id': user.id,
-          'expires_at': applyExpires.toUtc().toIso8601String(),
+          'expires_at': applyExpires!.toUtc().toIso8601String(),
         };
         await supabase.from('speech_state').upsert(upsertObj).select().maybeSingle();
       } catch (e) {
@@ -346,10 +431,10 @@ class _HomeScreenState extends State<HomeScreen> {
       _showMessage('Речь запущена. Кнопка будет недоступна до ${_formatYe(applyExpires)} (YEKT)');
     } on PostgrestException catch (e) {
       final msg = e.message;
-      if (msg.contains('Speech already active')) {
+      if (msg != null && msg.contains('Speech already active')) {
         await _fetchSpeechState();
       } else {
-        _showMessage(msg);
+        _showMessage(msg ?? e.toString());
         setState(() {
           speechActive = false;
           speechActorId = null;
@@ -379,6 +464,98 @@ class _HomeScreenState extends State<HomeScreen> {
   void _showMessage(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  // -----------------------
+  // Listen speech: UI + RPC
+  // -----------------------
+  bool get _isListenButtonEnabled {
+    if (_checkingListen) return false;
+    if (_sessionListened) return false;
+    if (_listenedToThisSpeech) return false;
+    if (_activeSpeechId == null) return false;
+    if (speechExpiresAt != null && DateTime.now().toUtc().isAfter(speechExpiresAt!)) return false;
+    return true;
+  }
+
+  Future<void> _onListenPressed() async {
+    if (!_isListenButtonEnabled) return;
+    final sid = _activeSpeechId;
+    if (sid == null) {
+      _showMessage('Нет активной речи.');
+      return;
+    }
+
+    final result = await showDialog<_ListenDialogResult>(
+      context: context,
+      builder: (_) => _ListenDialog(defaultN: 1),
+    );
+
+    if (result == null) return;
+
+    setState(() {
+      _checkingListen = true;
+    });
+
+    try {
+      final res = await supabase.rpc('listen_speech', params: {
+        'p_speech_id': sid,
+        'p_user': user.id,
+        'p_agree': result.agree,
+        'p_n': result.n,
+      });
+
+      Map<String, dynamic>? parsed;
+      if (res is Map<String, dynamic>) parsed = res;
+      else if (res is List && res.isNotEmpty && res[0] is Map) parsed = Map<String, dynamic>.from(res[0] as Map);
+      else if (res is String) {
+        try {
+          parsed = Map<String, dynamic>.from(jsonDecode(res) as Map);
+        } catch (_) {
+          parsed = null;
+        }
+      }
+
+      String message = 'Спасибо за прослушивание.';
+      if (parsed != null) {
+        final status = parsed['status']?.toString() ?? '';
+        if (status == 'changed_color') {
+          final newColor = parsed['new_color']?.toString() ?? '';
+          final addedM = parsed['added_m']?.toString() ?? '';
+          message = 'Ваш цвет изменён на $newColor. В банк цвета добавлено $addedM майндов.';
+        } else if (status == 'kept_color') {
+          final addedV = parsed['added_v']?.toString() ?? '';
+          message = 'Спасибо, вы остались верны своему цвету. Вам добавлено $addedV войсов.';
+        } else {
+          message = parsed.toString();
+        }
+      }
+
+      setState(() {
+        _sessionListened = true;
+        _listenedToThisSpeech = true;
+      });
+
+      await _refreshProfile();
+      await _fetchSpeechState();
+
+      await showDialog<void>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Спасибо за участие в речи'),
+          content: Text(message),
+          actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('ОК'))],
+        ),
+      );
+    } on PostgrestException catch (e) {
+      _showMessage(e.message ?? e.toString());
+    } catch (e) {
+      _showMessage(e.toString());
+    } finally {
+      setState(() {
+        _checkingListen = false;
+      });
+    }
   }
 
   // -----------------------
@@ -432,6 +609,23 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Widget _renderListenButton() {
+    final enabled = _isListenButtonEnabled;
+    final label = _sessionListened || _listenedToThisSpeech ? 'Уже прослушал' : 'Прослушал речь жизни';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ElevatedButton(
+          onPressed: enabled ? _onListenPressed : null,
+          style: ElevatedButton.styleFrom(backgroundColor: enabled ? Colors.blueAccent : Colors.grey),
+          child: _checkingListen ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : Text(label),
+        ),
+        if (_sessionListened) Padding(padding: const EdgeInsets.only(top: 6.0), child: Text('Нажималось в этой сессии', style: const TextStyle(fontSize: 12, color: Colors.grey))),
+        if (_listenedToThisSpeech && !_sessionListened) Padding(padding: const EdgeInsets.only(top: 6.0), child: Text('Вы уже прослушали текущую речь', style: const TextStyle(fontSize: 12, color: Colors.grey))),
+      ],
+    );
+  }
+
   Color? _parseHexColor(String? s) {
     if (s == null) return null;
     final str = s.trim();
@@ -440,13 +634,12 @@ class _HomeScreenState extends State<HomeScreen> {
     if (hex.length == 6) {
       hex = 'FF' + hex; // add alpha
     } else if (hex.length == 3) {
-      // shortcut #RGB -> expand
       final r = hex[0];
       final g = hex[1];
       final b = hex[2];
       hex = 'FF' + r + r + g + g + b + b;
     } else if (hex.length == 8) {
-      // ARGB or AARRGGBB? assume AARRGGBB
+      // assume AARRGGBB
     } else {
       return null;
     }
@@ -519,9 +712,13 @@ class _HomeScreenState extends State<HomeScreen> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Открыть: Опросы/Аукционы')));
     });
 
+    // For politicians render start speech button
     if (role == 'politician') {
-      buttons.add(_renderSpeechButton());
+      buttons.add(Padding(padding: const EdgeInsets.symmetric(vertical: 6.0), child: _renderSpeechButton()));
     }
+
+    // Listen button visible to all
+    buttons.add(Padding(padding: const EdgeInsets.symmetric(vertical: 6.0), child: _renderListenButton()));
 
     if (role == 'economist') {
       add('Аналитика / Ставки', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Аналитика'))));
@@ -586,6 +783,72 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Диалог для прослушивания речи: возвращает agree + n
+class _ListenDialogResult {
+  final bool agree;
+  final num n;
+  _ListenDialogResult(this.agree, this.n);
+}
+
+class _ListenDialog extends StatefulWidget {
+  final num defaultN;
+  const _ListenDialog({this.defaultN = 1, Key? key}) : super(key: key);
+
+  @override
+  State<_ListenDialog> createState() => _ListenDialogState();
+}
+
+class _ListenDialogState extends State<_ListenDialog> {
+  bool _agree = false;
+  final _nCtrl = TextEditingController();
+  bool _submitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _nCtrl.text = widget.defaultN.toString();
+  }
+
+  @override
+  void dispose() {
+    _nCtrl.dispose();
+    super.dispose();
+  }
+
+  void _onSubmit() {
+    final n = num.tryParse(_nCtrl.text.trim());
+    if (n == null || n <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Введите корректное положительное число n')));
+      return;
+    }
+    Navigator.of(context).pop(_ListenDialogResult(_agree, n));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Прослушал речь жизни'),
+      content: Column(mainAxisSize: MainAxisSize.min, children: [
+        Row(children: [
+          const Expanded(child: Text('Согласны сменить цвет на цвет политика, произносящего речь?')),
+          const SizedBox(width: 8),
+          Switch(value: _agree, onChanged: (v) => setState(() => _agree = v)),
+        ]),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _nCtrl,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: const InputDecoration(labelText: 'n (количество базовой награды)'),
+        ),
+      ]),
+      actions: [
+        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Отмена')),
+        ElevatedButton(onPressed: _submitting ? null : _onSubmit, child: const Text('Подтвердить')),
+      ],
     );
   }
 }
