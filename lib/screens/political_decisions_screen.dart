@@ -1,7 +1,7 @@
 // lib/screens/political_decisions_screen.dart
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:titanic/game_service.dart';
+import 'package:titanic/services/game_service.dart';
 
 class PoliticalDecisionsScreen extends StatefulWidget {
   final String currentUserId;

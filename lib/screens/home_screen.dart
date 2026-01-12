@@ -1,18 +1,17 @@
-// lib/home_screen.dart
+// lib/screens/home_screen.dart
 //
 // Главное окно — навигация на transfer_v_screen и логика "Речь жизни".
-// Добавлено отображение "цвета" пользователя под ролью — цвет берётся из
-// столбца `color` таблицы user_credentials. Цвет отображается как текст
-// и как маленький цветовой квадратик (если значение хранится в виде HEX,
-// например "#RRGGBB" или "#AARRGGBB").
+// Подключаем ListenDialog и используем публичный ListenDialogResult.
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'models/app_user.dart';
+import 'package:titanic/models/app_user.dart';
+import 'package:titanic/services/game_service.dart';
 import 'login_screen.dart';
 import 'transfer_v_screen.dart';
 import 'inventory_screen.dart';
+import 'package:titanic/widgets/listen_dialog.dart';
 
 class HomeScreen extends StatefulWidget {
   final AppUser user;
@@ -25,6 +24,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   late AppUser user;
   final supabase = Supabase.instance.client;
+  final GameService svc = GameService();
 
   // Speech state
   bool speechActive = false;
@@ -125,11 +125,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _fetchSpeechState() async {
     try {
-      final res = await supabase
-          .from('speech_state')
-          .select('active, actor_id, expires_at')
-          .eq('id', 1)
-          .maybeSingle();
+      final res = await svc.fetchSpeechState();
 
       if (res is Map<String, dynamic>) {
         final active = (res['active'] as bool?) ?? false;
@@ -155,14 +151,7 @@ class _HomeScreenState extends State<HomeScreen> {
         // Если мы ожидаем подтверждение от сервера — обрабатываем отдельной логикой
         if (_waitingForServerConfirm) {
           if (active) {
-            final life = await supabase
-                .from('life_speeches')
-                .select('id, politician_id, started_at, expires_at')
-                .gte('expires_at', DateTime.now().toIso8601String())
-                .order('started_at', ascending: false)
-                .limit(1)
-                .maybeSingle();
-
+            final life = await svc.getActiveLifeSpeech();
             int? speechId;
             DateTime? serverExpires;
             if (life is Map<String, dynamic>) {
@@ -213,13 +202,7 @@ class _HomeScreenState extends State<HomeScreen> {
         int? speechId;
         DateTime? serverExpires;
         try {
-          final life = await supabase
-              .from('life_speeches')
-              .select('id, politician_id, started_at, expires_at')
-              .gte('expires_at', DateTime.now().toIso8601String())
-              .order('started_at', ascending: false)
-              .limit(1)
-              .maybeSingle();
+          final life = await svc.getActiveLifeSpeech();
 
           if (life is Map<String, dynamic>) {
             speechId = (life['id'] is int) ? (life['id'] as int) : int.tryParse(life['id']?.toString() ?? '');
@@ -371,10 +354,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     try {
       // Вызов серверного RPC (если есть)
-      final dynamic rpcRes = await supabase.rpc('start_speech', params: {
-        'p_actor': user.id,
-        'p_duration_seconds': secondsForRpc,
-      });
+      final dynamic rpcRes = await svc.rpcStartSpeech(actorId: user.id, durationSeconds: secondsForRpc);
 
       Map<String, dynamic>? parsed;
       if (rpcRes is Map<String, dynamic>) {
@@ -423,7 +403,7 @@ class _HomeScreenState extends State<HomeScreen> {
           'actor_id': user.id,
           'expires_at': applyExpires!.toUtc().toIso8601String(),
         };
-        await supabase.from('speech_state').upsert(upsertObj).select().maybeSingle();
+        await svc.upsertSpeechState(obj: upsertObj);
       } catch (e) {
         _showMessage('Не удалось сохранить состояние речи на сервере (права). Кнопка всё равно будет локально заблокирована.');
       }
@@ -486,9 +466,9 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    final result = await showDialog<_ListenDialogResult>(
+    final result = await showDialog<ListenDialogResult>(
       context: context,
-      builder: (_) => _ListenDialog(defaultN: 1),
+      builder: (_) => const ListenDialog(defaultN: 1),
     );
 
     if (result == null) return;
@@ -498,12 +478,7 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     try {
-      final res = await supabase.rpc('listen_speech', params: {
-        'p_speech_id': sid,
-        'p_user': user.id,
-        'p_agree': result.agree,
-        'p_n': result.n,
-      });
+      final res = await svc.rpcListenSpeech(speechId: sid, userId: user.id, agree: result.agree, n: result.n);
 
       Map<String, dynamic>? parsed;
       if (res is Map<String, dynamic>) parsed = res;
@@ -683,7 +658,7 @@ class _HomeScreenState extends State<HomeScreen> {
             const SizedBox(height: 4),
             Text('M: ${user.mBalance.toStringAsFixed(2)}', style: const TextStyle(fontSize: 14)),
           ]),
-        ]),
+        ]), 
       ),
     );
   }
@@ -783,72 +758,6 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
       ),
-    );
-  }
-}
-
-/// Диалог для прослушивания речи: возвращает agree + n
-class _ListenDialogResult {
-  final bool agree;
-  final num n;
-  _ListenDialogResult(this.agree, this.n);
-}
-
-class _ListenDialog extends StatefulWidget {
-  final num defaultN;
-  const _ListenDialog({this.defaultN = 1, Key? key}) : super(key: key);
-
-  @override
-  State<_ListenDialog> createState() => _ListenDialogState();
-}
-
-class _ListenDialogState extends State<_ListenDialog> {
-  bool _agree = false;
-  final _nCtrl = TextEditingController();
-  bool _submitting = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _nCtrl.text = widget.defaultN.toString();
-  }
-
-  @override
-  void dispose() {
-    _nCtrl.dispose();
-    super.dispose();
-  }
-
-  void _onSubmit() {
-    final n = num.tryParse(_nCtrl.text.trim());
-    if (n == null || n <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Введите корректное положительное число n')));
-      return;
-    }
-    Navigator.of(context).pop(_ListenDialogResult(_agree, n));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Прослушал речь жизни'),
-      content: Column(mainAxisSize: MainAxisSize.min, children: [
-        Row(children: [
-          const Expanded(child: Text('Согласны сменить цвет на цвет политика, произносящего речь?')),
-          const SizedBox(width: 8),
-          Switch(value: _agree, onChanged: (v) => setState(() => _agree = v)),
-        ]),
-        const SizedBox(height: 8),
-        TextField(
-          controller: _nCtrl,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(labelText: 'n (количество базовой награды)'),
-        ),
-      ]),
-      actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Отмена')),
-        ElevatedButton(onPressed: _submitting ? null : _onSubmit, child: const Text('Подтвердить')),
-      ],
     );
   }
 }
