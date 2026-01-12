@@ -497,10 +497,54 @@ class _HomeScreenState extends State<HomeScreen> {
       activeSpeechId: _activeSpeechId,
       speechActorId: speechActorId,
       alreadyListened: _listenedToThisSpeech,
-      onListenComplete: () async {
-        // refresh profile & speech state after listen completes successfully
-        await _refreshProfile();
-        await _fetchSpeechState();
+      onListenComplete: (Map<String, dynamic>? rpcResult) async {
+        // If the RPC returned structured result, apply immediate UI changes for better UX
+        if (rpcResult != null) {
+          final status = rpcResult['status']?.toString() ?? '';
+          if (status == 'changed_color') {
+            final newColor = rpcResult['new_color']?.toString();
+            final addedM = rpcResult['added_m'];
+            if (newColor != null) {
+              setState(() {
+                _userColor = newColor;
+                // rebuild AppUser with updated color and possibly mBalance
+                user = AppUser(
+                  id: user.id,
+                  username: user.username,
+                  role: user.role,
+                  firstName: user.firstName,
+                  lastName: user.lastName,
+                  vBalance: user.vBalance,
+                  mBalance: (addedM is num) ? user.mBalance + addedM.toDouble() : user.mBalance,
+                  color: newColor,
+                );
+              });
+            }
+          } else if (status == 'kept_color') {
+            final addedV = rpcResult['added_v'];
+            if (addedV is num) {
+              setState(() {
+                user = AppUser(
+                  id: user.id,
+                  username: user.username,
+                  role: user.role,
+                  firstName: user.firstName,
+                  lastName: user.lastName,
+                  vBalance: user.vBalance + addedV.toDouble(),
+                  mBalance: user.mBalance,
+                  color: user.color,
+                );
+              });
+            }
+          }
+        }
+
+        // Always refresh server-side authoritative data afterwards
+        try {
+          await _refreshProfile();
+          await _fetchSpeechState();
+        } catch (_) {}
+
         setState(() {
           _listenedToThisSpeech = true;
         });
