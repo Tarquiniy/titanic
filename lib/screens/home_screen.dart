@@ -1,7 +1,6 @@
 // lib/screens/home_screen.dart
 //
 // Главное окно — навигация на transfer_v_screen и логика "Речь жизни".
-// Подключаем ListenDialog и используем публичный ListenDialogResult.
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -11,7 +10,7 @@ import 'package:titanic/services/game_service.dart';
 import 'login_screen.dart';
 import 'transfer_v_screen.dart';
 import 'inventory_screen.dart';
-import 'package:titanic/widgets/listen_dialog.dart';
+import 'package:titanic/widgets/listen_button.dart';
 
 class HomeScreen extends StatefulWidget {
   final AppUser user;
@@ -46,14 +45,8 @@ class _HomeScreenState extends State<HomeScreen> {
   // Waiting for server confirm after start_speech
   bool _waitingForServerConfirm = false;
 
-  // Listen state: whether current user already listened to this active speech
+  // Listen/historical flag (user already listened to this speech according to server)
   bool _listenedToThisSpeech = false;
-
-  // Session-level flag: "Нажимал кнопку 'Прослушал речь жизни' в этой сессии" (in-memory)
-  bool _sessionListened = false;
-
-  // while checking or performing listen RPC
-  bool _checkingListen = false;
 
   @override
   void initState() {
@@ -144,7 +137,6 @@ class _HomeScreenState extends State<HomeScreen> {
             _waitingForServerConfirm = false;
             _activeSpeechId = null;
             _listenedToThisSpeech = false;
-            _sessionListened = false;
           });
           return;
         }
@@ -170,7 +162,6 @@ class _HomeScreenState extends State<HomeScreen> {
               speechExpiresAt = applyExpires;
               _waitingForServerConfirm = false;
               _activeSpeechId = speechId;
-              _sessionListened = false; // new speech — reset session flag so user may click once
             });
 
             await _checkIfListened();
@@ -183,7 +174,6 @@ class _HomeScreenState extends State<HomeScreen> {
               _waitingForServerConfirm = false;
               _activeSpeechId = null;
               _listenedToThisSpeech = false;
-              _sessionListened = false;
             });
             return;
           }
@@ -197,7 +187,6 @@ class _HomeScreenState extends State<HomeScreen> {
             speechExpiresAt = null; // **важно** — доверяем серверу и включаем кнопку
             _activeSpeechId = null;
             _listenedToThisSpeech = false;
-            _sessionListened = false;
           });
           return;
         }
@@ -233,7 +222,6 @@ class _HomeScreenState extends State<HomeScreen> {
             speechExpiresAt = null;
             _activeSpeechId = null;
             _listenedToThisSpeech = false;
-            _sessionListened = false;
           });
         }
       }
@@ -388,7 +376,6 @@ class _HomeScreenState extends State<HomeScreen> {
           speechActorId = parsed?['actor_id']?.toString();
           speechExpiresAt = applyExpires;
           _waitingForServerConfirm = false;
-          _sessionListened = false; // new speech -> reset session click
         });
       } else {
         // RPC ничего не вернул — продолжаем и сохраняем в таблицу speech_state (upsert)
@@ -453,119 +440,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // -----------------------
-  // Listen speech: UI + RPC
-  // -----------------------
-  bool get _isListenButtonEnabled {
-    if (_checkingListen) return false;
-    if (_sessionListened) return false; // one-click per session
-    if (_listenedToThisSpeech) return false; // already listened historically
-    if (_activeSpeechId == null) return false; // no active speech
-    if (speechExpiresAt != null && DateTime.now().toUtc().isAfter(speechExpiresAt!)) return false; // expired
-    return true;
-  }
-
-  Future<void> _onListenPressed() async {
-    if (!_isListenButtonEnabled) return;
-    final sid = _activeSpeechId;
-    if (sid == null) {
-      _showMessage('Нет активной речи.');
-      return;
-    }
-
-    // show dialog to ask agree + n
-    final result = await showDialog<ListenDialogResult>(
-      context: context,
-      builder: (_) => const ListenDialog(defaultN: 1),
-    );
-
-    if (result == null) return;
-
-    // mark as checking to prevent duplicates
-    setState(() {
-      _checkingListen = true;
-    });
-
-    try {
-      // call RPC
-      final res = await svc.rpcListenSpeech(speechId: sid, userId: user.id, agree: result.agree, n: result.n);
-
-      Map<String, dynamic>? parsed;
-      if (res is Map<String, dynamic>) parsed = res;
-      else if (res is List && res.isNotEmpty && res[0] is Map) parsed = Map<String, dynamic>.from(res[0] as Map);
-      else if (res is String) {
-        try {
-          parsed = Map<String, dynamic>.from(jsonDecode(res) as Map);
-        } catch (_) {
-          parsed = null;
-        }
-      }
-
-      String message = 'Спасибо за прослушивание.';
-      // if server returned structured result — update client-side immediately for better UX
-      if (parsed != null) {
-        final status = parsed['status']?.toString() ?? '';
-        if (status == 'changed_color') {
-          final newColor = parsed['new_color']?.toString() ?? '';
-          final addedM = parsed['added_m'];
-          // apply locally for instant feedback
-          setState(() {
-            user = user.copyWith(color: newColor);
-            _userColor = newColor;
-            if (addedM is num) user = user.copyWith(mBalance: (user.mBalance) + (addedM.toDouble()));
-            _sessionListened = true;
-            _listenedToThisSpeech = true;
-          });
-          message = 'Ваш цвет изменён на $newColor. В банк цвета добавлено ${parsed['added_m']?.toString() ?? ''} майндов.';
-        } else if (status == 'kept_color') {
-          final addedV = parsed['added_v'];
-          setState(() {
-            if (addedV is num) user = user.copyWith(vBalance: user.vBalance + addedV.toDouble());
-            _sessionListened = true;
-            _listenedToThisSpeech = true;
-          });
-          message = 'Спасибо, вы остались верны своему цвету. Вам добавлено ${parsed['added_v']?.toString() ?? ''} войсов.';
-        } else {
-          // unexpected but show result
-          setState(() {
-            _sessionListened = true;
-            _listenedToThisSpeech = true;
-          });
-          message = parsed.toString();
-        }
-      } else {
-        // If RPC returned nothing useful, still mark session click (so it's one click per session)
-        setState(() {
-          _sessionListened = true;
-          _listenedToThisSpeech = true;
-        });
-      }
-
-      // Refresh profile to get authoritative balances/colors from server
-      await _refreshProfile();
-      await _fetchSpeechState();
-
-      // show confirmation dialog
-      await showDialog<void>(
-        context: context,
-        builder: (_) => AlertDialog(
-          title: const Text('Спасибо за участие в речи'),
-          content: Text(message),
-          actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('ОК'))],
-        ),
-      );
-    } on PostgrestException catch (e) {
-      // do not mark session as listened if RPC failed
-      _showMessage(e.message ?? e.toString());
-    } catch (e) {
-      _showMessage(e.toString());
-    } finally {
-      setState(() {
-        _checkingListen = false;
-      });
-    }
-  }
-
-  // -----------------------
   // Transfer navigation: open transfer_v_screen and refresh profile on success
   // -----------------------
   Future<void> _openTransferScreen() async {
@@ -616,20 +490,21 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _renderListenButton() {
-    final enabled = _isListenButtonEnabled;
-    final label = _sessionListened || _listenedToThisSpeech ? 'Уже прослушал' : 'Прослушал речь жизни';
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        ElevatedButton(
-          onPressed: enabled ? _onListenPressed : null,
-          style: ElevatedButton.styleFrom(backgroundColor: enabled ? Colors.blueAccent : Colors.grey),
-          child: _checkingListen ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : Text(label),
-        ),
-        if (_sessionListened) Padding(padding: const EdgeInsets.only(top: 6.0), child: Text('Нажималось в этой сессии', style: const TextStyle(fontSize: 12, color: Colors.grey))),
-        if (_listenedToThisSpeech && !_sessionListened) Padding(padding: const EdgeInsets.only(top: 6.0), child: Text('Вы уже прослушали текущую речь', style: const TextStyle(fontSize: 12, color: Colors.grey))),
-      ],
+  Widget _renderListenWidget() {
+    // Delegate the listen button to the external widget
+    return ListenButton(
+      userId: user.id,
+      activeSpeechId: _activeSpeechId,
+      speechActorId: speechActorId,
+      alreadyListened: _listenedToThisSpeech,
+      onListenComplete: () async {
+        // refresh profile & speech state after listen completes successfully
+        await _refreshProfile();
+        await _fetchSpeechState();
+        setState(() {
+          _listenedToThisSpeech = true;
+        });
+      },
     );
   }
 
@@ -724,8 +599,8 @@ class _HomeScreenState extends State<HomeScreen> {
       buttons.add(Padding(padding: const EdgeInsets.symmetric(vertical: 6.0), child: _renderSpeechButton()));
     }
 
-    // Listen button visible to all
-    buttons.add(Padding(padding: const EdgeInsets.symmetric(vertical: 6.0), child: _renderListenButton()));
+    // Listen widget visible to all (delegated)
+    buttons.add(Padding(padding: const EdgeInsets.symmetric(vertical: 6.0), child: _renderListenWidget()));
 
     if (role == 'economist') {
       add('Аналитика / Ставки', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Аналитика'))));
@@ -740,7 +615,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     if (role == 'journalist') {
-      add('Дебаты / Аукцификации', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Дебаты'))));
+      add('Дебаты / Публикации', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Дебаты'))));
     }
 
     if (role == 'public_figure') {
