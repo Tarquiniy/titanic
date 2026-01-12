@@ -5,8 +5,11 @@ import 'package:flutter/material.dart';
 import 'package:titanic/services/game_service.dart';
 
 /// ListenButton — отдельный виджет для "Прослушал речь жизни".
-/// onListenComplete: получает парсенный ответ от RPC (Map<String,dynamic>?) сразу после успешного выполнения.
-///   Позволяет родительскому экрану применить изменения локально и/или перезагрузить профиль.
+/// - userId: текущий user id (UUID string)
+/// - activeSpeechId: текущий life_speeches.id
+/// - speechActorId: id политика (опционально, для отображения)
+/// - alreadyListened: server-side flag (user already listened to this speech)
+/// - onListenComplete: callback(Map<String,dynamic>? rpcResult) после успешного выполнения RPC
 class ListenButton extends StatefulWidget {
   final String userId;
   final int? activeSpeechId;
@@ -30,12 +33,10 @@ class ListenButton extends StatefulWidget {
 class _ListenButtonState extends State<ListenButton> {
   final GameService _svc = GameService();
 
-  bool _sessionListened = false; // one per app session
+  bool _sessionListened = false;
   bool _loading = false;
 
-  static const int _fixedN = 100; // fixed n per spec
-  static const int _mindForYes = 2 * _fixedN; // 200
-  static const int _vForNo = _fixedN; // 100
+  static const int _fixedN = 100;
 
   bool get _isEnabled {
     if (_loading) return false;
@@ -48,7 +49,6 @@ class _ListenButtonState extends State<ListenButton> {
   Future<void> _onPressed() async {
     if (!_isEnabled) return;
     final sid = widget.activeSpeechId!;
-    // Confirm Yes/No
     final agree = await showDialog<bool>(
       context: context,
       barrierDismissible: true,
@@ -69,18 +69,10 @@ class _ListenButtonState extends State<ListenButton> {
     setState(() => _loading = true);
 
     Map<String, dynamic>? parsed;
-
     try {
-      final dynamic rpcRes = await _svc.rpcListenSpeech(
-        speechId: sid,
-        userId: widget.userId,
-        agree: agree,
-        n: _fixedN,
-      );
+      final rpcRes = await _svc.rpcListenSpeech(speechId: sid, userId: widget.userId, agree: agree, n: _fixedN);
 
-      // Debug print (useful while testing)
-      // print('listen_speech rpcRes: $rpcRes');
-
+      // parse rpcRes to Map if possible
       if (rpcRes is Map<String, dynamic>) {
         parsed = rpcRes;
       } else if (rpcRes is List && rpcRes.isNotEmpty && rpcRes[0] is Map) {
@@ -89,39 +81,35 @@ class _ListenButtonState extends State<ListenButton> {
         try {
           parsed = Map<String, dynamic>.from(jsonDecode(rpcRes) as Map);
         } catch (_) {
-          parsed = null;
+          // leave parsed null and show raw
         }
-      } else {
-        parsed = null;
       }
 
+      // Show immediate result to user
       String message;
       if (parsed != null) {
         final status = parsed['status']?.toString() ?? '';
-        if (agree && status == 'changed_color') {
-          final newColor = parsed['new_color']?.toString() ?? widget.speechActorId ?? '(неизвестно)';
-          final addedM = parsed['added_m']?.toString() ?? _mindForYes.toString();
+        if (status == 'changed_color') {
+          final newColor = parsed['new_color']?.toString() ?? '(неизвестно)';
+          final addedM = parsed['added_m']?.toString() ?? '0';
           message = 'Ваш цвет изменён на $newColor. В банк цвета добавлено $addedM майндов.';
-        } else if (!agree && status == 'kept_color') {
-          final addedV = parsed['added_v']?.toString() ?? _vForNo.toString();
+        } else if (status == 'kept_color') {
+          final addedV = parsed['added_v']?.toString() ?? '0';
           message = 'Спасибо, вы остались верны своему цвету. Вам добавлено $addedV войсов.';
         } else {
-          // RPC вернул что-то нестандартное — покажем весь ответ
           message = 'Ответ сервера: ${parsed.toString()}';
         }
       } else {
-        // Если сервер вернул неструктурированный ответ
-        if (agree) {
-          message = 'Ваш цвет изменён. В банк цвета перечислено $_mindForYes майндов.';
-        } else {
-          message = 'Спасибо, вы остались верны своему цвету. Вам добавлено $_vForNo войсов.';
-        }
+        // fallback if RPC returned non-map
+        message = 'Действие выполнено. Пожалуйста, обновите профиль.';
       }
 
-      // Пометить клик за сессию
-      setState(() => _sessionListened = true);
+      // Mark session listened only on success
+      setState(() {
+        _sessionListened = true;
+      });
 
-      // Показываем подтверждение пользователю
+      // Show confirmation dialog
       await showDialog<void>(
         context: context,
         builder: (_) => AlertDialog(
@@ -131,18 +119,17 @@ class _ListenButtonState extends State<ListenButton> {
         ),
       );
 
-      // Вызов callback'а родительского экрана и передача parsed (может быть null)
+      // Call parent's callback with parsed map (may be null)
       if (widget.onListenComplete != null) {
-        try {
-          await widget.onListenComplete!(parsed);
-        } catch (e) {
-          // ignore callback errors but notify in debug
-          // print('onListenComplete error: $e');
-        }
+        await widget.onListenComplete!(parsed);
+      } else {
+        // If no callback, show a short snackbar so user sees something changed
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Прослушивание зафиксировано.')));
       }
     } catch (e) {
-      // RPC error — не помечаем как прослушанное в сессии
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка: ${e.toString()}')));
+      // Do not mark as listened if RPC failed
+      final err = e?.toString() ?? 'Unknown error';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка RPC: $err')));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
