@@ -144,6 +144,7 @@ class _HomeScreenState extends State<HomeScreen> {
             _waitingForServerConfirm = false;
             _activeSpeechId = null;
             _listenedToThisSpeech = false;
+            _sessionListened = false;
           });
           return;
         }
@@ -169,6 +170,7 @@ class _HomeScreenState extends State<HomeScreen> {
               speechExpiresAt = applyExpires;
               _waitingForServerConfirm = false;
               _activeSpeechId = speechId;
+              _sessionListened = false; // new speech — reset session flag so user may click once
             });
 
             await _checkIfListened();
@@ -181,6 +183,7 @@ class _HomeScreenState extends State<HomeScreen> {
               _waitingForServerConfirm = false;
               _activeSpeechId = null;
               _listenedToThisSpeech = false;
+              _sessionListened = false;
             });
             return;
           }
@@ -194,6 +197,7 @@ class _HomeScreenState extends State<HomeScreen> {
             speechExpiresAt = null; // **важно** — доверяем серверу и включаем кнопку
             _activeSpeechId = null;
             _listenedToThisSpeech = false;
+            _sessionListened = false;
           });
           return;
         }
@@ -229,6 +233,7 @@ class _HomeScreenState extends State<HomeScreen> {
             speechExpiresAt = null;
             _activeSpeechId = null;
             _listenedToThisSpeech = false;
+            _sessionListened = false;
           });
         }
       }
@@ -383,6 +388,7 @@ class _HomeScreenState extends State<HomeScreen> {
           speechActorId = parsed?['actor_id']?.toString();
           speechExpiresAt = applyExpires;
           _waitingForServerConfirm = false;
+          _sessionListened = false; // new speech -> reset session click
         });
       } else {
         // RPC ничего не вернул — продолжаем и сохраняем в таблицу speech_state (upsert)
@@ -451,10 +457,10 @@ class _HomeScreenState extends State<HomeScreen> {
   // -----------------------
   bool get _isListenButtonEnabled {
     if (_checkingListen) return false;
-    if (_sessionListened) return false;
-    if (_listenedToThisSpeech) return false;
-    if (_activeSpeechId == null) return false;
-    if (speechExpiresAt != null && DateTime.now().toUtc().isAfter(speechExpiresAt!)) return false;
+    if (_sessionListened) return false; // one-click per session
+    if (_listenedToThisSpeech) return false; // already listened historically
+    if (_activeSpeechId == null) return false; // no active speech
+    if (speechExpiresAt != null && DateTime.now().toUtc().isAfter(speechExpiresAt!)) return false; // expired
     return true;
   }
 
@@ -466,6 +472,7 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
+    // show dialog to ask agree + n
     final result = await showDialog<ListenDialogResult>(
       context: context,
       builder: (_) => const ListenDialog(defaultN: 1),
@@ -473,11 +480,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (result == null) return;
 
+    // mark as checking to prevent duplicates
     setState(() {
       _checkingListen = true;
     });
 
     try {
+      // call RPC
       final res = await svc.rpcListenSpeech(speechId: sid, userId: user.id, agree: result.agree, n: result.n);
 
       Map<String, dynamic>? parsed;
@@ -492,28 +501,50 @@ class _HomeScreenState extends State<HomeScreen> {
       }
 
       String message = 'Спасибо за прослушивание.';
+      // if server returned structured result — update client-side immediately for better UX
       if (parsed != null) {
         final status = parsed['status']?.toString() ?? '';
         if (status == 'changed_color') {
           final newColor = parsed['new_color']?.toString() ?? '';
-          final addedM = parsed['added_m']?.toString() ?? '';
-          message = 'Ваш цвет изменён на $newColor. В банк цвета добавлено $addedM майндов.';
+          final addedM = parsed['added_m'];
+          // apply locally for instant feedback
+          setState(() {
+            user = user.copyWith(color: newColor);
+            _userColor = newColor;
+            if (addedM is num) user = user.copyWith(mBalance: (user.mBalance) + (addedM.toDouble()));
+            _sessionListened = true;
+            _listenedToThisSpeech = true;
+          });
+          message = 'Ваш цвет изменён на $newColor. В банк цвета добавлено ${parsed['added_m']?.toString() ?? ''} майндов.';
         } else if (status == 'kept_color') {
-          final addedV = parsed['added_v']?.toString() ?? '';
-          message = 'Спасибо, вы остались верны своему цвету. Вам добавлено $addedV войсов.';
+          final addedV = parsed['added_v'];
+          setState(() {
+            if (addedV is num) user = user.copyWith(vBalance: user.vBalance + addedV.toDouble());
+            _sessionListened = true;
+            _listenedToThisSpeech = true;
+          });
+          message = 'Спасибо, вы остались верны своему цвету. Вам добавлено ${parsed['added_v']?.toString() ?? ''} войсов.';
         } else {
+          // unexpected but show result
+          setState(() {
+            _sessionListened = true;
+            _listenedToThisSpeech = true;
+          });
           message = parsed.toString();
         }
+      } else {
+        // If RPC returned nothing useful, still mark session click (so it's one click per session)
+        setState(() {
+          _sessionListened = true;
+          _listenedToThisSpeech = true;
+        });
       }
 
-      setState(() {
-        _sessionListened = true;
-        _listenedToThisSpeech = true;
-      });
-
+      // Refresh profile to get authoritative balances/colors from server
       await _refreshProfile();
       await _fetchSpeechState();
 
+      // show confirmation dialog
       await showDialog<void>(
         context: context,
         builder: (_) => AlertDialog(
@@ -523,6 +554,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
     } on PostgrestException catch (e) {
+      // do not mark session as listened if RPC failed
       _showMessage(e.message ?? e.toString());
     } catch (e) {
       _showMessage(e.toString());
@@ -658,7 +690,7 @@ class _HomeScreenState extends State<HomeScreen> {
             const SizedBox(height: 4),
             Text('M: ${user.mBalance.toStringAsFixed(2)}', style: const TextStyle(fontSize: 14)),
           ]),
-        ]), 
+        ]),
       ),
     );
   }
@@ -708,7 +740,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     if (role == 'journalist') {
-      add('Дебаты / Публикации', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Дебаты'))));
+      add('Дебаты / Аукцификации', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Дебаты'))));
     }
 
     if (role == 'public_figure') {
