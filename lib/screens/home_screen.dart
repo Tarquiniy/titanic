@@ -496,7 +496,6 @@ class _HomeScreenState extends State<HomeScreen> {
       userId: user.id,
       activeSpeechId: _activeSpeechId,
       speechActorId: speechActorId,
-      speechActive: speechActive,
       alreadyListened: _listenedToThisSpeech,
       onListenComplete: (Map<String, dynamic>? rpcResult) async {
         // Если rpcResult содержит структуру — применим быстрые локальные изменения
