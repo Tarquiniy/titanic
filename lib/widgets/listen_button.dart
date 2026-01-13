@@ -1,15 +1,16 @@
 // lib/widgets/listen_button.dart
 //
-// Виджет кнопки "Прослушал речь жизни" — полностью автономный.
-// Условия активации:
-//  - активна, если передан activeSpeechId (int) и пользователь ещё не слушал (по серверному флагу или в сессии).
-// Поведение при нажатии:
-//  - показавает диалог с вопросом и кнопками "Да"/"Нет" (формулировка по ТЗ).
-//  - при "Да" вызывает RPC listen_speech(p_agree = true, p_n = 100) и показывает результат.
-//    RPC должен менять color_banks и присваивать новый цвет пользователю на сервере.
-//  - при "Нет" вызывает RPC listen_speech(p_agree = false, p_n = 100) и показывает результат.
-//  - помечает как прослушанное в сессии только после успешного RPC.
-//  - вызывает onListenComplete(parsedResult) для того, чтобы родитель обновил UI/профиль.
+// Переписанный полностью автономный виджет кнопки "Прослушал речь жизни".
+// Поведение:
+//  - кнопка активна, если есть activeSpeechId ИЛИ speechActive == true (на случай, если id ещё не синхронизирован).
+//  - при нажатии берёт реальный speechId (если нужно — достаёт его с сервера),
+//    затем показывает диалог "Да / Нет" по ТЗ.
+//  - при выборе "Да" вызывает RPC listen_speech(p_agree = true, p_n = 100).
+//    при успешном результате показывает диалог об изменении цвета и начислении 2*100 майндов.
+//  - при выборе "Нет" вызывает RPC listen_speech(p_agree = false, p_n = 100).
+//    при успешном результате показывает диалог "Вы остались верны себе..." и начисление 100 V.
+//  - помечает прослушивание в сессии только при успешном RPC.
+//  - вызывает onListenComplete(parsedResult) для родителя, чтобы тот обновил профиль/UI.
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -18,19 +19,11 @@ import 'package:titanic/services/game_service.dart';
 typedef ListenCompleteCallback = Future<void> Function(Map<String, dynamic>? rpcResult);
 
 class ListenButton extends StatefulWidget {
-  /// UUID пользователя (строка)
-  final String userId;
-
-  /// id активной записи из life_speeches. Если null -> кнопка неактивна.
-  final int? activeSpeechId;
-
-  /// id пользователя-политика, произнесящего речь (опционально, используется для подсказок/логики).
-  final String? speechActorId;
-
-  /// Флаг: сервер говорит, что пользователь уже слушал эту речь.
-  final bool alreadyListened;
-
-  /// Callback, вызываемый после успешного выполнения RPC (передаётся распарсенный Map или null).
+  final String userId; // UUID string
+  final int? activeSpeechId; // id из life_speeches (может быть null до синхронизации)
+  final String? speechActorId; // id политика (опционально)
+  final bool speechActive; // локальный флаг активности речи (может быть true до получения id)
+  final bool alreadyListened; // серверный флаг: пользователь уже слушал текущую речь
   final ListenCompleteCallback? onListenComplete;
 
   const ListenButton({
@@ -38,6 +31,7 @@ class ListenButton extends StatefulWidget {
     required this.userId,
     required this.activeSpeechId,
     this.speechActorId,
+    required this.speechActive,
     this.alreadyListened = false,
     this.onListenComplete,
   }) : super(key: key);
@@ -49,27 +43,63 @@ class ListenButton extends StatefulWidget {
 class _ListenButtonState extends State<ListenButton> {
   final GameService _svc = GameService();
 
-  // Флаг, что пользователь уже нажимал в этой сессии (локально).
   bool _sessionListened = false;
-
-  // Загрузка при выполнении RPC.
   bool _loading = false;
 
-  // Жёстко зафиксированное n по ТЗ.
   static const int _fixedN = 100;
 
+  /// Кнопка активна если:
+  ///  - виджет сообщает speechActive == true (речь начата) OR
+  ///  - уже пришёл activeSpeechId (точный id)
+  /// и пользователь ещё не слушал (ни серверно, ни в сессии), и не в загрузке.
   bool get _isEnabled {
-    // активна при наличии activeSpeechId и если ещё не слушал
-    if (widget.activeSpeechId == null) return false;
     if (_loading) return false;
     if (_sessionListened) return false;
     if (widget.alreadyListened) return false;
-    return true;
+    if (widget.activeSpeechId != null) return true;
+    if (widget.speechActive) return true;
+    return false;
+  }
+
+  int? _parseId(dynamic v) {
+    if (v == null) return null;
+    if (v is int) return v;
+    if (v is String) return int.tryParse(v);
+    return null;
+  }
+
+  Future<int?> _ensureSpeechId() async {
+    // Prefer explicit activeSpeechId if provided.
+    if (widget.activeSpeechId != null) return widget.activeSpeechId;
+    // If speechActive true but id missing, try to fetch the active life_speeches row.
+    try {
+      final life = await _svc.getActiveLifeSpeech();
+      if (life is Map<String, dynamic>) {
+        final id = _parseId(life['id']);
+        return id;
+      }
+    } catch (_) {
+      // ignore
+    }
+    return null;
   }
 
   Future<void> _handlePress() async {
     if (!_isEnabled) return;
-    final sid = widget.activeSpeechId!;
+
+    // Ensure we have a real speech id before doing anything that would call RPC.
+    setState(() => _loading = true);
+    int? sid = await _ensureSpeechId();
+    if (sid == null) {
+      // fallback: no id available
+      if (mounted) {
+        setState(() => _loading = false);
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Нет активной речи (id). Попробуйте чуть позже.')));
+      }
+      return;
+    }
+
+    // show Yes/No dialog (text per TЗ)
     final agree = await showDialog<bool>(
       context: context,
       barrierDismissible: true,
@@ -86,15 +116,16 @@ class _ListenButtonState extends State<ListenButton> {
       ),
     );
 
-    if (agree == null) return; // закрыл диалог — ничего не делаем
-
-    setState(() => _loading = true);
+    if (agree == null) {
+      if (mounted) setState(() => _loading = false);
+      return;
+    }
 
     Map<String, dynamic>? parsed;
     try {
       final res = await _svc.rpcListenSpeech(speechId: sid, userId: widget.userId, agree: agree, n: _fixedN);
 
-      // Нормализуем ответ в Map, если возможно
+      // normalize
       if (res is Map<String, dynamic>) {
         parsed = res;
       } else if (res is List && res.isNotEmpty && res[0] is Map) {
@@ -109,9 +140,9 @@ class _ListenButtonState extends State<ListenButton> {
         parsed = null;
       }
 
-      // Показываем пользователю результат в понятной форме
+      // Show results according to TЗ
       if (agree) {
-        // Да — ожидаем changed_color
+        // expect changed_color
         if (parsed != null && parsed['status'] == 'changed_color') {
           final newColor = parsed['new_color']?.toString() ?? widget.speechActorId ?? '(новый цвет)';
           final addedM = parsed['added_m'] ?? (2 * _fixedN);
@@ -124,8 +155,8 @@ class _ListenButtonState extends State<ListenButton> {
             ),
           );
         } else {
-          // Некорректный/неожиданный ответ — показать сырое сообщение
-          final text = parsed != null ? parsed.toString() : 'Действие выполнено.';
+          // fallback: show raw or generic
+          final text = parsed != null ? parsed.toString() : 'Действие выполнено. Пожалуйста, обновите профиль.';
           await showDialog<void>(
             context: context,
             builder: (_) => AlertDialog(
@@ -136,7 +167,7 @@ class _ListenButtonState extends State<ListenButton> {
           );
         }
       } else {
-        // Нет — ожидаем kept_color
+        // expect kept_color
         if (parsed != null && parsed['status'] == 'kept_color') {
           final addedV = parsed['added_v'] ?? _fixedN;
           await showDialog<void>(
@@ -148,7 +179,7 @@ class _ListenButtonState extends State<ListenButton> {
             ),
           );
         } else {
-          final text = parsed != null ? parsed.toString() : 'Действие выполнено.';
+          final text = parsed != null ? parsed.toString() : 'Действие выполнено. Пожалуйста, обновите профиль.';
           await showDialog<void>(
             context: context,
             builder: (_) => AlertDialog(
@@ -160,22 +191,22 @@ class _ListenButtonState extends State<ListenButton> {
         }
       }
 
-      // Отмечаем в сессии только при успешном выполнении
+      // mark session listened only after successful RPC
       setState(() => _sessionListened = true);
 
-      // Сообщаем родителю распарсенный результат, чтобы он обновил профиль/цвет локально и синхронизировал
+      // callback parent to update UI/profile
       if (widget.onListenComplete != null) {
         try {
           await widget.onListenComplete!(parsed);
         } catch (_) {
-          // ignore callback errors
+          // ignore
         }
       } else {
-        // если callback не задан — краткое уведомление
+        // small indicator if no callback
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Прослушивание зафиксировано.')));
       }
     } catch (e) {
-      // Ошибка выполнения RPC — показываем и не помечаем как прослушанное
+      // RPC failure - keep button enabled (not marked listened)
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка: ${e.toString()}')));
     } finally {
       if (mounted) setState(() => _loading = false);
