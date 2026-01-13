@@ -72,9 +72,9 @@ class GameService {
     }
   }
 
-  /// Calls RPC listen_speech. Returns parsed Map (if possible) or raw response.
-  /// Throws exception on RPC failure.
-  Future<dynamic> rpcListenSpeech({
+  /// Calls RPC listen_speech. MUST return a Map with 'status' on success,
+  /// otherwise throws an Exception so caller sees the failure.
+  Future<Map<String, dynamic>> rpcListenSpeech({
     required int speechId,
     required String userId,
     required bool agree,
@@ -92,20 +92,35 @@ class GameService {
       final res = await client.rpc('listen_speech', params: params);
       debugPrint('GameService.rpcListenSpeech raw res: $res');
 
-      // Normalize response
-      if (res is Map<String, dynamic>) return res;
-      if (res is List && res.isNotEmpty && res[0] is Map) return Map<String, dynamic>.from(res[0] as Map);
-      if (res is String) {
+      Map<String, dynamic>? parsed;
+      if (res is Map<String, dynamic>) {
+        parsed = res;
+      } else if (res is List && res.isNotEmpty && res[0] is Map) {
+        parsed = Map<String, dynamic>.from(res[0] as Map);
+      } else if (res is String) {
         try {
-          return Map<String, dynamic>.from(jsonDecode(res) as Map);
+          parsed = Map<String, dynamic>.from(jsonDecode(res) as Map);
         } catch (_) {
-          return res;
+          // leave parsed null
         }
       }
-      return res;
+
+      if (parsed == null) {
+        // If RPC didn't return structured data, treat as error so UI shows something
+        throw Exception('Empty or unexpected RPC response: $res');
+      }
+
+      // Ensure server returned at least 'status'
+      if (!parsed.containsKey('status')) {
+        // Still return parsed but warn
+        debugPrint('GameService.rpcListenSpeech: parsed missing status -> $parsed');
+        // It's safer to throw so caller can show message / handle it explicitly
+        throw Exception('Unexpected RPC response (missing status): $parsed');
+      }
+
+      return parsed;
     } on PostgrestException catch (e, st) {
       debugPrint('GameService.rpcListenSpeech PostgrestException: ${e.message}\n$st');
-      // Provide as much context as possible to the caller
       throw Exception('listen_speech RPC error: ${e.message ?? e.toString()}');
     } catch (e, st) {
       debugPrint('GameService.rpcListenSpeech error: $e\n$st');
@@ -157,7 +172,6 @@ class GameService {
   // ---------------------------
   // Debates helpers
   // ---------------------------
-  /// Возвращает активные дебаты (null если нет)
   Future<Map<String, dynamic>?> getActiveDebate() async {
     final now = DateTime.now().toIso8601String();
     try {
@@ -177,7 +191,6 @@ class GameService {
     return null;
   }
 
-  /// Голос за дебаты — реализован как RPC wrapper, если нет — пытаемся вставить в таблицу votes
   Future<void> rpcVoteInDebate({required int debateId, required String userId, required int optionId, required int voices}) async {
     try {
       debugPrint('GameService.rpcVoteInDebate RPC params: debateId=$debateId userId=$userId optionId=$optionId voices=$voices');

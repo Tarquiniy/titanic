@@ -39,15 +39,12 @@ class _ListenButtonState extends State<ListenButton> {
     if (_loading) return false;
     if (_sessionListened) return false;
     if (widget.alreadyListened) return false;
-    // active if we have id OR speechActive flag is true
     if (widget.activeSpeechId != null) return true;
     if (widget.speechActive) return true;
     return false;
   }
 
-  void _dbg(String s) {
-    debugPrint('ListenButton: $s');
-  }
+  void _dbg(String s) => debugPrint('ListenButton: $s');
 
   Future<int?> _ensureSpeechId() async {
     if (widget.activeSpeechId != null) {
@@ -57,14 +54,15 @@ class _ListenButtonState extends State<ListenButton> {
     _dbg('no activeSpeechId provided, trying to fetch active life_speeches row');
     try {
       final life = await _svc.getActiveLifeSpeech();
+      _dbg('getActiveLifeSpeech -> $life');
       if (life is Map<String, dynamic>) {
         final idRaw = life['id'];
         final id = idRaw is int ? idRaw : int.tryParse(idRaw?.toString() ?? '');
         _dbg('fetched active life_speeches id=$id');
         return id;
       }
-    } catch (e) {
-      _dbg('error fetching active life speech: $e');
+    } catch (e, st) {
+      _dbg('error fetching active life speech: $e\n$st');
     }
     return null;
   }
@@ -87,13 +85,12 @@ class _ListenButtonState extends State<ListenButton> {
       return;
     }
 
-    // force explicit choice so user can't click outside
     final agree = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
         title: const Text('Прослушал речь жизни'),
-        content: const Text('Вы прослушали речь жизни и она произвела на вас впечатление?\n\nЕсли Да — ваш цвет изменится!'),
+        content: const Text('Вы прослушали речь жизни и она произвела на вас впечатление?\n\nЕсли Да — учтите, ваш цвет изменится!'),
         actions: [
           TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Нет')),
           ElevatedButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Да')),
@@ -102,95 +99,68 @@ class _ListenButtonState extends State<ListenButton> {
     );
 
     if (agree == null) {
-      _dbg('dialog closed without choice (shouldn\'t happen because barrierDismissible=false)');
+      _dbg('dialog returned null (should not occur)');
       setState(() => _loading = false);
       return;
     }
 
+    _dbg('calling rpcListenSpeech with sid=$sid user=${widget.userId} agree=$agree n=$_fixedN');
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Отправка запроса...')));
-    _dbg('calling rpcListenSpeech with sid, userId, agree... sid: $sid, userId: ${widget.userId}, agree: $agree, n: $_fixedN');
 
-    Map<String, dynamic>? parsed;
     try {
-      final res = await _svc.rpcListenSpeech(speechId: sid, userId: widget.userId, agree: agree, n: _fixedN);
-      _dbg('rpc returned: $res');
+      final parsed = await _svc.rpcListenSpeech(speechId: sid, userId: widget.userId, agree: agree, n: _fixedN);
+      _dbg('rpcListenSpeech parsed -> $parsed');
 
-      if (res is Map<String, dynamic>) {
-        parsed = res;
-      } else if (res is List && res.isNotEmpty && res[0] is Map) {
-        parsed = Map<String, dynamic>.from(res[0] as Map);
-      } else if (res is String) {
-        try {
-          parsed = Map<String, dynamic>.from(jsonDecode(res) as Map);
-        } catch (_) {
-          parsed = null;
-        }
+      final status = parsed['status']?.toString() ?? '';
+
+      if (agree && status == 'changed_color') {
+        final newColor = parsed['new_color']?.toString() ?? widget.speechActorId ?? '(новый цвет)';
+        final addedM = parsed['added_m'] ?? (2 * _fixedN);
+        await showDialog<void>(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('Цвет изменён'),
+            content: Text('Ваш цвет изменён на $newColor.\nВ банк цвета добавлено ${addedM.toString()} майндов.'),
+            actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('ОК'))],
+          ),
+        );
+      } else if (!agree && status == 'kept_color') {
+        final addedV = parsed['added_v'] ?? _fixedN;
+        await showDialog<void>(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('Спасибо'),
+            content: Text('Вы остались верны себе, это достойно!\nВам начислено ${addedV.toString()} войсов.'),
+            actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('ОК'))],
+          ),
+        );
       } else {
-        parsed = null;
+        // Unexpected but show raw
+        await showDialog<void>(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('Результат'),
+            content: Text(parsed.toString()),
+            actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('ОК'))],
+          ),
+        );
       }
 
-      // show proper confirmation
-      if (agree) {
-        if (parsed != null && parsed['status'] == 'changed_color') {
-          final newColor = parsed['new_color']?.toString() ?? '(неизвестно)';
-          final addedM = parsed['added_m'] ?? (2 * _fixedN);
-          await showDialog<void>(
-            context: context,
-            builder: (_) => AlertDialog(
-              title: const Text('Цвет изменён'),
-              content: Text('Ваш цвет изменён на $newColor.\nВ банк цвета добавлено ${addedM.toString()} майндов.'),
-              actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('ОК'))],
-            ),
-          );
-        } else {
-          await showDialog<void>(
-            context: context,
-            builder: (_) => AlertDialog(
-              title: const Text('Результат'),
-              content: Text(parsed != null ? parsed.toString() : 'Действие выполнено.'),
-              actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('ОК'))],
-            ),
-          );
-        }
-      } else {
-        if (parsed != null && parsed['status'] == 'kept_color') {
-          final addedV = parsed['added_v'] ?? _fixedN;
-          await showDialog<void>(
-            context: context,
-            builder: (_) => AlertDialog(
-              title: const Text('Спасибо'),
-              content: Text('Вы остались верны себе, это достойно!\nВам начислено ${addedV.toString()} войсов.'),
-              actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('ОК'))],
-            ),
-          );
-        } else {
-          await showDialog<void>(
-            context: context,
-            builder: (_) => AlertDialog(
-              title: const Text('Результат'),
-              content: Text(parsed != null ? parsed.toString() : 'Действие выполнено.'),
-              actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('ОК'))],
-            ),
-          );
-        }
-      }
-
-      // success — mark session listened
+      // success -> mark session listened and notify parent
       setState(() => _sessionListened = true);
-
-      // notify parent
       if (widget.onListenComplete != null) {
         try {
           await widget.onListenComplete!(parsed);
-        } catch (e) {
-          _dbg('onListenComplete callback error: $e');
+        } catch (e, st) {
+          _dbg('onListenComplete error: $e\n$st');
         }
       } else {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Прослушивание зафиксировано.')));
       }
     } catch (e, st) {
-      _dbg('rpc failed: $e\n$st');
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка RPC: ${e.toString()}')));
+      _dbg('rpcListenSpeech failed: $e\n$st');
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка: ${e.toString()}')));
+      // Do not mark as listened
     } finally {
       if (mounted) setState(() => _loading = false);
     }
