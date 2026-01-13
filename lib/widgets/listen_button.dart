@@ -41,13 +41,15 @@ class _ListenButtonState extends State<ListenButton> {
   static const int _fixedN = 100; // фиксированное n по ТЗ
 
   bool get _isEnabled {
-    if (!widget.speechActive) return false;
-    if (widget.activeSpeechId == null) return false;
-    if (_loading) return false;
-    if (_sessionListened) return false;
-    if (widget.alreadyListened) return false;
-    return true;
-  }
+  // Кнопка активна, если есть активная речь (life_speeches)
+  if (widget.activeSpeechId == null) return false;
+
+  if (_loading) return false;
+  if (_sessionListened) return false;
+  if (widget.alreadyListened) return false;
+
+  return true;
+}
 
   Future<void> _onPressed() async {
     if (!_isEnabled) return;
