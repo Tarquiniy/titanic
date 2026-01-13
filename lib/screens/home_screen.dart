@@ -491,14 +491,15 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _renderListenWidget() {
-    // Delegate the listen button to the external widget
+    // Передаем speechActive и speechActorId — это гарантирует, что кнопка будет активна только во время речи
     return ListenButton(
       userId: user.id,
       activeSpeechId: _activeSpeechId,
       speechActorId: speechActorId,
+      speechActive: speechActive,
       alreadyListened: _listenedToThisSpeech,
       onListenComplete: (Map<String, dynamic>? rpcResult) async {
-        // If the RPC returned structured result, apply immediate UI changes for better UX
+        // Если rpcResult содержит структуру — применим быстрые локальные изменения
         if (rpcResult != null) {
           final status = rpcResult['status']?.toString() ?? '';
           if (status == 'changed_color') {
@@ -507,7 +508,6 @@ class _HomeScreenState extends State<HomeScreen> {
             if (newColor != null) {
               setState(() {
                 _userColor = newColor;
-                // rebuild AppUser with updated color and possibly mBalance
                 user = AppUser(
                   id: user.id,
                   username: user.username,
@@ -539,7 +539,7 @@ class _HomeScreenState extends State<HomeScreen> {
           }
         }
 
-        // Always refresh server-side authoritative data afterwards
+        // Всегда синхронизируемся с сервером (профиль, состояние речи)
         try {
           await _refreshProfile();
           await _fetchSpeechState();
