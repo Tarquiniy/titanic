@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:titanic/models/app_user.dart';
+import 'package:titanic/screens/debates_screen.dart';
 import 'package:titanic/services/game_service.dart';
 import 'login_screen.dart';
 import 'transfer_v_screen.dart';
@@ -48,19 +49,36 @@ class _HomeScreenState extends State<HomeScreen> {
   // Listen/historical flag (user already listened to this speech according to server)
   bool _listenedToThisSpeech = false;
 
+  // ---- Debates state ----
+  bool _hasActiveDebate = false;
+  int? _activeDebateId;
+  bool _alreadyVotedInActiveDebate = false;
+  Timer? _debatePollTimer;
+
+  // ---- Political resolutions state ----
+  bool _hasActiveResolution = false;
+  int? _activeResolutionId;
+  bool _alreadyBetInActiveResolution = false;
+  Timer? _resolutionPollTimer;
+
   @override
   void initState() {
     super.initState();
     user = widget.user;
+    _refreshProfile();
     _fetchSpeechState();
     _startPollingSpeechState();
-    // Подтянем профиль (включая color) при инициализации
-    _refreshProfile();
+    _loadDebateState();
+    _startDebatePolling();
+    _loadResolutionState();
+    _startResolutionPolling();
   }
 
   @override
   void dispose() {
     _stopPollingSpeechState();
+    _debatePollTimer?.cancel();
+    _resolutionPollTimer?.cancel();
     super.dispose();
   }
 
@@ -69,13 +87,14 @@ class _HomeScreenState extends State<HomeScreen> {
   // -----------------------
   Future<void> _refreshProfile() async {
     try {
-      final profile = await supabase
+      final profileRaw = await supabase
           .from('user_credentials')
           .select('v_balance, m_balance, first_name, last_name, telegram_username, role, color')
           .eq('id', user.id)
           .maybeSingle();
 
-      if (profile is Map<String, dynamic>) {
+      final profile = (profileRaw is Map<String, dynamic>) ? profileRaw : null;
+      if (profile != null) {
         final v = profile['v_balance'];
         final m = profile['m_balance'];
         final fn = profile['first_name'];
@@ -84,6 +103,7 @@ class _HomeScreenState extends State<HomeScreen> {
         final role = profile['role'];
         final color = profile['color'];
 
+        if (!mounted) return;
         setState(() {
           user = AppUser(
             id: user.id,
@@ -101,6 +121,115 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (_) {
       // ignore refresh errors
     }
+  }
+
+  // -----------------------
+  // Debates: load active state and whether current user already voted
+  // -----------------------
+  Future<void> _loadDebateState() async {
+    try {
+      final active = await supabase
+          .from('debates')
+          .select('id')
+          .eq('is_closed', false)
+          .order('created_at', ascending: false)
+          .limit(1)
+          .maybeSingle();
+
+      if (active is Map<String, dynamic> && active['id'] != null) {
+        final int id = (active['id'] is int) ? active['id'] as int : int.parse(active['id'].toString());
+        bool already = false;
+        try {
+          final vote = await supabase
+              .from('debate_votes')
+              .select('id')
+              .eq('debate_id', id)
+              .eq('user_id', user.id)
+              .limit(1)
+              .maybeSingle();
+          already = vote != null;
+        } catch (_) {
+          already = false;
+        }
+        if (!mounted) return;
+        setState(() {
+          _hasActiveDebate = true;
+          _activeDebateId = id;
+          _alreadyVotedInActiveDebate = already;
+        });
+      } else {
+        if (!mounted) return;
+        setState(() {
+          _hasActiveDebate = false;
+          _activeDebateId = null;
+          _alreadyVotedInActiveDebate = false;
+        });
+      }
+    } catch (_) {
+      // ignore errors, leave previous state
+    }
+  }
+
+  void _startDebatePolling({int seconds = 5}) {
+    _debatePollTimer?.cancel();
+    _debatePollTimer = Timer.periodic(Duration(seconds: seconds), (_) => _loadDebateState());
+  }
+
+  // -----------------------
+  // Resolutions: load active resolution and whether user already bet
+  // -----------------------
+  Future<void> _loadResolutionState() async {
+    try {
+      final active = await supabase
+          .from('political_resolutions')
+          .select('id')
+          .eq('is_closed', false)
+          .order('created_at', ascending: false)
+          .limit(1)
+          .maybeSingle();
+
+      if (active is Map<String, dynamic> && active['id'] != null) {
+        final int id = (active['id'] is int) ? active['id'] as int : int.parse(active['id'].toString());
+        bool already = false;
+        try {
+          final bet = await supabase
+              .from('political_bets')
+              .select('id')
+              .eq('resolution_id', id)
+              .eq('user_id', user.id)
+              .limit(1)
+              .maybeSingle();
+          already = bet != null;
+        } catch (_) {
+          already = false;
+        }
+        if (!mounted) return;
+        setState(() {
+          _hasActiveResolution = true;
+          _activeResolutionId = id;
+          _alreadyBetInActiveResolution = already;
+        });
+      } else {
+        if (!mounted) return;
+        setState(() {
+          _hasActiveResolution = false;
+          _activeResolutionId = null;
+          _alreadyBetInActiveResolution = false;
+        });
+      }
+    } catch (_) {
+      // ignore
+    }
+  }
+
+  void _startResolutionPolling({int seconds = 5}) {
+    _resolutionPollTimer?.cancel();
+    _resolutionPollTimer = Timer.periodic(Duration(seconds: seconds), (_) => _loadResolutionState());
+  }
+
+  void _stopResolutionPolling() {
+    _resolutionPollTimer?.cancel();
+    _resolutionPollTimer = null;
   }
 
   // -----------------------
@@ -130,6 +259,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
         // Если сервер сообщает, что expired (expires в прошлом) -> считаем неактивным
         if (expires != null && nowUtc.isAfter(expires)) {
+          if (!mounted) return;
           setState(() {
             speechActive = false;
             speechActorId = null;
@@ -156,6 +286,7 @@ class _HomeScreenState extends State<HomeScreen> {
             DateTime applyExpires = serverExpires ?? clientNextSlotUtc;
             if (clientNextSlotUtc.isAfter(applyExpires)) applyExpires = clientNextSlotUtc;
 
+            if (!mounted) return;
             setState(() {
               speechActive = true;
               speechActorId = actor;
@@ -167,6 +298,7 @@ class _HomeScreenState extends State<HomeScreen> {
             await _checkIfListened();
             return;
           } else {
+            if (!mounted) return;
             setState(() {
               speechActive = false;
               speechActorId = null;
@@ -181,6 +313,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
         // Обычная ветка: если сервер говорит inactive — сбрасываем локальный lock
         if (!active) {
+          if (!mounted) return;
           setState(() {
             speechActive = false;
             speechActorId = null;
@@ -205,6 +338,7 @@ class _HomeScreenState extends State<HomeScreen> {
           // ignore
         }
 
+        if (!mounted) return;
         setState(() {
           speechActive = true;
           speechActorId = actor;
@@ -216,6 +350,7 @@ class _HomeScreenState extends State<HomeScreen> {
       } else {
         // ничего нет — считаем inactive и сбрасываем локально
         if (!_waitingForServerConfirm) {
+          if (!mounted) return;
           setState(() {
             speechActive = false;
             speechActorId = null;
@@ -236,7 +371,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _checkIfListened() async {
     final sid = _activeSpeechId;
     if (sid == null) {
-      setState(() => _listenedToThisSpeech = false);
+      if (!mounted) return setState(() => _listenedToThisSpeech = false);
       return;
     }
     try {
@@ -247,8 +382,11 @@ class _HomeScreenState extends State<HomeScreen> {
           .eq('user_id', user.id)
           .limit(1)
           .maybeSingle();
+
+      final listened = res != null;
+      if (!mounted) return;
       setState(() {
-        _listenedToThisSpeech = res != null;
+        _listenedToThisSpeech = listened;
       });
     } catch (_) {
       // ignore
@@ -335,6 +473,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final clientNextSlotUtc = _nextYekaterinburg12or20Utc();
 
+    if (!mounted) return;
     setState(() {
       _rpcLoading = true;
       speechActive = true;
@@ -371,6 +510,7 @@ class _HomeScreenState extends State<HomeScreen> {
         if (clientNextSlotUtc.isAfter(chosen)) chosen = clientNextSlotUtc;
         applyExpires = chosen;
 
+        if (!mounted) return;
         setState(() {
           speechActive = parsed?['active'] as bool? ?? true;
           speechActorId = parsed?['actor_id']?.toString();
@@ -380,6 +520,7 @@ class _HomeScreenState extends State<HomeScreen> {
       } else {
         // RPC ничего не вернул — продолжаем и сохраняем в таблицу speech_state (upsert)
         await _fetchSpeechState();
+        if (!mounted) return;
         setState(() {
           if (speechExpiresAt == null || clientNextSlotUtc.isAfter(speechExpiresAt!)) {
             speechExpiresAt = clientNextSlotUtc;
@@ -408,6 +549,7 @@ class _HomeScreenState extends State<HomeScreen> {
         await _fetchSpeechState();
       } else {
         _showMessage(msg ?? e.toString());
+        if (!mounted) return;
         setState(() {
           speechActive = false;
           speechActorId = null;
@@ -417,6 +559,7 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     } catch (e) {
       _showMessage(e.toString());
+      if (!mounted) return;
       setState(() {
         speechActive = false;
         speechActorId = null;
@@ -424,11 +567,13 @@ class _HomeScreenState extends State<HomeScreen> {
         speechExpiresAt = null;
       });
     } finally {
+      if (!mounted) return;
       setState(() => _rpcLoading = false);
     }
   }
 
-  String _formatYe(DateTime utc) {
+  String _formatYe(DateTime? utc) {
+    if (utc == null) return '—';
     final ye = utc.toUtc().add(const Duration(hours: 5));
     String z(int n) => n.toString().padLeft(2, '0');
     return '${z(ye.day)}.${z(ye.month)} ${z(ye.hour)}:${z(ye.minute)}';
@@ -452,6 +597,146 @@ class _HomeScreenState extends State<HomeScreen> {
       await _refreshProfile();
     }
   }
+
+  // -----------------------
+  // Open resolution (political) betting dialog for politicians
+  // -----------------------
+  Future<void> _onOpenResolutionPressed() async {
+  if (_activeResolutionId == null) return;
+  final resolutionId = _activeResolutionId!;
+  // load options
+  List<Map<String, dynamic>> options = [];
+  try {
+    final res = await supabase.from('resolution_options').select('id,label').eq('resolution_id', resolutionId).order('id');
+    if (res is List) options = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  } catch (e) {
+    _showMessage('Не удалось загрузить варианты: $e');
+    return;
+  }
+
+  if (options.isEmpty) {
+    _showMessage('Нет доступных вариантов для этого политрешения');
+    return;
+  }
+
+  int? selectedOptionId;
+  final TextEditingController amtCtrl = TextEditingController();
+
+  final resDialogResult = await showDialog<bool>(
+    context: context,
+    builder: (ctx) {
+      return StatefulBuilder(builder: (ctx2, setStateDialog) {
+        return AlertDialog(
+          title: const Text('Политрешение — ваш выбор'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('Выберите вариант:'),
+                const SizedBox(height: 8),
+                ...options.map((opt) {
+                  final oid = (opt['id'] is int) ? opt['id'] as int : int.parse(opt['id'].toString());
+                  return RadioListTile<int>(
+                    value: oid,
+                    groupValue: selectedOptionId,
+                    onChanged: (v) => setStateDialog(() => selectedOptionId = v),
+                    title: Text(opt['label'] ?? '-'),
+                  );
+                }).toList(),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: amtCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(labelText: 'Сумма майндов (целое). Ваш баланс: ${user.mBalance.toStringAsFixed(2)}'),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(ctx2).pop(false), child: const Text('Отмена')),
+            ElevatedButton(
+              onPressed: () async {
+                // validate
+                if (selectedOptionId == null) {
+                  ScaffoldMessenger.of(ctx2).showSnackBar(const SnackBar(content: Text('Выберите вариант')));
+                  return;
+                }
+                final txt = amtCtrl.text.trim();
+                final n = int.tryParse(txt);
+                if (n == null || n <= 0) {
+                  ScaffoldMessenger.of(ctx2).showSnackBar(const SnackBar(content: Text('Введите положительное целое число')));
+                  return;
+                }
+                if (n > user.mBalance) {
+                  ScaffoldMessenger.of(ctx2).showSnackBar(SnackBar(content: Text('Недостаточно майндов: у вас ${user.mBalance.toStringAsFixed(2)}')));
+                  return;
+                }
+
+                // disable button by popping and then performing RPC
+                Navigator.of(ctx2).pop(true);
+
+                // perform bet (show progress)
+                showDialog(
+                  context: context,
+                  barrierDismissible: false,
+                  builder: (_) => const Center(child: CircularProgressIndicator()),
+                );
+
+                try {
+                  await svc.placeBetInResolution(
+                    resolutionId: resolutionId,
+                    optionId: selectedOptionId!, // <- передаём выбранный вариант
+                    userId: user.id,
+                    amount: n,
+                  );
+
+                  // success: update local flags and profile
+                  await _refreshProfile();
+                  await _loadResolutionState();
+
+                  // close progress dialog
+                  if (mounted) Navigator.of(context).pop();
+
+                  // thank you popup
+                  await showDialog(
+                    context: context,
+                    builder: (_) => AlertDialog(
+                      title: const Text('Спасибо за участие в политрешении'),
+                      content: const Text('Ваша ставка принята.'),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.of(context).pop(),
+                          child: const Text('OK'),
+                        )
+                      ],
+                    ),
+                  );
+
+                  if (!mounted) return;
+                  setState(() {
+                    _alreadyBetInActiveResolution = true;
+                  });
+                } catch (e) {
+                  // close progress
+                  if (mounted) Navigator.of(context).pop();
+                  final msg = e is PostgrestException ? (e.message ?? e.toString()) : e.toString();
+                  _showMessage('Ошибка при ставке: $msg');
+                }
+              },
+              child: const Text('Подтвердить ставку'),
+            ),
+          ],
+        );
+      });
+    },
+  );
+
+  // cleanup
+  try {
+    amtCtrl.dispose();
+  } catch (_) {}
+  // resDialogResult used only for flow; state updated after RPC
+}
 
   // -----------------------
   // UI rendering
@@ -482,7 +767,7 @@ class _HomeScreenState extends State<HomeScreen> {
           Padding(
             padding: const EdgeInsets.only(top: 6.0),
             child: Text(
-              'Кнопка снова станет доступна в ${_formatYe(speechExpiresAt!)} (YEKT).',
+              'Кнопка снова станет доступна в ${_formatYe(speechExpiresAt)} (YEKT).',
               style: const TextStyle(fontSize: 12, color: Colors.grey),
             ),
           ),
@@ -506,6 +791,7 @@ class _HomeScreenState extends State<HomeScreen> {
             final newColor = rpcResult['new_color']?.toString();
             final addedM = rpcResult['added_m'];
             if (newColor != null) {
+              if (!mounted) return;
               setState(() {
                 _userColor = newColor;
                 user = AppUser(
@@ -523,6 +809,7 @@ class _HomeScreenState extends State<HomeScreen> {
           } else if (status == 'kept_color') {
             final addedV = rpcResult['added_v'];
             if (addedV is num) {
+              if (!mounted) return;
               setState(() {
                 user = AppUser(
                   id: user.id,
@@ -545,6 +832,7 @@ class _HomeScreenState extends State<HomeScreen> {
           await _fetchSpeechState();
         } catch (_) {}
 
+        if (!mounted) return;
         setState(() {
           _listenedToThisSpeech = true;
         });
@@ -637,6 +925,54 @@ class _HomeScreenState extends State<HomeScreen> {
     add('Опросы / Аукционы', () {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Открыть: Опросы/Аукционы')));
     });
+
+    // Debates button: only show if user is NOT politician, there is an active debate and user hasn't voted
+    if (role != 'politician' && _hasActiveDebate && !_alreadyVotedInActiveDebate) {
+      buttons.add(Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6.0),
+        child: SizedBox(
+          width: double.infinity,
+          child: ElevatedButton(
+            onPressed: () async {
+              // navigate to debates and wait result
+              final res = await Navigator.of(context).push<bool>(
+                MaterialPageRoute(builder: (_) => DebatesScreen(currentUserId: user.id, service: svc)),
+              );
+
+              // If DebatesScreen returned true (user voted), refresh local state and profile
+              if (res == true) {
+                // mark as voted and refresh profile/state
+                if (!mounted) return;
+                setState(() {
+                  _alreadyVotedInActiveDebate = true;
+                });
+                await _refreshProfile();
+                await _loadDebateState();
+              } else {
+                // otherwise just refresh state (maybe admin closed debate)
+                await _loadDebateState();
+              }
+            },
+            child: const Text('Дебаты'),
+          ),
+        ),
+      ));
+    }
+
+    // Political resolution button: only for politicians, only if there's an active resolution and user hasn't bet
+    if (role == 'politician' && _hasActiveResolution && !_alreadyBetInActiveResolution) {
+      buttons.add(Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6.0),
+        child: SizedBox(
+          width: double.infinity,
+          child: ElevatedButton(
+            onPressed: _onOpenResolutionPressed,
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent),
+            child: const Text('Выбрать политрешение'),
+          ),
+        ),
+      ));
+    }
 
     // For politicians render start speech button
     if (role == 'politician') {

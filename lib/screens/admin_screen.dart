@@ -2,6 +2,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:titanic/services/game_service.dart';
 import 'login_screen.dart';
 
 class AdminScreen extends StatefulWidget {
@@ -15,61 +16,19 @@ class _AdminScreenState extends State<AdminScreen> {
 
   int _tabIndex = 0;
 
-  // GlobalKeys для доступа к методам состояний табов
-  final GlobalKey<_PollsAuctionsTabState> _pollsKey = GlobalKey<_PollsAuctionsTabState>();
-  final GlobalKey<_EnterprisesTabState> _enterprisesKey = GlobalKey<_EnterprisesTabState>();
-
-  void _openCreatePoll() {
-    setState(() => _tabIndex = 1);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _pollsKey.currentState?._createPoll();
-    });
-  }
-
-  void _openCreateAuction() {
-    setState(() => _tabIndex = 1);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _pollsKey.currentState?._createAuction();
-    });
-  }
-
-  void _openCreateEnterprise() {
-    setState(() => _tabIndex = 3);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _enterprisesKey.currentState?._openCreateEnterpriseDialog();
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     final tabs = [
       const UsersTab(),
-      PollsAuctionsTab(key: _pollsKey),
-      const InventoryTab(),
-      EnterprisesTab(key: _enterprisesKey),
-      const BulkTab(),
+      const DebatesTab(),
+      const ResolutionsTab(),
+      const ColorBanksTab(),
     ];
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Admin — Панель управления'),
         actions: [
-          IconButton(
-            tooltip: 'Создать опрос',
-            icon: const Icon(Icons.how_to_vote),
-            onPressed: _openCreatePoll,
-          ),
-          IconButton(
-            tooltip: 'Создать аукцион',
-            icon: const Icon(Icons.gavel),
-            onPressed: _openCreateAuction,
-          ),
-          IconButton(
-            tooltip: 'Создать предприятие',
-            icon: const Icon(Icons.apartment),
-            onPressed: _openCreateEnterprise,
-          ),
-          const SizedBox(width: 8),
           IconButton(
             tooltip: 'Выйти',
             icon: const Icon(Icons.logout),
@@ -83,12 +42,16 @@ class _AdminScreenState extends State<AdminScreen> {
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _tabIndex,
         onTap: (i) => setState(() => _tabIndex = i),
+        type: BottomNavigationBarType.fixed,
+        backgroundColor: Colors.white,
+        selectedItemColor: Colors.blueAccent,
+        unselectedItemColor: Colors.grey.shade600,
+        selectedLabelStyle: const TextStyle(fontWeight: FontWeight.w600),
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.people), label: 'Пользователи'),
-          BottomNavigationBarItem(icon: Icon(Icons.how_to_vote), label: 'Опросы/Аукционы'),
-          BottomNavigationBarItem(icon: Icon(Icons.inventory_2), label: 'Инвентарь'),
-          BottomNavigationBarItem(icon: Icon(Icons.apartment), label: 'Предприятия'),
-          BottomNavigationBarItem(icon: Icon(Icons.copy_all), label: 'Массово'),
+          BottomNavigationBarItem(icon: Icon(Icons.forum), label: 'Дебаты'),
+          BottomNavigationBarItem(icon: Icon(Icons.gavel), label: 'Политрешения'),
+          BottomNavigationBarItem(icon: Icon(Icons.account_balance), label: 'Банки цветов'),
         ],
       ),
     );
@@ -154,42 +117,6 @@ class _UsersTabState extends State<UsersTab> {
     }
   }
 
-  Future<void> _bulkAssignInventory() async {
-    final body = await showDialog<String>(context: context, builder: (_) => const _BulkJsonDialog(title: 'Вставьте JSON { "username": { "item": count } }'));
-    if (body == null) return;
-    try {
-      final Map parsed = jsonDecode(body);
-      for (final entry in parsed.entries) {
-        final username = entry.key.toString();
-        final inv = entry.value;
-        final profile = await supabase.from('user_credentials').select('id, inventory').eq('telegram_username', username).maybeSingle();
-        if (profile == null) continue;
-        final id = (profile as Map)['id'].toString();
-        // Получаем текущее inventory и объединяем
-        dynamic cur = (profile as Map)['inventory'];
-        Map merged = {};
-        if (cur != null) {
-          try {
-            if (cur is String) cur = jsonDecode(cur);
-            if (cur is Map) merged.addAll(Map<String, dynamic>.from(cur as Map));
-          } catch (_) {}
-        }
-        if (inv is Map) {
-          inv.forEach((k, v) {
-            final key = k.toString();
-            final count = int.tryParse(v.toString()) ?? 0;
-            merged[key] = (merged[key] ?? 0) + count;
-          });
-        }
-        await supabase.from('user_credentials').update({'inventory': merged}).eq('id', id);
-      }
-      await _loadUsers();
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Массовая операция завершена')));
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка парсинга JSON: $e')));
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final visible = _users.where((u) {
@@ -211,9 +138,10 @@ class _UsersTabState extends State<UsersTab> {
             ),
           ),
           const SizedBox(width: 8),
-          ElevatedButton(onPressed: _loadUsers, child: _loading ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Обновить')),
-          const SizedBox(width: 8),
-          ElevatedButton(onPressed: _bulkAssignInventory, child: const Text('Массово: инвентарь')),
+          ElevatedButton(
+            onPressed: _loadUsers,
+            child: _loading ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Обновить'),
+          ),
         ]),
       ),
       Expanded(
@@ -320,1743 +248,1063 @@ class _UserEditDialogState extends State<_UserEditDialog> {
   }
 }
 
-// ----------------- Polls/Auctions tab -----------------
-class PollsAuctionsTab extends StatefulWidget {
-  const PollsAuctionsTab({Key? key}) : super(key: key);
+// ----------------- DebatesTab (admin create/close) -----------------
+class DebatesTab extends StatefulWidget {
+  const DebatesTab({Key? key}) : super(key: key);
   @override
-  State<PollsAuctionsTab> createState() => _PollsAuctionsTabState();
+  State<DebatesTab> createState() => _DebatesTabState();
 }
 
-class _PollsAuctionsTabState extends State<PollsAuctionsTab> {
+class _DebatesTabState extends State<DebatesTab> {
   final supabase = Supabase.instance.client;
+  final GameService svc = GameService();
 
-  List<Map<String, dynamic>> _polls = [];
-  List<Map<String, dynamic>> _auctions = [];
-  List<Map<String, dynamic>> _users = []; // для выбора участников
-  bool _loadingPolls = false;
-  bool _loadingAuctions = false;
-  bool _loadingUsers = false;
+  final TextEditingController _titleCtrl = TextEditingController(text: 'Дебаты');
+  final TextEditingController _descCtrl = TextEditingController();
+
+  bool _creating = false;
+  bool _closing = false;
+
+  // politicians list
+  List<Map<String, dynamic>> _politicians = [];
+
+  // speakers selection: maps color -> selected id (string) or null
+  final Map<String, String?> _speakerA = {};
+  final Map<String, String?> _speakerB = {};
+
+  Map<String, dynamic>? _activeDebate;
+
+  final List<_ColorDef> _colorDefs = const [
+    _ColorDef(label: 'красный', hex: '#FF0000'),
+    _ColorDef(label: 'зелёный', hex: '#00FF00'),
+    _ColorDef(label: 'жёлтый', hex: '#FFFF00'),
+    _ColorDef(label: 'малиновый', hex: '#FF00FF'),
+    _ColorDef(label: 'синий', hex: '#0000FF'),
+  ];
 
   @override
   void initState() {
     super.initState();
-    _refreshAll();
-  }
-
-  Future<void> _refreshAll() async {
-    await Future.wait([_loadUsers(), _loadPolls(), _loadAuctions()]);
-  }
-
-  Future<void> _loadUsers() async {
-    setState(() => _loadingUsers = true);
-    try {
-      final res = await supabase.from('user_credentials').select('id, telegram_username, first_name, last_name').order('telegram_username');
-      if (res is List) {
-        _users = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
-      } else {
-        _users = [];
-      }
-    } catch (e) {
-      _users = [];
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка загрузки пользователей: $e')));
-    } finally {
-      setState(() => _loadingUsers = false);
+    for (final c in _colorDefs) {
+      _speakerA[c.label] = null;
+      _speakerB[c.label] = null;
     }
-  }
-
-  Future<void> _loadPolls() async {
-    setState(() => _loadingPolls = true);
-    try {
-      final res = await supabase.from('polls').select('id, title, is_closed, created_at').order('created_at', ascending: false);
-      if (res is List) {
-        _polls = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
-      } else {
-        _polls = [];
-      }
-    } catch (e) {
-      _polls = [];
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка загрузки опросов: $e')));
-    } finally {
-      setState(() => _loadingPolls = false);
-    }
-  }
-
-  Future<void> _loadAuctions() async {
-    setState(() => _loadingAuctions = true);
-    try {
-      // now select item as well so we can display name/count
-      final res = await supabase.from('auctions').select('id, title, item, starts_at, ends_at, is_closed, created_at').order('created_at', ascending: false);
-      if (res is List) {
-        _auctions = res.map((e) {
-          final m = Map<String, dynamic>.from(e as Map);
-          if (m['item'] is String) {
-            try {
-              m['item'] = jsonDecode(m['item']);
-            } catch (_) {}
-          }
-          return m;
-        }).toList();
-      } else {
-        _auctions = [];
-      }
-    } catch (e) {
-      _auctions = [];
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка загрузки аукционов: $e')));
-    } finally {
-      setState(() => _loadingAuctions = false);
-    }
-  }
-
-  // создание опроса — открывает диалог с возможностью выбора пользователей
-  Future<void> _createPoll() async {
-    if (_users.isEmpty) await _loadUsers();
-
-    final payload = await showDialog<Map<String, dynamic>>(
-      context: context,
-      builder: (_) => _CreatePollDialog(availableUsers: _users),
-    );
-    if (payload == null) return;
-
-    try {
-      final pollInsert = {
-        'title': payload['title'],
-        'is_closed': payload['isClosed'] ?? true,
-        'meta': payload['meta'] ?? {},
-      };
-      final pollRes = await supabase.from('polls').insert(pollInsert).select().maybeSingle();
-      if (pollRes == null) throw 'Не удалось создать опрос';
-      final pollId = (pollRes as Map)['id'];
-      final List options = payload['options'] ?? [];
-      final List participants = payload['participants'] ?? [];
-
-      if (options.isNotEmpty) {
-        final List<Map<String, dynamic>> batch = options.map((o) => {'poll_id': pollId, 'label': o}).toList();
-        await supabase.from('poll_options').insert(batch);
-      }
-
-      if (participants.isNotEmpty) {
-        final List<Map<String, dynamic>> pBatch = participants.map((u) => {'poll_id': pollId, 'user_id': u}).toList();
-        await supabase.from('poll_participants').insert(pBatch);
-      }
-
-      await _loadPolls();
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Опрос создан')));
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка создания опроса: $e')));
-    }
-  }
-
-  Future<void> _editPoll(Map<String, dynamic> poll) async {
-    if (_users.isEmpty) await _loadUsers();
-
-    // load existing options & participants
-    final pollId = poll['id'];
-    List<Map<String, dynamic>> options = [];
-    List<dynamic> participants = [];
-    try {
-      final optsRes = await supabase.from('poll_options').select('id, label').eq('poll_id', pollId).order('id');
-      if (optsRes is List) options = optsRes.map((e) => Map<String, dynamic>.from(e as Map)).toList();
-      final partsRes = await supabase.from('poll_participants').select('user_id').eq('poll_id', pollId);
-      if (partsRes is List) participants = partsRes.map((e) => (e as Map)['user_id']).toList();
-    } catch (_) {}
-
-    final initial = {
-      'title': poll['title'] ?? '',
-      'options': options.map((o) => o['label'].toString()).toList(),
-      'participants': participants,
-      'isClosed': poll['is_closed'] ?? true,
-    };
-
-    final payload = await showDialog<Map<String, dynamic>>(
-      context: context,
-      builder: (_) => _EditPollDialog(availableUsers: _users, initial: initial),
-    );
-    if (payload == null) return;
-
-    try {
-      // update poll row
-      await supabase.from('polls').update({'title': payload['title'], 'is_closed': payload['isClosed']}).eq('id', pollId);
-
-      // replace options
-      await supabase.from('poll_options').delete().eq('poll_id', pollId);
-      final List opts = payload['options'] ?? [];
-      if (opts.isNotEmpty) {
-        final batch = opts.map((o) => {'poll_id': pollId, 'label': o}).toList();
-        await supabase.from('poll_options').insert(batch);
-      }
-
-      // replace participants
-      await supabase.from('poll_participants').delete().eq('poll_id', pollId);
-      final List parts = payload['participants'] ?? [];
-      if (parts.isNotEmpty) {
-        final pBatch = parts.map((u) => {'poll_id': pollId, 'user_id': u}).toList();
-        await supabase.from('poll_participants').insert(pBatch);
-      }
-
-      await _loadPolls();
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Опрос обновлён')));
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка обновления опроса: $e')));
-    }
-  }
-
-  // создание аукциона — открывает диалог с выбором участников и указанием предмета + количества
-  Future<void> _createAuction() async {
-    if (_users.isEmpty) await _loadUsers();
-
-    final payload = await showDialog<Map<String, dynamic>>(
-      context: context,
-      builder: (_) => _CreateAuctionDialog(availableUsers: _users),
-    );
-    if (payload == null) return;
-
-    try {
-      final itemName = (payload['itemName'] ?? '').toString();
-      final itemCountRaw = payload['itemCount'];
-      final int itemCount = (itemCountRaw is int) ? itemCountRaw : int.tryParse(itemCountRaw?.toString() ?? '') ?? 1;
-      final auctionInsert = {
-        'title': payload['title'],
-        'item': {'name': itemName, 'count': itemCount},
-        'starts_at': payload['startsAt']?.toIso8601String(),
-        'ends_at': payload['endsAt']?.toIso8601String(),
-        'is_closed': true,
-      };
-      final auctionRes = await supabase.from('auctions').insert(auctionInsert).select().maybeSingle();
-      if (auctionRes == null) throw 'Не удалось создать аукцион';
-      final auctionId = (auctionRes as Map)['id'];
-      final List participants = payload['participants'] ?? [];
-
-      if (participants.isNotEmpty) {
-        final List<Map<String, dynamic>> pBatch = participants.map((u) => {'auction_id': auctionId, 'user_id': u}).toList();
-        await supabase.from('auction_participants').insert(pBatch);
-      }
-
-      await _loadAuctions();
-
-      // показать подробности созданного аукциона (конвертируем безопасно)
-      final created = await supabase.from('auctions').select('id, title, item, starts_at, ends_at, is_closed, created_at').eq('id', auctionId).maybeSingle();
-      Map<String, dynamic>? createdMap;
-      if (created != null) {
-        try {
-          createdMap = Map<String, dynamic>.from(jsonDecode(jsonEncode(created)));
-        } catch (_) {
-          createdMap = null;
-        }
-      }
-      if (createdMap != null) {
-        if (createdMap['item'] is String) {
-          try {
-            createdMap['item'] = jsonDecode(createdMap['item']);
-          } catch (_) {}
-        }
-        await _viewAuctionDetails(createdMap);
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Аукцион создан')));
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка создания аукциона: $e')));
-    }
-  }
-
-  Future<void> _viewPollDetails(Map<String, dynamic> poll) async {
-    final pollId = poll['id'];
-    try {
-      final optionsRes = await supabase.from('poll_options').select('id, label').eq('poll_id', pollId).order('id');
-      final votesRes = await supabase.from('poll_votes').select('id, option_id, user_id, created_at').eq('poll_id', pollId);
-      final options = (optionsRes is List) ? optionsRes.map((e) => Map<String, dynamic>.from(e as Map)).toList() : <Map<String, dynamic>>[];
-      final votes = (votesRes is List) ? votesRes.map((e) => Map<String, dynamic>.from(e as Map)).toList() : <Map<String, dynamic>>[];
-
-      // Count votes per option
-      final Map<dynamic, int> counts = {};
-      for (final v in votes) {
-        final opt = v['option_id'];
-        counts[opt] = (counts[opt] ?? 0) + 1;
-      }
-
-      // participants list
-      final partsRes = await supabase.from('poll_participants').select('user_id').eq('poll_id', pollId);
-      final participants = (partsRes is List) ? partsRes.map((e) => (e as Map)['user_id']).toList() : <dynamic>[];
-      final List<String> participantNames = [];
-      if (participants.isNotEmpty) {
-        try {
-          final ids = participants.map((p) => p.toString()).toList();
-          final orQuery = ids.map((id) => 'id.eq.$id').join(',');
-          final res = await supabase.from('user_credentials').select('id, telegram_username, first_name, last_name').or(orQuery);
-          if (res is List) {
-            for (final u in res) {
-              final um = Map<String, dynamic>.from(u as Map);
-              final display = (um['first_name'] ?? '').toString().isNotEmpty ? '${um['first_name']} ${um['last_name'] ?? ''} (${um['telegram_username'] ?? um['id']})' : (um['telegram_username'] ?? um['id']).toString();
-              participantNames.add(display);
-            }
-          }
-        } catch (_) {}
-      }
-
-      await showDialog<void>(
-        context: context,
-        builder: (_) => AlertDialog(
-          title: Text('Опрос: ${poll['title']}'),
-          content: SizedBox(
-            width: double.maxFinite,
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              if (options.isEmpty) const Text('Варианты отсутствуют'),
-              ...options.map((o) {
-                final optId = o['id'];
-                final label = o['label'] ?? '';
-                final cnt = counts[optId] ?? 0;
-                return ListTile(
-                  title: Text(label.toString()),
-                  trailing: Text(cnt.toString()),
-                );
-              }).toList(),
-              const Divider(),
-              Text('Участники (${participantNames.length}):'),
-              if (participantNames.isEmpty) const Text('— нет участников (открытый опрос)'),
-              if (participantNames.isNotEmpty) ...participantNames.map((n) => Padding(padding: const EdgeInsets.symmetric(vertical: 2.0), child: Text(n))).toList(),
-              const Divider(),
-              Text('Всего голосов: ${votes.length}'),
-              if (votes.isNotEmpty) const SizedBox(height: 8),
-              if (votes.isNotEmpty)
-                SizedBox(
-                  height: 160,
-                  child: ListView.builder(
-                    itemCount: votes.length,
-                    itemBuilder: (context, i) {
-                      final v = votes[i];
-                      return ListTile(
-                        dense: true,
-                        title: Text('vote id: ${v['id']}'),
-                        subtitle: Text('option: ${v['option_id']} user: ${v['user_id']}'),
-                        trailing: Text(v['created_at']?.toString() ?? ''),
-                      );
-                    },
-                  ),
-                ),
-            ]),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Закрыть')),
-            TextButton(
-              onPressed: () async {
-                Navigator.of(context).pop();
-                await _editPoll(poll);
-              },
-              child: const Text('Редактировать'),
-            ),
-            TextButton(
-                onPressed: () async {
-                  try {
-                    await supabase.from('polls').delete().eq('id', pollId);
-                    await _loadPolls();
-                    Navigator.of(context).pop();
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Опрос удалён')));
-                  } catch (e) {
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка удаления: $e')));
-                  }
-                },
-                child: const Text('Удалить опрос')),
-          ],
-        ),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка получения данных опроса: $e')));
-    }
-  }
-
-  Future<void> _viewAuctionDetails(Map<String, dynamic> auction) async {
-    final auctionId = auction['id'];
-    try {
-      final bidsRes = await supabase.from('auction_bids').select('id, user_id, bid, created_at').eq('auction_id', auctionId).order('created_at', ascending: false);
-      final participantsRes = await supabase.from('auction_participants').select('user_id').eq('auction_id', auctionId);
-      final bids = (bidsRes is List) ? bidsRes.map((e) => Map<String, dynamic>.from(e as Map)).toList() : <Map<String, dynamic>>[];
-      final participants = (participantsRes is List) ? participantsRes.map((e) => (e as Map)['user_id']).toList() : <dynamic>[];
-
-      final List<String> participantNames = [];
-      if (participants.isNotEmpty) {
-        try {
-          final ids = participants.map((p) => p.toString()).toList();
-          final orQuery = ids.map((id) => 'id.eq.$id').join(',');
-          final res = await supabase.from('user_credentials').select('id, telegram_username, first_name, last_name').or(orQuery);
-          if (res is List) {
-            for (final u in res) {
-              final um = Map<String, dynamic>.from(u as Map);
-              final display = (um['first_name'] ?? '').toString().isNotEmpty ? '${um['first_name']} ${um['last_name'] ?? ''} (${um['telegram_username'] ?? um['id']})' : (um['telegram_username'] ?? um['id']).toString();
-              participantNames.add(display);
-            }
-          }
-        } catch (_) {}
-      }
-
-      dynamic item = auction['item'];
-      if (item is String) {
-        try {
-          item = jsonDecode(item);
-        } catch (_) {}
-      }
-
-      await showDialog<void>(
-        context: context,
-        builder: (_) => StatefulBuilder(builder: (context, setStateDialog) {
-          return AlertDialog(
-            title: Text('Аукцион: ${auction['title']}'),
-            content: SizedBox(
-              width: double.maxFinite,
-              child: SingleChildScrollView(
-                child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('ID: ${auction['id']}'),
-                  const SizedBox(height: 8),
-                  Text('Заголовок: ${auction['title'] ?? '-'}'),
-                  const SizedBox(height: 8),
-                  Text('Item: ${item is Map ? '${item['name'] ?? '-'} x${item['count'] ?? '-'}' : item.toString()}'),
-                  const SizedBox(height: 8),
-                  Text('Старт: ${auction['starts_at'] ?? '-'}'),
-                  Text('Конец: ${auction['ends_at'] ?? '-'}'),
-                  const SizedBox(height: 12),
-                  const Text('Участники:'),
-                  if (participantNames.isEmpty) const Text('— нет участников'),
-                  if (participantNames.isNotEmpty) ...participantNames.map((n) => pad(n)).toList(),
-                  const SizedBox(height: 12),
-                  const Text('Ставки:'),
-                  if (bids.isEmpty) const Text('— нет ставок'),
-                  if (bids.isNotEmpty)
-                    SizedBox(
-                      height: 180,
-                      child: ListView.builder(
-                        itemCount: bids.length,
-                        itemBuilder: (context, i) {
-                          final b = bids[i];
-                          return ListTile(
-                            title: Text('Bid: ${b['bid']}'),
-                            subtitle: Text('user: ${b['user_id']}'),
-                            trailing: Text(b['created_at']?.toString() ?? ''),
-                          );
-                        },
-                      ),
-                    ),
-                ]),
-              ),
-            ),
-            actions: [
-              TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Закрыть')),
-              TextButton(
-                onPressed: () async {
-                  Navigator.of(context).pop();
-                  await _editAuction(auction);
-                },
-                child: const Text('Редактировать'),
-              ),
-              TextButton(
-                onPressed: () async {
-                  try {
-                    await supabase.from('auctions').delete().eq('id', auctionId);
-                    await _loadAuctions();
-                    Navigator.of(context).pop();
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Аукцион удалён')));
-                  } catch (e) {
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка удаления: $e')));
-                  }
-                },
-                child: const Text('Удалить аукцион'),
-              ),
-            ],
-          );
-        }),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка получения ставок/участников: $e')));
-    }
-  }
-
-  // Edit auction: open dialog prefilled, then update auctions row + participants table
-  Future<void> _editAuction(Map<String, dynamic> auction) async {
-    if (_users.isEmpty) await _loadUsers();
-
-    dynamic item = auction['item'];
-    if (item is String) {
-      try {
-        item = jsonDecode(item);
-      } catch (_) {}
-    }
-    final initial = {
-      'title': auction['title'] ?? '',
-      'itemName': (item is Map) ? (item['name'] ?? '') : (item?.toString() ?? ''),
-      'itemCount': (item is Map) ? (item['count'] ?? 1) : 1,
-      'startsAt': auction['starts_at'] != null ? DateTime.tryParse(auction['starts_at'].toString()) : null,
-      'endsAt': auction['ends_at'] != null ? DateTime.tryParse(auction['ends_at'].toString()) : null,
-      'participants': <dynamic>[],
-    };
-
-    try {
-      final partsRes = await supabase.from('auction_participants').select('user_id').eq('auction_id', auction['id']);
-      if (partsRes is List) {
-        initial['participants'] = partsRes.map((e) => (e as Map)['user_id']).toList();
-      }
-    } catch (_) {
-      initial['participants'] = <dynamic>[];
-    }
-
-    final payload = await showDialog<Map<String, dynamic>>(
-      context: context,
-      builder: (_) => _EditAuctionDialog(availableUsers: _users, initial: initial),
-    );
-    if (payload == null) return;
-
-    try {
-      final auctionId = auction['id'];
-      final itemName = (payload['itemName'] ?? '').toString();
-      final itemCountRaw = payload['itemCount'];
-      final int itemCount = (itemCountRaw is int) ? itemCountRaw : int.tryParse(itemCountRaw?.toString() ?? '') ?? 1;
-      final updateMap = {
-        'title': payload['title'],
-        'item': {'name': itemName, 'count': itemCount},
-        'starts_at': payload['startsAt']?.toIso8601String(),
-        'ends_at': payload['endsAt']?.toIso8601String(),
-      };
-
-      await supabase.from('auctions').update(updateMap).eq('id', auctionId);
-
-      await supabase.from('auction_participants').delete().eq('auction_id', auctionId);
-      final List participants = payload['participants'] ?? [];
-      if (participants.isNotEmpty) {
-        final List<Map<String, dynamic>> pBatch = participants.map((u) => {'auction_id': auctionId, 'user_id': u}).toList();
-        await supabase.from('auction_participants').insert(pBatch);
-      }
-
-      await _loadAuctions();
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Аукцион обновлён')));
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка обновления аукциона: $e')));
-    }
-  }
-
-  // helper to pad widgets
-  static Widget pad(String text) => Padding(padding: const EdgeInsets.symmetric(vertical: 2.0), child: Text(text));
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(12.0),
-      child: Column(children: [
-        Row(children: [
-          ElevatedButton.icon(onPressed: _createPoll, icon: const Icon(Icons.add), label: const Text('Создать опрос')),
-          const SizedBox(width: 8),
-          ElevatedButton.icon(onPressed: _createAuction, icon: const Icon(Icons.add_shopping_cart), label: const Text('Создать аукцион')),
-          const Spacer(),
-          IconButton(
-            tooltip: 'Обновить',
-            icon: const Icon(Icons.refresh),
-            onPressed: _refreshAll,
-          ),
-        ]),
-        const SizedBox(height: 12),
-        Expanded(
-          child: Row(children: [
-            // Left: polls
-            Expanded(
-              child: Card(
-                child: Column(children: [
-                  ListTile(title: const Text('Опросы'), trailing: _loadingPolls ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : null),
-                  const Divider(height: 0),
-                  Expanded(
-                    child: _loadingPolls
-                        ? const Center(child: CircularProgressIndicator())
-                        : ListView.separated(
-                            itemCount: _polls.length,
-                            separatorBuilder: (_, __) => const Divider(height: 0),
-                            itemBuilder: (context, i) {
-                              final p = _polls[i];
-                              return ListTile(
-                                title: Text(p['title'] ?? 'Без названия'),
-                                subtitle: Text('id: ${p['id']}  closed: ${p['is_closed'] ?? true}'),
-                                onTap: () => _viewPollDetails(p),
-                                trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                                  IconButton(icon: const Icon(Icons.edit), onPressed: () => _editPoll(p)),
-                                ]),
-                              );
-                            },
-                          ),
-                  ),
-                ]),
-              ),
-            ),
-            const SizedBox(width: 12),
-            // Right: auctions
-            Expanded(
-              child: Card(
-                child: Column(children: [
-                  ListTile(title: const Text('Аукционы'), trailing: _loadingAuctions ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : null),
-                  const Divider(height: 0),
-                  Expanded(
-                    child: _loadingAuctions
-                        ? const Center(child: CircularProgressIndicator())
-                        : ListView.separated(
-                            itemCount: _auctions.length,
-                            separatorBuilder: (_, __) => const Divider(height: 0),
-                            itemBuilder: (context, i) {
-                              final a = _auctions[i];
-                              final item = a['item'];
-                              final itemLabel = (item is Map) ? '${item['name'] ?? '-'} x${item['count'] ?? '-'}' : (item?.toString() ?? '-');
-                              return ListTile(
-                                title: Text(a['title'] ?? 'Без названия'),
-                                subtitle: Text('id: ${a['id']}  item: $itemLabel  до: ${a['ends_at'] ?? '-'}'),
-                                onTap: () => _viewAuctionDetails(a),
-                                trailing: IconButton(
-                                  icon: const Icon(Icons.edit),
-                                  onPressed: () => _editAuction(a),
-                                ),
-                              );
-                            },
-                          ),
-                  ),
-                ]),
-              ),
-            ),
-          ]),
-        ),
-      ]),
-    );
-  }
-}
-
-/// ДИАЛОГ СОЗДАНИЯ ОПРОСА
-class _CreatePollDialog extends StatefulWidget {
-  final List<Map<String, dynamic>> availableUsers;
-  const _CreatePollDialog({required this.availableUsers, Key? key}) : super(key: key);
-  @override
-  State<_CreatePollDialog> createState() => _CreatePollDialogState();
-}
-
-class _CreatePollDialogState extends State<_CreatePollDialog> {
-  final _title = TextEditingController();
-  final _optionCtrl = TextEditingController();
-  List<String> _options = [];
-  bool _isClosed = true;
-  // participants — список user_id
-  final Set<dynamic> _participants = {};
-
-  @override
-  void dispose() {
-    _title.dispose();
-    _optionCtrl.dispose();
-    super.dispose();
-  }
-
-  void _addOption() {
-    final t = _optionCtrl.text.trim();
-    if (t.isEmpty) return;
-    setState(() {
-      _options.add(t);
-      _optionCtrl.clear();
-    });
-  }
-
-  void _removeOptionAt(int index) {
-    setState(() {
-      _options.removeAt(index);
-    });
-  }
-
-  void _toggleParticipant(dynamic id) {
-    setState(() {
-      if (_participants.contains(id)) _participants.remove(id);
-      else _participants.add(id);
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final users = widget.availableUsers;
-    return AlertDialog(
-      title: const Text('Создать опрос'),
-      content: SingleChildScrollView(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          TextField(controller: _title, decoration: const InputDecoration(labelText: 'Заголовок')),
-          const SizedBox(height: 8),
-          Row(children: [
-            Expanded(child: TextField(controller: _optionCtrl, decoration: const InputDecoration(hintText: 'Вариант'))),
-            IconButton(icon: const Icon(Icons.add), onPressed: _addOption),
-          ]),
-          const SizedBox(height: 8),
-          if (_options.isEmpty) const Text('Варианты ещё не добавлены'),
-          ..._options.asMap().entries.map((e) {
-            final idx = e.key;
-            final val = e.value;
-            return ListTile(
-              title: Text(val),
-              trailing: IconButton(icon: const Icon(Icons.delete), onPressed: () => _removeOptionAt(idx)),
-            );
-          }).toList(),
-          const Divider(),
-          const Align(alignment: Alignment.centerLeft, child: Text('Выбрать участников (необязательно):')),
-          SizedBox(
-            height: 200,
-            width: double.maxFinite,
-            child: users.isEmpty
-                ? const Center(child: Text('Пользователи не загружены'))
-                : ListView.builder(
-                    itemCount: users.length,
-                    itemBuilder: (context, i) {
-                      final u = users[i];
-                      final display = (u['first_name'] ?? '').toString().isNotEmpty
-                          ? '${u['first_name']} ${u['last_name'] ?? ''} (${u['telegram_username'] ?? u['id']})'
-                          : (u['telegram_username'] ?? u['id']).toString();
-                      final id = u['id'];
-                      return CheckboxListTile(
-                        dense: true,
-                        value: _participants.contains(id),
-                        title: Text(display),
-                        onChanged: (_) => _toggleParticipant(id),
-                      );
-                    },
-                  ),
-          ),
-          const SizedBox(height: 8),
-          Row(children: [
-            const Text('Закрытый (только админ смотрит результаты)'),
-            const SizedBox(width: 8),
-            Switch(value: _isClosed, onChanged: (v) => setState(() => _isClosed = v)),
-          ]),
-        ]),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Отмена')),
-        ElevatedButton(
-          onPressed: () {
-            if (_title.text.trim().isEmpty || _options.isEmpty) {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Название и варианты обязательны')));
-              return;
-            }
-            Navigator.of(context).pop({
-              'title': _title.text.trim(),
-              'options': _options,
-              'isClosed': _isClosed,
-              'participants': _participants.toList(),
-            });
-          },
-          child: const Text('Создать'),
-        ),
-      ],
-    );
-  }
-}
-
-/// ДИАЛОГ РЕДАКТИРОВАНИЯ ОПРОСА
-class _EditPollDialog extends StatefulWidget {
-  final List<Map<String, dynamic>> availableUsers;
-  final Map<String, dynamic> initial;
-  const _EditPollDialog({required this.availableUsers, required this.initial, Key? key}) : super(key: key);
-  @override
-  State<_EditPollDialog> createState() => _EditPollDialogState();
-}
-
-class _EditPollDialogState extends State<_EditPollDialog> {
-  late TextEditingController _title;
-  final _optionCtrl = TextEditingController();
-  List<String> _options = [];
-  final Set<dynamic> _participants = {};
-  bool _isClosed = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _title = TextEditingController(text: widget.initial['title']?.toString() ?? '');
-    final opts = widget.initial['options'] as List<dynamic>? ?? [];
-    _options = opts.map((e) => e.toString()).toList();
-    final parts = widget.initial['participants'] as List<dynamic>? ?? [];
-    _participants.addAll(parts);
-    _isClosed = widget.initial['isClosed'] ?? true;
-  }
-
-  @override
-  void dispose() {
-    _title.dispose();
-    _optionCtrl.dispose();
-    super.dispose();
-  }
-
-  void _addOption() {
-    final t = _optionCtrl.text.trim();
-    if (t.isEmpty) return;
-    setState(() {
-      _options.add(t);
-      _optionCtrl.clear();
-    });
-  }
-
-  void _removeOptionAt(int index) {
-    setState(() {
-      _options.removeAt(index);
-    });
-  }
-
-  void _toggleParticipant(dynamic id) {
-    setState(() {
-      if (_participants.contains(id)) _participants.remove(id);
-      else _participants.add(id);
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final users = widget.availableUsers;
-    return AlertDialog(
-      title: const Text('Редактировать опрос'),
-      content: SingleChildScrollView(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          TextField(controller: _title, decoration: const InputDecoration(labelText: 'Заголовок')),
-          const SizedBox(height: 8),
-          Row(children: [
-            Expanded(child: TextField(controller: _optionCtrl, decoration: const InputDecoration(hintText: 'Вариант'))),
-            IconButton(icon: const Icon(Icons.add), onPressed: _addOption),
-          ]),
-          const SizedBox(height: 8),
-          if (_options.isEmpty) const Text('Варианты отсутствуют'),
-          ..._options.asMap().entries.map((e) {
-            final idx = e.key;
-            final val = e.value;
-            return ListTile(
-              title: Text(val),
-              trailing: IconButton(icon: const Icon(Icons.delete), onPressed: () => _removeOptionAt(idx)),
-            );
-          }).toList(),
-          const Divider(),
-          const Align(alignment: Alignment.centerLeft, child: Text('Участники (необязательно)')),
-          SizedBox(
-            height: 200,
-            width: double.maxFinite,
-            child: users.isEmpty
-                ? const Center(child: Text('Пользователи не загружены'))
-                : ListView.builder(
-                    itemCount: users.length,
-                    itemBuilder: (context, i) {
-                      final u = users[i];
-                      final display = (u['first_name'] ?? '').toString().isNotEmpty
-                          ? '${u['first_name']} ${u['last_name'] ?? ''} (${u['telegram_username'] ?? u['id']})'
-                          : (u['telegram_username'] ?? u['id']).toString();
-                      final id = u['id'];
-                      return CheckboxListTile(
-                        dense: true,
-                        value: _participants.contains(id),
-                        title: Text(display),
-                        onChanged: (_) => _toggleParticipant(id),
-                      );
-                    },
-                  ),
-          ),
-          const SizedBox(height: 8),
-          Row(children: [
-            const Text('Закрытый (только админ смотрит результаты)'),
-            const SizedBox(width: 8),
-            Switch(value: _isClosed, onChanged: (v) => setState(() => _isClosed = v)),
-          ]),
-        ]),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Отмена')),
-        ElevatedButton(
-          onPressed: () {
-            if (_title.text.trim().isEmpty || _options.isEmpty) {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Название и варианты обязательны')));
-              return;
-            }
-            Navigator.of(context).pop({
-              'title': _title.text.trim(),
-              'options': _options,
-              'participants': _participants.toList(),
-              'isClosed': _isClosed,
-            });
-          },
-          child: const Text('Сохранить'),
-        ),
-      ],
-    );
-  }
-}
-
-/// ДИАЛОГ СОЗДАНИЯ АУКЦИОНА
-class _CreateAuctionDialog extends StatefulWidget {
-  final List<Map<String, dynamic>> availableUsers;
-  const _CreateAuctionDialog({required this.availableUsers, Key? key}) : super(key: key);
-  @override
-  State<_CreateAuctionDialog> createState() => _CreateAuctionDialogState();
-}
-
-class _CreateAuctionDialogState extends State<_CreateAuctionDialog> {
-  final _title = TextEditingController();
-  final _itemName = TextEditingController();
-  final _itemCountCtrl = TextEditingController(text: '1');
-  DateTime? _startsAt;
-  DateTime? _endsAt;
-  final Set<dynamic> _participants = {};
-
-  @override
-  void dispose() {
-    _title.dispose();
-    _itemName.dispose();
-    _itemCountCtrl.dispose();
-    super.dispose();
-  }
-
-  Future<void> _pickDate(bool isStart) async {
-    final now = DateTime.now();
-    final pick = await showDatePicker(context: context, initialDate: now, firstDate: now.subtract(const Duration(days: 1)), lastDate: now.add(const Duration(days: 365)));
-    if (pick == null) return;
-    final time = await showTimePicker(context: context, initialTime: const TimeOfDay(hour: 12, minute: 0));
-    if (time == null) return;
-    final dt = DateTime(pick.year, pick.month, pick.day, time.hour, time.minute);
-    setState(() {
-      if (isStart) _startsAt = dt;
-      else _endsAt = dt;
-    });
-  }
-
-  void _toggleParticipant(dynamic id) {
-    setState(() {
-      if (_participants.contains(id)) _participants.remove(id);
-      else _participants.add(id);
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final users = widget.availableUsers;
-    return AlertDialog(
-      title: const Text('Создать аукцион'),
-      content: SingleChildScrollView(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          TextField(controller: _title, decoration: const InputDecoration(labelText: 'Заголовок аукциона')),
-          const SizedBox(height: 8),
-          TextField(controller: _itemName, decoration: const InputDecoration(labelText: 'Название предмета')),
-          const SizedBox(height: 8),
-          TextField(controller: _itemCountCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Количество (целое)')),
-          const SizedBox(height: 12),
-          Row(children: [
-            ElevatedButton(onPressed: () => _pickDate(true), child: Text(_startsAt == null ? 'Выбрать старт' : _startsAt!.toString())),
-            const SizedBox(width: 8),
-            ElevatedButton(onPressed: () => _pickDate(false), child: Text(_endsAt == null ? 'Выбрать конец' : _endsAt!.toString())),
-          ]),
-          const Divider(),
-          const Align(alignment: Alignment.centerLeft, child: Text('Выбрать участников (необязательно):')),
-          SizedBox(
-            height: 200,
-            width: double.maxFinite,
-            child: users.isEmpty
-                ? const Center(child: Text('Пользователи не загружены'))
-                : ListView.builder(
-                    itemCount: users.length,
-                    itemBuilder: (context, i) {
-                      final u = users[i];
-                      final display = (u['first_name'] ?? '').toString().isNotEmpty
-                          ? '${u['first_name']} ${u['last_name'] ?? ''} (${u['telegram_username'] ?? u['id']})'
-                          : (u['telegram_username'] ?? u['id']).toString();
-                      final id = u['id'];
-                      return CheckboxListTile(
-                        dense: true,
-                        value: _participants.contains(id),
-                        title: Text(display),
-                        onChanged: (_) => _toggleParticipant(id),
-                      );
-                    },
-                  ),
-          ),
-        ]),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Отмена')),
-        ElevatedButton(
-          onPressed: () {
-            final title = _title.text.trim();
-            final itemName = _itemName.text.trim();
-            final itemCount = int.tryParse(_itemCountCtrl.text.trim()) ?? 1;
-            if (title.isEmpty) {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Заголовок обязателен')));
-              return;
-            }
-            if (itemName.isEmpty) {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Название предмета обязательно')));
-              return;
-            }
-            Navigator.of(context).pop({
-              'title': title,
-              'itemName': itemName,
-              'itemCount': itemCount,
-              'startsAt': _startsAt,
-              'endsAt': _endsAt,
-              'participants': _participants.toList(),
-            });
-          },
-          child: const Text('Создать'),
-        ),
-      ],
-    );
-  }
-}
-
-/// ДИАЛОГ РЕДАКТИРОВАНИЯ АУКЦИОНА
-class _EditAuctionDialog extends StatefulWidget {
-  final List<Map<String, dynamic>> availableUsers;
-  final Map<String, dynamic> initial;
-  const _EditAuctionDialog({required this.availableUsers, required this.initial, Key? key}) : super(key: key);
-  @override
-  State<_EditAuctionDialog> createState() => _EditAuctionDialogState();
-}
-
-class _EditAuctionDialogState extends State<_EditAuctionDialog> {
-  late TextEditingController _title;
-  late TextEditingController _itemName;
-  late TextEditingController _itemCountCtrl;
-  DateTime? _startsAt;
-  DateTime? _endsAt;
-  final Set<dynamic> _participants = {};
-
-  @override
-  void initState() {
-    super.initState();
-    _title = TextEditingController(text: widget.initial['title']?.toString() ?? '');
-    _itemName = TextEditingController(text: widget.initial['itemName']?.toString() ?? '');
-    _itemCountCtrl = TextEditingController(text: widget.initial['itemCount']?.toString() ?? '1');
-    _startsAt = widget.initial['startsAt'] as DateTime?;
-    _endsAt = widget.initial['endsAt'] as DateTime?;
-    final initialParts = widget.initial['participants'] as List<dynamic>? ?? [];
-    _participants.addAll(initialParts);
-  }
-
-  @override
-  void dispose() {
-    _title.dispose();
-    _itemName.dispose();
-    _itemCountCtrl.dispose();
-    super.dispose();
-  }
-
-  Future<void> _pickDate(bool isStart) async {
-    final now = DateTime.now();
-    final pick = await showDatePicker(context: context, initialDate: isStart ? (_startsAt ?? now) : (_endsAt ?? now), firstDate: now.subtract(const Duration(days: 3650)), lastDate: now.add(const Duration(days: 3650)));
-    if (pick == null) return;
-    final time = await showTimePicker(context: context, initialTime: TimeOfDay.fromDateTime(isStart ? (_startsAt ?? now) : (_endsAt ?? now)));
-    if (time == null) return;
-    final dt = DateTime(pick.year, pick.month, pick.day, time.hour, time.minute);
-    setState(() {
-      if (isStart) _startsAt = dt;
-      else _endsAt = dt;
-    });
-  }
-
-  void _toggleParticipant(dynamic id) {
-    setState(() {
-      if (_participants.contains(id)) _participants.remove(id);
-      else _participants.add(id);
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final users = widget.availableUsers;
-    return AlertDialog(
-      title: const Text('Редактировать аукцион'),
-      content: SingleChildScrollView(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          TextField(controller: _title, decoration: const InputDecoration(labelText: 'Заголовок аукциона')),
-          const SizedBox(height: 8),
-          TextField(controller: _itemName, decoration: const InputDecoration(labelText: 'Название предмета')),
-          const SizedBox(height: 8),
-          TextField(controller: _itemCountCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Количество (целое)')),
-          const SizedBox(height: 12),
-          Row(children: [
-            ElevatedButton(onPressed: () => _pickDate(true), child: Text(_startsAt == null ? 'Выбрать старт' : _startsAt!.toString())),
-            const SizedBox(width: 8),
-            ElevatedButton(onPressed: () => _pickDate(false), child: Text(_endsAt == null ? 'Выбрать конец' : _endsAt!.toString())),
-          ]),
-          const Divider(),
-          const Align(alignment: Alignment.centerLeft, child: Text('Участники (отметьте кто участвует):')),
-          SizedBox(
-            height: 200,
-            width: double.maxFinite,
-            child: users.isEmpty
-                ? const Center(child: Text('Пользователи не загружены'))
-                : ListView.builder(
-                    itemCount: users.length,
-                    itemBuilder: (context, i) {
-                      final u = users[i];
-                      final display = (u['first_name'] ?? '').toString().isNotEmpty
-                          ? '${u['first_name']} ${u['last_name'] ?? ''} (${u['telegram_username'] ?? u['id']})'
-                          : (u['telegram_username'] ?? u['id']).toString();
-                      final id = u['id'];
-                      return CheckboxListTile(
-                        dense: true,
-                        value: _participants.contains(id),
-                        title: Text(display),
-                        onChanged: (_) => _toggleParticipant(id),
-                      );
-                    },
-                  ),
-          ),
-        ]),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Отмена')),
-        ElevatedButton(
-          onPressed: () {
-            final title = _title.text.trim();
-            final itemName = _itemName.text.trim();
-            final itemCount = int.tryParse(_itemCountCtrl.text.trim()) ?? 1;
-            if (title.isEmpty) {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Заголовок обязателен')));
-              return;
-            }
-            if (itemName.isEmpty) {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Название предмета обязательно')));
-              return;
-            }
-            Navigator.of(context).pop({
-              'title': title,
-              'itemName': itemName,
-              'itemCount': itemCount,
-              'startsAt': _startsAt,
-              'endsAt': _endsAt,
-              'participants': _participants.toList(),
-            });
-          },
-          child: const Text('Сохранить'),
-        ),
-      ],
-    );
-  }
-}
-
-// ----------------- InventoryTab -----------------
-class InventoryTab extends StatefulWidget {
-  const InventoryTab({Key? key}) : super(key: key);
-  @override
-  State<InventoryTab> createState() => _InventoryTabState();
-}
-
-class _InventoryTabState extends State<InventoryTab> {
-  final supabase = Supabase.instance.client;
-  final _usernameCtrl = TextEditingController();
-  Map<String, dynamic>? _profile;
-  bool _loading = false;
-
-  Future<void> _loadProfile() async {
-    setState(() => _loading = true);
-    try {
-      final row = await supabase
-          .from('user_credentials')
-          .select('id, telegram_username, inventory')
-          .eq('telegram_username', _usernameCtrl.text.trim())
-          .maybeSingle();
-
-      Map<String, dynamic>? profile;
-      if (row == null) {
-        profile = null;
-      } else if (row is Map) {
-        profile = Map<String, dynamic>.from(row as Map);
-      } else {
-        try {
-          profile = Map<String, dynamic>.from(jsonDecode(jsonEncode(row)));
-        } catch (_) {
-          profile = null;
-        }
-      }
-
-      setState(() => _profile = profile);
-    } catch (e) {
-      setState(() => _profile = null);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
-    } finally {
-      setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _setInventory() async {
-    if (_profile == null) return;
-    final body = await showDialog<String>(context: context, builder: (_) => _BulkJsonDialog(title: 'Введите inventory JSON, например {"sword":3}'));
-    if (body == null) return;
-    try {
-      final parsed = jsonDecode(body);
-      await supabase.from('user_credentials').update({'inventory': parsed}).eq('id', _profile!['id']);
-      await _loadProfile();
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Инвентарь обновлён')));
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
-    }
-  }
-
-  @override
-  void dispose() {
-    _usernameCtrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(12.0),
-      child: Column(children: [
-        Row(children: [
-          Expanded(child: TextField(controller: _usernameCtrl, decoration: const InputDecoration(labelText: 'telegram username (без @)'))),
-          const SizedBox(width: 8),
-          ElevatedButton(onPressed: _loadProfile, child: _loading ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Загрузить')),
-        ]),
-        const SizedBox(height: 12),
-        if (_profile != null)
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              Text('Пользователь: ${_profile!['telegram_username']}'),
-              const SizedBox(height: 8),
-              Expanded(child: SingleChildScrollView(child: Text(jsonEncode(_profile!['inventory'] ?? {})))),
-              ElevatedButton(onPressed: _setInventory, child: const Text('Установить / Перезаписать инвентарь')),
-            ]),
-          ),
-      ]),
-    );
-  }
-}
-
-// ----------------- EnterprisesTab -----------------
-class EnterprisesTab extends StatefulWidget {
-  const EnterprisesTab({Key? key}) : super(key: key);
-  @override
-  State<EnterprisesTab> createState() => _EnterprisesTabState();
-}
-
-class _EnterprisesTabState extends State<EnterprisesTab> {
-  final supabase = Supabase.instance.client;
-  final _nameCtrl = TextEditingController();
-  bool _loading = false;
-  List<Map<String, dynamic>> _enterprises = [];
-
-  @override
-  void initState() {
-    super.initState();
-    _loadEnterprises();
-  }
-
-  Future<void> _loadEnterprises() async {
-    setState(() => _loading = true);
-    try {
-      final res = await supabase.from('enterprises').select('id, title, created_at').order('created_at', ascending: false);
-      if (res is List) {
-        _enterprises = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
-      } else {
-        _enterprises = [];
-      }
-    } catch (e) {
-      _enterprises = [];
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка загрузки предприятий: $e')));
-    } finally {
-      setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _openCreateEnterpriseDialog() async {
-    // dialog will fetch users itself
-    final payload = await showDialog<Map<String, dynamic>>(context: context, builder: (_) => _CreateEnterpriseDialog());
-    if (payload == null) return;
-    await _createEnterprise(payload);
-  }
-
-  Future<void> _createEnterprise(Map<String, dynamic> payload) async {
-    final name = payload['title']?.toString() ?? '';
-    final shares = payload['shares'] as List<dynamic>? ?? [];
-    if (name.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Имя предприятия нужно')));
-      return;
-    }
-
-    try {
-      final ent = await supabase.from('enterprises').insert({'title': name}).select().maybeSingle();
-      if (ent == null) throw 'Не удалось создать предприятие';
-      final entId = (ent as Map)['id'];
-      final List<Map<String, dynamic>> sharesBatch = [];
-      for (final s in shares) {
-        final userId = s['user_id'];
-        final pctRaw = s['pct'];
-        if (userId == null || pctRaw == null) continue;
-        final pct = (pctRaw is num) ? pctRaw : double.tryParse(pctRaw.toString());
-        if (pct == null) continue;
-        sharesBatch.add({'enterprise_id': entId, 'user_id': userId, 'percent': pct});
-      }
-
-      if (sharesBatch.isNotEmpty) {
-        await supabase.from('enterprise_shares').insert(sharesBatch);
-      }
-
-      await _loadEnterprises();
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Предприятие создано')));
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
-    }
-  }
-
-  Future<void> _editEnterprise(Map<String, dynamic> ent) async {
-    // load shares and users
-    try {
-      final sharesRes = await supabase.from('enterprise_shares').select('id, user_id, percent').eq('enterprise_id', ent['id']);
-      List<Map<String, dynamic>> shares = (sharesRes is List) ? sharesRes.map((e) => Map<String, dynamic>.from(e as Map)).toList() : [];
-      final payload = await showDialog<Map<String, dynamic>>(
-        context: context,
-        builder: (_) => _EditEnterpriseDialog(initialTitle: ent['title'] ?? '', initialShares: shares),
-      );
-      if (payload == null) return;
-      // update title
-      await supabase.from('enterprises').update({'title': payload['title']}).eq('id', ent['id']);
-      // replace shares
-      await supabase.from('enterprise_shares').delete().eq('enterprise_id', ent['id']);
-      final List sharesList = payload['shares'] ?? [];
-      if (sharesList.isNotEmpty) {
-        final batch = sharesList.map((s) => {'enterprise_id': ent['id'], 'user_id': s['user_id'], 'percent': s['pct']}).toList();
-        await supabase.from('enterprise_shares').insert(batch);
-      }
-      await _loadEnterprises();
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Предприятие обновлено')));
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка редактирования предприятия: $e')));
-    }
-  }
-
-  Future<void> _viewEnterpriseDetails(Map<String, dynamic> ent) async {
-    final entId = ent['id'];
-    try {
-      final sharesRes = await supabase.from('enterprise_shares').select('id, user_id, percent, meta, created_at').eq('enterprise_id', entId);
-      final shares = (sharesRes is List) ? sharesRes.map((e) => Map<String, dynamic>.from(e as Map)).toList() : <Map<String, dynamic>>[];
-
-      // load user names for shares
-      final List<String> lines = [];
-      if (shares.isNotEmpty) {
-        final userIds = shares.map((s) => s['user_id'].toString()).toList();
-        final orQuery = userIds.map((id) => 'id.eq.$id').join(',');
-        final usersRes = await supabase.from('user_credentials').select('id, telegram_username, first_name, last_name').or(orQuery);
-        Map<dynamic, Map<String, dynamic>> userById = {};
-        if (usersRes is List) {
-          for (final u in usersRes) {
-            final um = Map<String, dynamic>.from(u as Map);
-            userById[um['id']] = um;
-          }
-        }
-        for (final s in shares) {
-          final uid = s['user_id'];
-          final u = userById[uid];
-          final name = (u != null && (u['first_name'] ?? '').toString().isNotEmpty) ? '${u['first_name']} ${u['last_name'] ?? ''} (${u['telegram_username'] ?? u['id']})' : (u != null ? (u['telegram_username'] ?? u['id']).toString() : uid.toString());
-          lines.add('$name — ${s['percent']}%');
-        }
-      }
-
-      await showDialog<void>(
-        context: context,
-        builder: (_) => AlertDialog(
-          title: Text('Предприятие: ${ent['title']}'),
-          content: SizedBox(
-            width: double.maxFinite,
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              if (shares.isEmpty) const Text('Доли не распределены'),
-              if (shares.isNotEmpty)
-                SizedBox(
-                  height: 240,
-                  child: ListView.builder(
-                    itemCount: lines.length,
-                    itemBuilder: (context, i) {
-                      final line = lines[i];
-                      return ListTile(
-                        title: Text(line),
-                      );
-                    },
-                  ),
-                ),
-            ]),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Закрыть')),
-            TextButton(
-                onPressed: () async {
-                  Navigator.of(context).pop();
-                  await _editEnterprise(ent);
-                },
-                child: const Text('Редактировать')),
-            TextButton(
-                onPressed: () async {
-                  try {
-                    await supabase.from('enterprises').delete().eq('id', entId);
-                    await _loadEnterprises();
-                    Navigator.of(context).pop();
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Предприятие удалено')));
-                  } catch (e) {
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка удаления: $e')));
-                  }
-                },
-                child: const Text('Удалить предприятие')),
-          ],
-        ),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка получения долей: $e')));
-    }
-  }
-
-  @override
-  void dispose() {
-    _nameCtrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(12.0),
-      child: Column(children: [
-        Row(children: [
-          ElevatedButton.icon(onPressed: _openCreateEnterpriseDialog, icon: const Icon(Icons.add_business), label: const Text('Создать предприятие')),
-          const SizedBox(width: 12),
-          ElevatedButton(onPressed: _loadEnterprises, child: const Text('Обновить список')),
-        ]),
-        const SizedBox(height: 12),
-        Expanded(
-          child: _loading
-              ? const Center(child: CircularProgressIndicator())
-              : ListView.separated(
-                  itemCount: _enterprises.length,
-                  separatorBuilder: (_, __) => const Divider(height: 0),
-                  itemBuilder: (context, i) {
-                    final e = _enterprises[i];
-                    return ListTile(
-                      title: Text(e['title'] ?? 'Без названия'),
-                      subtitle: Text('id: ${e['id']}'),
-                      onTap: () => _viewEnterpriseDetails(e),
-                      trailing: IconButton(icon: const Icon(Icons.edit), onPressed: () => _editEnterprise(e)),
-                    );
-                  },
-                ),
-        ),
-      ]),
-    );
-  }
-}
-
-// ----------------- BulkTab -----------------
-class BulkTab extends StatefulWidget {
-  const BulkTab({Key? key}) : super(key: key);
-  @override
-  State<BulkTab> createState() => _BulkTabState();
-}
-
-class _BulkTabState extends State<BulkTab> {
-  final supabase = Supabase.instance.client;
-  final _payloadCtrl = TextEditingController();
-
-  Future<void> _applyBulkUpdate() async {
-    final text = _payloadCtrl.text.trim();
-    if (text.isEmpty) return;
-    try {
-      final doc = jsonDecode(text);
-      if (doc is List) {
-        for (final el in doc) {
-          final username = el['username']?.toString();
-          final set = el['set'];
-          if (username == null || set == null) continue;
-          await supabase.from('user_credentials').update(set).eq('telegram_username', username);
-        }
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Массовое обновление выполнено')));
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ожидается список объектов')));
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка JSON: $e')));
-    }
-  }
-
-  @override
-  void dispose() {
-    _payloadCtrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(12.0),
-      child: Column(children: [
-        const Text('Массовые операции: вставьте JSON-список изменений'),
-        const SizedBox(height: 8),
-        Expanded(child: TextField(controller: _payloadCtrl, maxLines: null, expands: true, decoration: const InputDecoration(border: OutlineInputBorder(), hintText: '[{ "username":"alice","set":{"v_balance":10}}]'))),
-        const SizedBox(height: 8),
-        ElevatedButton(onPressed: _applyBulkUpdate, child: const Text('Применить')),
-      ]),
-    );
-  }
-}
-
-// ----------------- Reusable small dialogs -----------------
-class _BulkJsonDialog extends StatefulWidget {
-  final String title;
-  const _BulkJsonDialog({required this.title, Key? key}) : super(key: key);
-  @override
-  State<_BulkJsonDialog> createState() => _BulkJsonDialogState();
-}
-
-class _BulkJsonDialogState extends State<_BulkJsonDialog> {
-  final _ctrl = TextEditingController();
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(widget.title),
-      content: TextField(controller: _ctrl, minLines: 4, maxLines: 12, decoration: const InputDecoration(hintText: '{}')),
-      actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Отмена')),
-        ElevatedButton(onPressed: () => Navigator.of(context).pop(_ctrl.text), child: const Text('OK')),
-      ],
-    );
-  }
-}
-
-// ----------------- Create Enterprise Dialog (friendly UI) -----------------
-class _CreateEnterpriseDialog extends StatefulWidget {
-  const _CreateEnterpriseDialog({Key? key}) : super(key: key);
-  @override
-  State<_CreateEnterpriseDialog> createState() => _CreateEnterpriseDialogState();
-}
-
-class _CreateEnterpriseDialogState extends State<_CreateEnterpriseDialog> {
-  final supabase = Supabase.instance.client;
-  final _titleCtrl = TextEditingController();
-  List<Map<String, dynamic>> _users = [];
-  bool _loading = true;
-  final Map<dynamic, TextEditingController> _pctCtrls = {};
-  final Set<dynamic> _selected = {};
-
-  @override
-  void initState() {
-    super.initState();
-    _fetchUsers();
-  }
-
-  Future<void> _fetchUsers() async {
-    setState(() => _loading = true);
-    try {
-      final res = await supabase.from('user_credentials').select('id, telegram_username, first_name, last_name').order('telegram_username');
-      if (res is List) {
-        _users = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
-      } else {
-        _users = [];
-      }
-    } catch (_) {
-      _users = [];
-    } finally {
-      setState(() => _loading = false);
-    }
+    _loadPoliticians();
+    _loadActiveDebate();
   }
 
   @override
   void dispose() {
     _titleCtrl.dispose();
-    for (final c in _pctCtrls.values) {
+    _descCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadPoliticians() async {
+    try {
+      final res = await supabase.from('user_credentials').select('id, first_name, last_name, telegram_username').eq('role', 'politician').order('first_name');
+      if (res is List) {
+        _politicians = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      } else {
+        _politicians = <Map<String, dynamic>>[];
+      }
+    } catch (_) {
+      _politicians = <Map<String, dynamic>>[];
+    }
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _loadActiveDebate() async {
+    try {
+      final row = await supabase.from('debates').select().eq('is_closed', false).order('created_at', ascending: false).limit(1).maybeSingle();
+      if (row is Map<String, dynamic>) {
+        _activeDebate = Map<String, dynamic>.from(row);
+      } else {
+        _activeDebate = null;
+      }
+    } catch (_) {
+      _activeDebate = null;
+    }
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _createDebate() async {
+    if (_creating) return;
+    setState(() => _creating = true);
+
+    try {
+      // ensure no active debate
+      final existing = await supabase.from('debates').select('id').eq('is_closed', false).limit(1).maybeSingle();
+      if (existing != null) {
+        throw Exception('Уже существует активный дебат. Закройте его перед созданием нового.');
+      }
+
+      // create debate row
+      final debateInsert = {
+        'title': _titleCtrl.text.trim().isEmpty ? 'Дебаты' : _titleCtrl.text.trim(),
+        'description': _descCtrl.text.trim(),
+        'created_at': DateTime.now().toUtc().toIso8601String(),
+        'is_closed': false,
+      };
+
+      final debateRes = await supabase.from('debates').insert(debateInsert).select().maybeSingle();
+      if (debateRes == null || debateRes is! Map<String, dynamic> || debateRes['id'] == null) {
+        throw Exception('Не удалось создать запись дебата');
+      }
+      final int debateId = (debateRes['id'] is int) ? debateRes['id'] as int : int.parse(debateRes['id'].toString());
+
+      // create fixed options
+      final List<Map<String, dynamic>> optionRows = [];
+      for (final c in _colorDefs) {
+        optionRows.add({'debate_id': debateId, 'label': c.label, 'color': c.label});
+      }
+      final optsRes = await supabase.from('debate_options').insert(optionRows).select();
+      if (optsRes == null || optsRes is! List) {
+        throw Exception('Не удалось создать варианты голосования');
+      }
+      // map color -> option_id
+      final Map<String, int> colorToOptionId = {};
+      for (final row in optsRes) {
+        final m = Map<String, dynamic>.from(row as Map);
+        final label = (m['label'] ?? '').toString();
+        final id = (m['id'] is int) ? m['id'] as int : int.parse(m['id'].toString());
+        colorToOptionId[label] = id;
+      }
+
+      // insert speakers if selected
+      final List<Map<String, dynamic>> speakerInserts = [];
+      for (final c in _colorDefs) {
+        final optId = colorToOptionId[c.label];
+        final sA = _speakerA[c.label];
+        final sB = _speakerB[c.label];
+        if (sA != null && sA.trim().isNotEmpty) {
+          speakerInserts.add({'debate_id': debateId, 'option_id': optId, 'color': c.label, 'politician_id': sA});
+        }
+        if (sB != null && sB.trim().isNotEmpty && sB != sA) {
+          speakerInserts.add({'debate_id': debateId, 'option_id': optId, 'color': c.label, 'politician_id': sB});
+        }
+      }
+      if (speakerInserts.isNotEmpty) {
+        await supabase.from('debate_speakers').insert(speakerInserts);
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Дебаты успешно созданы')));
+      }
+      await _loadActiveDebate();
+    } catch (e) {
+      final msg = e is Exception ? e.toString() : 'Ошибка: $e';
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    } finally {
+      if (mounted) setState(() => _creating = false);
+    }
+  }
+
+  Future<void> _closeDebate() async {
+    if (_closing) return;
+    if (_activeDebate == null) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Нет активного дебата')));
+      return;
+    }
+    setState(() => _closing = true);
+    try {
+      final debateId = (_activeDebate!['id'] is int) ? _activeDebate!['id'] as int : int.parse(_activeDebate!['id'].toString());
+
+      // call RPC via GameService; implement rpcCloseDebate(debateId: int) in GameService
+      await GameService().rpcCloseDebate(debateId: debateId);
+
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Дебаты закрыты')));
+      await _loadActiveDebate();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка закрытия: $e')));
+    } finally {
+      if (mounted) setState(() => _closing = false);
+    }
+  }
+
+  Widget _buildSpeakerDropdown(String color, bool first) {
+    final current = (first ? _speakerA[color] : _speakerB[color]);
+    final items = <DropdownMenuItem<String?>>[
+      const DropdownMenuItem<String?>(value: null, child: Text('- нет -')),
+    ];
+    for (final p in _politicians) {
+      final id = p['id']?.toString();
+      final name = ((p['first_name'] ?? '') as String).toString().trim().isEmpty
+          ? (p['telegram_username'] ?? p['last_name'] ?? id ?? '—').toString()
+          : '${p['first_name'] ?? ''} ${p['last_name'] ?? ''}'.trim();
+      items.add(DropdownMenuItem<String?>(value: id, child: Text(name)));
+    }
+    return DropdownButton<String?>(
+      value: current,
+      isExpanded: true,
+      items: items,
+      onChanged: (v) {
+        setState(() {
+          if (first) {
+            _speakerA[color] = v;
+            if (_speakerB[color] == v) _speakerB[color] = null;
+          } else {
+            _speakerB[color] = v;
+            if (_speakerA[color] == v) _speakerA[color] = null;
+          }
+        });
+      },
+    );
+  }
+
+  Widget _buildColorRow(_ColorDef c) {
+    Color parsed;
+    try {
+      parsed = Color(int.parse('0xFF${c.hex.replaceFirst('#', '')}'));
+    } catch (_) {
+      parsed = Colors.grey;
+    }
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(
+            children: [
+              Container(width: 14, height: 14, decoration: BoxDecoration(color: parsed, borderRadius: BorderRadius.circular(3), border: Border.all(color: Colors.black12))),
+              const SizedBox(width: 8),
+              Text(c.label, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('Спикер A', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                const SizedBox(height: 6),
+                _buildSpeakerDropdown(c.label, true),
+              ]),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('Спикер B', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                const SizedBox(height: 6),
+                _buildSpeakerDropdown(c.label, false),
+              ]),
+            ),
+          ]),
+        ]),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hasActive = _activeDebate != null;
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(12),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(12.0),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('Создать дебаты', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 8),
+              TextField(controller: _titleCtrl, decoration: const InputDecoration(labelText: 'Заголовок')),
+              const SizedBox(height: 8),
+              TextField(controller: _descCtrl, decoration: const InputDecoration(labelText: 'Описание (опционально)')),
+              const SizedBox(height: 12),
+              const Text('Назначить спикеров по цветам (максимум 2 на цвет)', style: TextStyle(color: Colors.black87)),
+              const SizedBox(height: 8),
+              ..._colorDefs.map((c) => _buildColorRow(c)).toList(),
+              const SizedBox(height: 12),
+              Row(children: [
+                ElevatedButton(
+                  onPressed: _creating ? null : _createDebate,
+                  child: _creating ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Создать дебаты'),
+                ),
+                const SizedBox(width: 12),
+                ElevatedButton(
+                  onPressed: hasActive && !_closing ? _closeDebate : null,
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+                  child: _closing ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Закрыть текущие дебаты'),
+                ),
+              ])
+            ]),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('Текущее состояние', style: TextStyle(fontWeight: FontWeight.w700)),
+              const SizedBox(height: 8),
+              if (_activeDebate != null) ...[
+                Text('Активный дебат: ${_activeDebate?['title'] ?? '—'}'),
+                const SizedBox(height: 6),
+                Text('Описание: ${_activeDebate?['description'] ?? '—'}'),
+                const SizedBox(height: 6),
+                Text('Создан: ${_activeDebate?['created_at'] ?? '—'}'),
+              ] else
+                const Text('Нет активных дебатов'),
+            ]),
+          ),
+        ),
+      ]),
+    );
+  }
+}
+
+// ----------------- ResolutionsTab (admin political resolutions) -----------------
+class ResolutionsTab extends StatefulWidget {
+  const ResolutionsTab({Key? key}) : super(key: key);
+  @override
+  State<ResolutionsTab> createState() => _ResolutionsTabState();
+}
+
+class _ResolutionsTabState extends State<ResolutionsTab> {
+  final supabase = Supabase.instance.client;
+  final GameService svc = GameService();
+
+  // form controllers
+  final TextEditingController _titleCtrl = TextEditingController();
+  final TextEditingController _descCtrl = TextEditingController();
+  String _selectedColor = 'зелёный';
+
+  // dynamic options fields
+  final List<TextEditingController> _optionCtrls = [];
+
+  bool _creating = false;
+  bool _loading = false;
+  bool _closing = false;
+
+  List<Map<String, dynamic>> _resolutions = [];
+
+  // fixed colors (must match enum values in DB)
+  static const List<String> fixedColors = [
+    'зелёный',
+    'красный',
+    'синий',
+    'жёлтый',
+    'малиновый'
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _addOptionField(); // start with one option
+    _loadResolutions();
+  }
+
+  @override
+  void dispose() {
+    _titleCtrl.dispose();
+    _descCtrl.dispose();
+    for (final c in _optionCtrls) {
       c.dispose();
     }
     super.dispose();
   }
 
-  void _toggleSelect(dynamic id) {
-    setState(() {
-      if (_selected.contains(id)) {
-        _selected.remove(id);
-      } else {
-        _selected.add(id);
-        _pctCtrls[id] = TextEditingController(text: '0');
-      }
-    });
+  void _addOptionField() {
+    final ctrl = TextEditingController();
+    _optionCtrls.add(ctrl);
+    setState(() {});
   }
 
-  void _submit() {
-    final title = _titleCtrl.text.trim();
-    if (title.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Название предприятия нужно')));
-      return;
-    }
-    final List shares = [];
-    for (final id in _selected) {
-      final ctrl = _pctCtrls[id];
-      final pct = double.tryParse(ctrl?.text.replaceAll(',', '.') ?? '') ?? 0.0;
-      if (pct <= 0) continue;
-      shares.add({'user_id': id, 'pct': pct});
-    }
-    if (shares.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Необходимо указать хотя бы одну долю > 0')));
-      return;
-    }
-    Navigator.of(context).pop({'title': title, 'shares': shares});
+  void _removeOptionField(int idx) {
+    if (idx < 0 || idx >= _optionCtrls.length) return;
+    _optionCtrls[idx].dispose();
+    _optionCtrls.removeAt(idx);
+    setState(() {});
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Создать предприятие (удобный интерфейс)'),
-      content: SizedBox(
-        width: double.maxFinite,
-        child: _loading
-            ? const SizedBox(height: 120, child: Center(child: CircularProgressIndicator()))
-            : SingleChildScrollView(
-                child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  TextField(controller: _titleCtrl, decoration: const InputDecoration(labelText: 'Название предприятия')),
-                  const SizedBox(height: 12),
-                  const Align(alignment: Alignment.centerLeft, child: Text('Отметьте пользователей и укажите %:')),
-                  const SizedBox(height: 8),
-                  if (_users.isEmpty) const Text('Нет пользователей'),
-                  ..._users.map((u) {
-                    final id = u['id'];
-                    final display = (u['first_name'] ?? '').toString().isNotEmpty ? '${u['first_name']} ${u['last_name'] ?? ''} (${u['telegram_username'] ?? id})' : (u['telegram_username'] ?? id).toString();
-                    final selected = _selected.contains(id);
-                    final ctrl = _pctCtrls[id] ?? TextEditingController(text: '0');
-                    if (!_pctCtrls.containsKey(id)) _pctCtrls[id] = ctrl;
-                    return Row(children: [
-                      Checkbox(value: selected, onChanged: (_) => _toggleSelect(id)),
-                      Expanded(child: Text(display)),
-                      SizedBox(width: 96, child: TextField(controller: ctrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(suffixText: '%'))),
-                    ]);
-                  }).toList(),
-                ]),
-              ),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Отмена')),
-        ElevatedButton(onPressed: _submit, child: const Text('Создать')),
-      ],
-    );
-  }
-}
-
-// ----------------- Edit Enterprise Dialog -----------------
-class _EditEnterpriseDialog extends StatefulWidget {
-  final String initialTitle;
-  final List<Map<String, dynamic>> initialShares; // {id, user_id, percent}
-  const _EditEnterpriseDialog({required this.initialTitle, required this.initialShares, Key? key}) : super(key: key);
-  @override
-  State<_EditEnterpriseDialog> createState() => _EditEnterpriseDialogState();
-}
-
-class _EditEnterpriseDialogState extends State<_EditEnterpriseDialog> {
-  final supabase = Supabase.instance.client;
-  late TextEditingController _titleCtrl;
-  List<Map<String, dynamic>> _users = [];
-  bool _loading = true;
-
-  // shares editor: each element { user_id, pct }
-  List<Map<String, dynamic>> _shares = [];
-
-  @override
-  void initState() {
-    super.initState();
-    _titleCtrl = TextEditingController(text: widget.initialTitle);
-    _shares = widget.initialShares.map((s) => {'user_id': s['user_id'], 'pct': s['percent']}).toList();
-    _fetchUsers();
-  }
-
-  Future<void> _fetchUsers() async {
+  Future<void> _loadResolutions() async {
     setState(() => _loading = true);
     try {
-      final res = await supabase.from('user_credentials').select('id, telegram_username, first_name, last_name').order('telegram_username');
-      if (res is List) {
-        _users = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
-      } else {
-        _users = [];
+      // try selecting expected columns; if DB doesn't have some, fallback to select('*')
+      try {
+        final res = await supabase
+            .from('political_resolutions')
+            .select('id, title, description, created_by, created_at, is_closed, closed_at, total_m, winning_bet_id, winning_option_id')
+            .order('created_at', ascending: false);
+        if (res is List) {
+          _resolutions = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+        } else {
+          _resolutions = [];
+        }
+      } catch (e) {
+        // fallback: select all columns (safer when schema differs)
+        debugPrint('Resolutions: specific select failed, falling back to select(*): $e');
+        final res2 = await supabase.from('political_resolutions').select('*').order('created_at', ascending: false);
+        if (res2 is List) {
+          _resolutions = res2.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+        } else {
+          _resolutions = [];
+        }
       }
-    } catch (_) {
-      _users = [];
+    } catch (e) {
+      _resolutions = [];
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка загрузки политрешений: $e')));
     } finally {
       setState(() => _loading = false);
     }
   }
 
-  void _addEmptyShare() {
-    setState(() => _shares.add({'user_id': null, 'pct': 0}));
-  }
+  Future<void> _createResolution() async {
+    if (_creating) return;
 
-  void _removeShare(int idx) {
-    setState(() => _shares.removeAt(idx));
-  }
-
-  void _submit() {
     final title = _titleCtrl.text.trim();
     if (title.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Название предприятия нужно')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Введите заголовок')));
       return;
     }
-    final List out = [];
-    for (final s in _shares) {
-      final uid = s['user_id'];
-      final pctRaw = s['pct'];
-      final pct = (pctRaw is num) ? pctRaw : double.tryParse(pctRaw.toString()) ?? 0.0;
-      if (uid == null || pct <= 0) continue;
-      out.add({'user_id': uid, 'pct': pct});
-    }
-    if (out.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Добавьте хотя бы одну долю > 0')));
+
+    final options = _optionCtrls.map((c) => c.text.trim()).where((t) => t.isNotEmpty).toList();
+    if (options.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Добавьте хотя бы один вариант ответа')));
       return;
     }
-    Navigator.of(context).pop({'title': title, 'shares': out});
+
+    setState(() => _creating = true);
+    try {
+      // insert resolution
+      final payload = {
+        'title': title,
+        'description': _descCtrl.text.trim(),
+        'created_at': DateTime.now().toUtc().toIso8601String(),
+        'is_closed': false,
+      };
+      final res = await supabase.from('political_resolutions').insert(payload).select().maybeSingle();
+      if (res == null || res['id'] == null) {
+        throw Exception('Не удалось создать политрешение');
+      }
+      final int resolutionId = (res['id'] is int) ? res['id'] as int : int.parse(res['id'].toString());
+
+      // insert options; include color selection for each option as default _selectedColor
+      final optRows = options.map((label) => {'resolution_id': resolutionId, 'label': label, 'color': _selectedColor}).toList();
+      await supabase.from('resolution_options').insert(optRows);
+
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Политрешение и варианты созданы')));
+      _titleCtrl.clear();
+      _descCtrl.clear();
+      for (final c in _optionCtrls) c.clear();
+      // keep one option field
+      while (_optionCtrls.length > 1) {
+        _optionCtrls.removeLast().dispose();
+      }
+
+      await _loadResolutions();
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка создания: $e')));
+    } finally {
+      setState(() => _creating = false);
+    }
   }
 
-  @override
-  void dispose() {
-    _titleCtrl.dispose();
-    super.dispose();
+  Future<void> _addOptionToResolution(int resolutionId) async {
+    final ctrl = TextEditingController();
+    final added = await showDialog<String?>(context: context, builder: (_) => AlertDialog(
+      title: const Text('Добавить вариант'),
+      content: TextField(controller: ctrl, decoration: const InputDecoration(labelText: 'Вариант')),
+      actions: [
+        TextButton(onPressed: () => Navigator.of(context).pop(null), child: const Text('Отмена')),
+        ElevatedButton(onPressed: () => Navigator.of(context).pop(ctrl.text.trim()), child: const Text('Добавить')),
+      ],
+    ));
+
+    if (added != null && added.isNotEmpty) {
+      try {
+        // new option gets default color _selectedColor
+        await supabase.from('resolution_options').insert({'resolution_id': resolutionId, 'label': added, 'color': _selectedColor});
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Вариант добавлен')));
+        await _loadResolutions();
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка добавления варианта: $e')));
+      }
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _loadOptionsForResolution(int resolutionId) async {
+    try {
+      final res = await supabase.from('resolution_options').select('id, label, color, created_at').eq('resolution_id', resolutionId).order('id');
+      if (res is List) return res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      return [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _loadResultsForResolution(int resolutionId) async {
+    try {
+      // resolution_results_admin view aggregates votes per option (admin-only)
+      final res = await supabase.from('resolution_results_admin').select('option_id, label, votes_count, votes_sum').eq('resolution_id', resolutionId).order('votes_sum', ascending: false);
+      if (res is List) return res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      return [];
+    } catch (e) {
+      debugPrint('Failed to load results: $e');
+      return [];
+    }
+  }
+
+  Future<void> _closeResolution(int resolutionId) async {
+    if (_closing) return;
+    setState(() => _closing = true);
+    try {
+      final res = await svc.rpcCloseResolution(resolutionId: resolutionId);
+      final msg = (res != null && (res['winning_option_label'] != null || res['winner'] != null))
+          ? 'Резолюция закрыта. Победитель: ${res['winning_option_label'] ?? res['winner'] ?? ''}'
+          : 'Резолюция закрыта';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+      await _loadResolutions();
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка закрытия: $e')));
+    } finally {
+      setState(() => _closing = false);
+    }
+  }
+
+  Widget _buildResolutionCard(Map<String, dynamic> r) {
+    final closed = (r['is_closed'] == true);
+    final id = (r['id'] is int) ? r['id'] as int : int.parse(r['id'].toString());
+    final int? winningOptionId = r['winning_option_id'] == null
+        ? null
+        : (r['winning_option_id'] is int
+            ? r['winning_option_id'] as int
+            : int.tryParse(r['winning_option_id'].toString()));
+
+    // combined future: load options + results together for consistent display
+    final combinedFuture = Future.wait([
+      _loadOptionsForResolution(id),
+      _loadResultsForResolution(id),
+    ]);
+
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Expanded(child: Text(r['title'] ?? '—', style: const TextStyle(fontWeight: FontWeight.w700))),
+            if (!closed)
+              ElevatedButton(
+                onPressed: () => _closeResolution(id),
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+                child: const Text('Закрыть'),
+              ),
+          ]),
+          const SizedBox(height: 6),
+          Text('Описание: ${r['description'] ?? '-'}'),
+          const SizedBox(height: 6),
+          Text('Создано: ${r['created_at'] ?? '-'}'),
+          if (r['is_closed'] == true) ...[
+            const SizedBox(height: 6),
+            Text('Закрыто: ${r['closed_at'] ?? '-'}'),
+            const SizedBox(height: 6),
+            // total_m may be present; otherwise we will display aggregated sum from results
+            Text('Всего вложено (M): ${r['total_m'] ?? '-'}'),
+            const SizedBox(height: 6),
+          ],
+          const SizedBox(height: 8),
+          FutureBuilder<List<dynamic>>(
+            future: combinedFuture,
+            builder: (context, snap) {
+              if (snap.connectionState == ConnectionState.waiting) return const SizedBox(height: 40, child: Center(child: CircularProgressIndicator()));
+              if (!snap.hasData) {
+                return const Text('Нет вариантов/ставок или ошибка при загрузке результатов.');
+              }
+              final opts = (snap.data![0] as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+              final results = (snap.data![1] as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+
+              // build map: option_id -> result row
+              final Map<int, Map<String, dynamic>> resMap = {};
+              num aggregatedTotal = 0;
+              for (final rr in results) {
+                final oid = (rr['option_id'] is int) ? rr['option_id'] as int : int.tryParse(rr['option_id']?.toString() ?? '') ?? 0;
+                resMap[oid] = rr;
+                final sum = (rr['votes_sum'] is num) ? (rr['votes_sum'] as num) : num.tryParse(rr['votes_sum']?.toString() ?? '') ?? 0;
+                aggregatedTotal += sum;
+              }
+
+              // determine winning option label/color if closed or if winningOptionId available
+              Map<String, dynamic>? winningOption;
+              if (winningOptionId != null) {
+                try {
+                  winningOption = opts.firstWhere((o) {
+                    final oid = (o['id'] is int) ? o['id'] as int : int.tryParse(o['id']?.toString() ?? '') ?? 0;
+                    return oid == winningOptionId;
+                  });
+                } catch (_) {
+                  winningOption = null;
+                }
+              } else {
+                // if no explicit winner stored but results available, pick highest votes_sum
+                if (results.isNotEmpty) {
+                  results.sort((a, b) {
+                    final sa = (a['votes_sum'] is num) ? (a['votes_sum'] as num) : num.tryParse(a['votes_sum']?.toString() ?? '') ?? 0;
+                    final sb = (b['votes_sum'] is num) ? (b['votes_sum'] as num) : num.tryParse(b['votes_sum']?.toString() ?? '') ?? 0;
+                    return sb.compareTo(sa);
+                  });
+                  final topOid = (results[0]['option_id'] is int) ? results[0]['option_id'] as int : int.tryParse(results[0]['option_id']?.toString() ?? '') ?? 0;
+                  try {
+                    winningOption = opts.firstWhere((o) {
+                      final oid = (o['id'] is int) ? o['id'] as int : int.tryParse(o['id']?.toString() ?? '') ?? 0;
+                      return oid == topOid;
+                    });
+                  } catch (_) {
+                    winningOption = null;
+                  }
+                }
+              }
+
+              // display total sum if r['total_m'] is absent, show aggregatedTotal
+              final totalToShow = (r['total_m'] != null) ? r['total_m'] : aggregatedTotal;
+
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Варианты и ставки (детально):', style: const TextStyle(fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 8),
+                  // list options with per-option aggregated values
+                  ...opts.map((o) {
+                    final oid = (o['id'] is int) ? o['id'] as int : int.tryParse(o['id']?.toString() ?? '') ?? 0;
+                    final label = (o['label'] ?? '-').toString();
+                    final color = (o['color'] ?? '-').toString();
+                    final resRow = resMap[oid];
+                    final sum = resRow != null ? ((resRow['votes_sum'] is num) ? (resRow['votes_sum'] as num) : num.tryParse(resRow['votes_sum']?.toString() ?? '') ?? 0) : 0;
+                    final cnt = resRow != null ? ((resRow['votes_count'] is num) ? (resRow['votes_count'] as num).toInt() : int.tryParse(resRow['votes_count']?.toString() ?? '') ?? 0) : 0;
+
+                    final isWinner = (winningOption != null) && ((winningOption['id'] is int ? winningOption['id'] : int.tryParse(winningOption['id']?.toString() ?? '')) == oid);
+
+                    return Container(
+                      margin: const EdgeInsets.symmetric(vertical: 6),
+                      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey.shade200),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              Row(children: [
+                                Expanded(child: Text(label, style: TextStyle(fontWeight: isWinner ? FontWeight.w700 : FontWeight.w600))),
+                                if (isWinner)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(color: Colors.yellow.shade100, borderRadius: BorderRadius.circular(12)),
+                                    child: const Text('Победитель', style: TextStyle(fontSize: 12)),
+                                  ),
+                              ]),
+                              const SizedBox(height: 6),
+                              Text('Ставок: $cnt  •  Сумма: ${sum.toString()}'),
+                            ]),
+                          ),
+                          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                            Text(color, style: const TextStyle(color: Colors.black54)),
+                            const SizedBox(height: 6),
+                            Text('id:${oid}', style: const TextStyle(color: Colors.black45, fontSize: 12)),
+                          ]),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                  const SizedBox(height: 8),
+                  // totals and winner summary
+                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                    Expanded(
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text('Итого вложено (M): $totalToShow', style: const TextStyle(fontWeight: FontWeight.w600)),
+                        const SizedBox(height: 6),
+                        if (closed)
+                          Text(
+                            winningOption != null
+                                ? 'Победивший вариант: ${winningOption['label']} [${winningOption['color'] ?? '-'}]'
+                                : 'Победивший вариант: —',
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                        if (!closed)
+                          Text(
+                            winningOption != null
+                                ? 'Текущий лидер: ${winningOption['label']} [${winningOption['color'] ?? '-'}]'
+                                : 'Текущий лидер: —',
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                      ]),
+                    ),
+                  ]),
+                ],
+              );
+            },
+          ),
+        ]),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Редактировать предприятие'),
-      content: SizedBox(
-        width: double.maxFinite,
-        child: _loading
-            ? const SizedBox(height: 120, child: Center(child: CircularProgressIndicator()))
-            : SingleChildScrollView(
-                child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  TextField(controller: _titleCtrl, decoration: const InputDecoration(labelText: 'Название предприятия')),
-                  const SizedBox(height: 12),
-                  const Align(alignment: Alignment.centerLeft, child: Text('Доли:')),
-                  const SizedBox(height: 8),
-                  ..._shares.asMap().entries.map((entry) {
-                    final idx = entry.key;
-                    final s = entry.value;
-                    final selectedUserId = s['user_id'];
-                    return Row(children: [
-                      Expanded(
-                        child: DropdownButtonFormField<dynamic>(
-                          value: selectedUserId,
-                          items: [
-                            const DropdownMenuItem(value: null, child: Text('- выбрать пользователя -')),
-                            ..._users.map((u) => DropdownMenuItem(value: u['id'], child: Text((u['first_name'] ?? '').toString().isNotEmpty ? '${u['first_name']} ${u['last_name'] ?? ''} (${u['telegram_username'] ?? u['id']})' : (u['telegram_username'] ?? u['id']).toString())))
-                          ],
-                          onChanged: (v) => setState(() => s['user_id'] = v),
-                        ),
-                      ),
+    return RefreshIndicator(
+      onRefresh: _loadResolutions,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(12),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12.0),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('Создать политрешение', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 8),
+                TextField(controller: _titleCtrl, decoration: const InputDecoration(labelText: 'Заголовок')),
+                const SizedBox(height: 8),
+                TextField(controller: _descCtrl, decoration: const InputDecoration(labelText: 'Описание (опционально)')),
+                // removed resolution-level color per request (colors are per-option)
+                const SizedBox(height: 12),
+                const Text('Варианты ответа:', style: TextStyle(fontWeight: FontWeight.w600)),
+                const SizedBox(height: 8),
+                ..._optionCtrls.asMap().entries.map((e) {
+                  final idx = e.key;
+                  final ctrl = e.value;
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 6.0),
+                    child: Row(children: [
+                      Expanded(child: TextField(controller: ctrl, decoration: InputDecoration(labelText: 'Вариант ${idx + 1}'))),
                       const SizedBox(width: 8),
-                      SizedBox(
-                        width: 96,
-                        child: TextFormField(
-                          initialValue: s['pct'].toString(),
-                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                          onChanged: (v) => s['pct'] = double.tryParse(v.replaceAll(',', '.')) ?? 0.0,
-                          decoration: const InputDecoration(suffixText: '%'),
-                        ),
-                      ),
-                      IconButton(icon: const Icon(Icons.delete), onPressed: () => _removeShare(idx)),
-                    ]);
-                  }).toList(),
-                  const SizedBox(height: 8),
-                  Align(alignment: Alignment.centerLeft, child: ElevatedButton(onPressed: _addEmptyShare, child: const Text('Добавить долю'))),
-                ]),
-              ),
+                      IconButton(
+                          onPressed: () {
+                            if (_optionCtrls.length <= 1) return;
+                            _removeOptionField(idx);
+                          },
+                          icon: const Icon(Icons.delete, color: Colors.redAccent)),
+                    ]),
+                  );
+                }).toList(),
+                Row(children: [
+                  ElevatedButton.icon(onPressed: _addOptionField, icon: const Icon(Icons.add), label: const Text('Добавить поле варианта')),
+                  const SizedBox(width: 12),
+                  ElevatedButton(
+                    onPressed: _creating ? null : _createResolution,
+                    child: _creating ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Создать политрешение'),
+                  ),
+                ])
+              ]),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('Список политрешений', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 8),
+                if (_loading)
+                  const Center(child: CircularProgressIndicator())
+                else if (_resolutions.isEmpty)
+                  const Text('Нет политрешений')
+                else
+                  Column(children: _resolutions.map((r) => _buildResolutionCard(r)).toList()),
+              ]),
+            ),
+          ),
+          const SizedBox(height: 40),
+        ]),
       ),
-      actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Отмена')),
-        ElevatedButton(onPressed: _submit, child: const Text('Сохранить')),
-      ],
     );
   }
+}
+
+// ----------------- ColorBanksTab -----------------
+class ColorBanksTab extends StatefulWidget {
+  const ColorBanksTab({Key? key}) : super(key: key);
+  @override
+  State<ColorBanksTab> createState() => _ColorBanksTabState();
+}
+
+class _ColorBanksTabState extends State<ColorBanksTab> {
+  final supabase = Supabase.instance.client;
+
+  static const List<String> fixedColors = [
+    'зелёный',
+    'красный',
+    'синий',
+    'жёлтый',
+    'малиновый'
+  ];
+
+  Map<String, num> _balances = {};
+  bool _loading = false;
+
+  // history cache per color
+  final Map<String, List<Map<String, dynamic>>> _historyCache = {};
+  final Map<String, bool> _loadingHistory = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadBanks();
+  }
+
+  Future<void> _loadBanks() async {
+    setState(() => _loading = true);
+    try {
+      final res = await supabase.from('color_banks').select('*');
+      final Map<String, num> map = {};
+      if (res is List) {
+        for (final r in res) {
+          final row = Map<String, dynamic>.from(r as Map);
+          final color = (row['color'] ?? '').toString();
+          num val = 0;
+          if (row.containsKey('m_balance') && row['m_balance'] != null) {
+            val = (row['m_balance'] is num) ? row['m_balance'] as num : num.tryParse(row['m_balance'].toString()) ?? 0;
+          } else if (row.containsKey('balance') && row['balance'] != null) {
+            val = (row['balance'] is num) ? row['balance'] as num : num.tryParse(row['balance'].toString()) ?? 0;
+          } else if (row.containsKey('amount') && row['amount'] != null) {
+            val = (row['amount'] is num) ? row['amount'] as num : num.tryParse(row['amount'].toString()) ?? 0;
+          }
+          if (color.isNotEmpty) map[color] = val;
+        }
+      }
+      for (final c in fixedColors) {
+        map.putIfAbsent(c, () => 0);
+      }
+      setState(() => _balances = map);
+    } catch (e) {
+      debugPrint('Failed to load color_banks: $e');
+      final Map<String, num> map = {};
+      for (final c in fixedColors) map[c] = _balances[c] ?? 0;
+      setState(() => _balances = map);
+    } finally {
+      setState(() => _loading = false);
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _loadHistory(String color) async {
+    if (_historyCache.containsKey(color)) return _historyCache[color]!;
+    _loadingHistory[color] = true;
+    try {
+      // try color_bank_history table first
+      try {
+        final hist = await supabase
+            .from('color_bank_history')
+            .select('id, amount, comment, created_at')
+            .eq('color', color)
+            .order('created_at', ascending: false)
+            .limit(500);
+        if (hist is List) {
+          final list = hist.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+          _historyCache[color] = list;
+          return list;
+        }
+      } catch (e) {
+        debugPrint('color_bank_history query failed or missing, falling back to derived: $e');
+      }
+
+      // fallback: derive from closed resolutions
+      final resRows = await supabase
+          .from('political_resolutions')
+          .select('id, title, closed_at')
+          .eq('is_closed', true)
+          .order('closed_at', ascending: false)
+          .limit(200);
+
+      final List<Map<String, dynamic>> derived = [];
+      if (resRows is List) {
+        for (final rr in resRows) {
+          final r = Map<String, dynamic>.from(rr as Map);
+          final int resId = (r['id'] is int) ? r['id'] as int : int.tryParse(r['id'].toString()) ?? 0;
+          final String title = (r['title'] ?? '').toString();
+          final closedAt = r['closed_at'];
+
+          final opts = await supabase
+              .from('resolution_options')
+              .select('id, label')
+              .eq('resolution_id', resId)
+              .eq('color', color);
+          if (opts is! List || opts.isEmpty) continue;
+          final List<int> optionIds = [];
+          for (final o in opts) {
+            final mo = Map<String, dynamic>.from(o as Map);
+            final oid = (mo['id'] is int) ? mo['id'] as int : int.tryParse(mo['id'].toString()) ?? 0;
+            if (oid > 0) optionIds.add(oid);
+          }
+          if (optionIds.isEmpty) continue;
+
+          final bets = await supabase
+              .from('political_bets')
+              .select('amount, option_id, created_at')
+              .eq('resolution_id', resId);
+          if (bets is! List || bets.isEmpty) continue;
+
+          num sumForColor = 0;
+          DateTime? lastBetAt;
+          for (final b in bets) {
+            final mb = Map<String, dynamic>.from(b as Map);
+            final oid = (mb['option_id'] is int) ? mb['option_id'] as int : int.tryParse(mb['option_id']?.toString() ?? '') ?? 0;
+            if (!optionIds.contains(oid)) continue;
+            final amt = (mb['amount'] is num) ? (mb['amount'] as num) : num.tryParse(mb['amount']?.toString() ?? '') ?? 0;
+            sumForColor += amt;
+            if (mb['created_at'] != null) {
+              try {
+                final dt = DateTime.tryParse(mb['created_at'].toString());
+                if (dt != null && (lastBetAt == null || dt.isAfter(lastBetAt))) lastBetAt = dt;
+              } catch (_) {}
+            }
+          }
+
+          if (sumForColor > 0) {
+            derived.add({
+              'amount': sumForColor,
+              'comment': 'Резолюция #$resId — ${title.isEmpty ? 'без названия' : title}',
+              'created_at': closedAt ?? (lastBetAt?.toUtc().toIso8601String() ?? DateTime.now().toUtc().toIso8601String()),
+              'resolution_id': resId,
+            });
+          }
+        }
+      }
+
+      derived.sort((a, b) {
+        final da = a['created_at']?.toString() ?? '';
+        final db = b['created_at']?.toString() ?? '';
+        final dta = DateTime.tryParse(da) ?? DateTime.fromMillisecondsSinceEpoch(0);
+        final dtb = DateTime.tryParse(db) ?? DateTime.fromMillisecondsSinceEpoch(0);
+        return dtb.compareTo(dta);
+      });
+
+      _historyCache[color] = derived;
+      return derived;
+    } catch (e, st) {
+      debugPrint('_loadHistory error: $e\n$st');
+      _historyCache[color] = [];
+      return [];
+    } finally {
+      _loadingHistory[color] = false;
+    }
+  }
+
+  Future<void> _showHistory(String color) async {
+    showDialog(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator()));
+    List<Map<String, dynamic>> hist = [];
+    try {
+      hist = await _loadHistory(color);
+    } catch (e) {
+      hist = [];
+    } finally {
+      if (mounted) Navigator.of(context).pop();
+    }
+
+    await showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text('История по цвету: $color'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: hist.isEmpty
+              ? const Text('История недоступна или отсутствует.')
+              : Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Flexible(
+                      child: ListView.separated(
+                        shrinkWrap: true,
+                        itemCount: hist.length,
+                        separatorBuilder: (_, __) => const Divider(height: 0),
+                        itemBuilder: (context, i) {
+                          final row = hist[i];
+                          final amt = (row['amount'] is num) ? row['amount'].toString() : row['amount']?.toString() ?? '-';
+                          final comment = row['comment']?.toString() ?? (row['resolution_id'] != null ? 'Резолюция #${row['resolution_id']}' : '-');
+                          final created = row['created_at']?.toString() ?? '-';
+                          String readableDate;
+                          try {
+                            final dt = DateTime.tryParse(created);
+                            readableDate = dt != null ? '${dt.toLocal()}' : created;
+                          } catch (_) {
+                            readableDate = created;
+                          }
+                          return ListTile(
+                            dense: true,
+                            title: Text('$amt M'),
+                            subtitle: Text(comment),
+                            trailing: Text(readableDate, style: const TextStyle(fontSize: 11, color: Colors.black54)),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+        ),
+        actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Закрыть'))],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return RefreshIndicator(
+      onRefresh: _loadBanks,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(12),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(
+                  children: [
+                    const Expanded(child: Text('Банки цветов', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700))),
+                    IconButton(onPressed: _loadBanks, icon: const Icon(Icons.refresh)),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                if (_loading)
+                  const Center(child: CircularProgressIndicator())
+                else
+                  Column(
+                    children: fixedColors.map((c) {
+                      final val = _balances[c] ?? 0;
+                      Color parsed;
+                      try {
+                        switch (c) {
+                          case 'зелёный':
+                            parsed = const Color(0xFF00FF00);
+                            break;
+                          case 'красный':
+                            parsed = const Color(0xFFFF0000);
+                            break;
+                          case 'синий':
+                            parsed = const Color(0xFF0000FF);
+                            break;
+                          case 'жёлтый':
+                            parsed = const Color(0xFFFFFF00);
+                            break;
+                          case 'малиновый':
+                            parsed = const Color(0xFFFF00FF);
+                            break;
+                          default:
+                            parsed = Colors.grey;
+                        }
+                      } catch (_) {
+                        parsed = Colors.grey;
+                      }
+                      return ListTile(
+                        leading: Container(width: 16, height: 16, decoration: BoxDecoration(color: parsed, borderRadius: BorderRadius.circular(3), border: Border.all(color: Colors.black12))),
+                        title: Text(c, style: const TextStyle(fontWeight: FontWeight.w600)),
+                        subtitle: Text('Текущий баланс: ${val.toString()} M'),
+                        trailing: TextButton(onPressed: () => _showHistory(c), child: const Text('История')),
+                      );
+                    }).toList(),
+                  ),
+              ]),
+            ),
+          ),
+          const SizedBox(height: 24),
+        ]),
+      ),
+    );
+  }
+}
+
+class _ColorDef {
+  final String label;
+  final String hex;
+  const _ColorDef({required this.label, required this.hex});
 }

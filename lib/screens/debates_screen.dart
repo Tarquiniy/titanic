@@ -1,273 +1,295 @@
-// lib/screens/debates_screen.dart
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
 import '../services/game_service.dart';
 
 class DebatesScreen extends StatefulWidget {
   final String currentUserId;
-  final String currentUserRole;
-  const DebatesScreen({required this.currentUserId, required this.currentUserRole, Key? key}) : super(key: key);
+  final GameService service;
+
+  const DebatesScreen({
+    Key? key,
+    required this.currentUserId,
+    required this.service,
+  }) : super(key: key);
 
   @override
   State<DebatesScreen> createState() => _DebatesScreenState();
 }
 
 class _DebatesScreenState extends State<DebatesScreen> {
-  final GameService _service = GameService();
-  bool _loading = false;
+  final _supabase = Supabase.instance.client;
+  bool _loading = true;
+  String? _error;
+  List<Map<String, dynamic>> _debates = [];
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Дебаты')),
-      body: RefreshIndicator(
-        onRefresh: _refresh,
-        child: ListView(
-          padding: const EdgeInsets.all(12),
-          children: [
-            if (widget.currentUserRole == 'admin') DebateAdminPanel(currentUserId: widget.currentUserId),
-            const SizedBox(height: 12),
-            DebateUserPanel(currentUserId: widget.currentUserId),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _refresh() async {
-    setState(() => _loading = true);
-    // пока заглушка — можно вызвать загрузку из _service
-    setState(() => _loading = false);
-  }
-}
-
-/// Admin: create debate, set speakers, close debate
-class DebateAdminPanel extends StatefulWidget {
-  final String currentUserId;
-  const DebateAdminPanel({required this.currentUserId, Key? key}) : super(key: key);
-  @override
-  State<DebateAdminPanel> createState() => _DebateAdminPanelState();
-}
-
-class _DebateAdminPanelState extends State<DebateAdminPanel> {
-  final supabase = Supabase.instance.client;
-  final GameService _service = GameService();
-
-  bool _loading = false;
-  Map<String, dynamic>? _activeDebate;
-  List<Map<String, dynamic>> _policies = [];
-  List<Map<String, dynamic>> _users = [];
-
-  @override
-  void initState() {
-    super.initState();
-    _loadState();
-  }
-
-  Future<void> _loadState() async {
-    setState(() => _loading = true);
-    try {
-      _activeDebate = await _service.getActiveDebate();
-      final ures = await supabase.from('user_credentials').select('id, first_name, last_name, telegram_username, role');
-      if (ures is List) _users = ures.map((e) => Map<String, dynamic>.from(e as Map)).toList();
-    } catch (_) {
-      // ignore
-    } finally {
-      setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _closeDebate() async {
-    if (_activeDebate == null) return;
-    final id = _activeDebate!['id'] as int?;
-    if (id == null) return;
-    setState(() => _loading = true);
-    try {
-      await _service.rpcCloseDebate(debateId: id);
-      await _loadState();
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Дебаты закрыты')));
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
-    } finally {
-      setState(() => _loading = false);
-    }
-  }
-
-  // UI — простая панель
-  @override
-  Widget build(BuildContext context) {
-    if (_loading) return const Center(child: CircularProgressIndicator());
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12.0),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('Дебаты (админ)', style: TextStyle(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          if (_activeDebate == null)
-            Column(children: [
-              const Text('Активные дебаты отсутствуют'),
-              const SizedBox(height: 8),
-              ElevatedButton(onPressed: _loadState, child: const Text('Обновить')),
-            ])
-          else
-            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Дебаты: ${_activeDebate!['title'] ?? '-'}'),
-              const SizedBox(height: 8),
-              ElevatedButton(onPressed: _closeDebate, child: const Text('Завершить дебаты')),
-            ]),
-        ]),
-      ),
-    );
-  }
-}
-
-/// User panel — голосование
-class DebateUserPanel extends StatefulWidget {
-  final String currentUserId;
-  const DebateUserPanel({required this.currentUserId, Key? key}) : super(key: key);
-  @override
-  State<DebateUserPanel> createState() => _DebateUserPanelState();
-}
-
-class _DebateUserPanelState extends State<DebateUserPanel> {
-  final supabase = Supabase.instance.client;
-  final GameService _service = GameService();
-
-  bool _loading = false;
-  Map<String, dynamic>? _activeDebate;
-  List<Map<String, dynamic>> _options = [];
-  bool _alreadyVoted = false;
+  int? _selectedDebateIndex;
   int? _selectedOptionId;
-  final TextEditingController _voicesCtrl = TextEditingController(text: '1');
+  final TextEditingController _voicesCtrl = TextEditingController();
+  final Map<int, bool> _alreadyVotedForDebate = {}; // debateId -> bool
 
   @override
   void initState() {
     super.initState();
-    _loadState();
+    _loadActiveDebates();
   }
 
-  Future<void> _loadState() async {
-    setState(() => _loading = true);
-    try {
-      _activeDebate = await _service.getActiveDebate();
-      if (_activeDebate != null) {
-        final debateId = _activeDebate!['id'] as int?;
-        if (debateId != null) {
-          final ores = await supabase.from('debate_options').select('*').eq('debate_id', debateId).order('id');
-          if (ores is List) _options = ores.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  @override
+  void dispose() {
+    _voicesCtrl.dispose();
+    super.dispose();
+  }
 
-          final voted = await supabase.from('debate_votes').select('id').eq('debate_id', debateId).eq('user_id', widget.currentUserId).limit(1).maybeSingle();
-          _alreadyVoted = voted != null;
-        }
-      } else {
-        _options = [];
-        _alreadyVoted = false;
+  Future<void> _loadActiveDebates() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+      _debates = [];
+      _selectedDebateIndex = null;
+      _selectedOptionId = null;
+      _alreadyVotedForDebate.clear();
+    });
+
+    try {
+      // 1) load active debates (returns List or throws)
+      final debatesRaw = await _supabase
+          .from('debates')
+          .select()
+          .eq('is_closed', false)
+          .order('created_at', ascending: false);
+
+      if (debatesRaw == null) {
+        throw 'Не удалось загрузить дебаты';
       }
+
+      final debatesList = (debatesRaw is List) ? debatesRaw.cast<Map<String, dynamic>>() : <Map<String, dynamic>>[];
+
+      // 2) load options for these debates
+      final debateIds = debatesList.map((d) => d['id']).where((e) => e != null).toList();
+
+      List<Map<String, dynamic>> options = [];
+      if (debateIds.isNotEmpty) {
+        final inArg = '(${debateIds.join(',')})';
+        final optsRaw = await _supabase
+            .from('debate_options')
+            .select()
+            .filter('debate_id', 'in', inArg)
+            .order('id', ascending: true);
+
+        if (optsRaw != null && optsRaw is List) {
+          options = optsRaw.cast<Map<String, dynamic>>();
+        } else {
+          options = <Map<String, dynamic>>[];
+        }
+      }
+
+      // 3) assemble debates with options
+      final assembled = debatesList.map((d) {
+        final dId = d['id'];
+        final opts = options.where((o) => o['debate_id'] == dId).toList();
+        return {...d, 'options': opts};
+      }).toList();
+
+      // 4) check if current user already voted in these debates
+      if (debateIds.isNotEmpty) {
+        final votesRaw = await _supabase
+            .from('debate_votes')
+            .select('debate_id')
+            .eq('user_id', widget.currentUserId);
+
+        final votesList = (votesRaw is List) ? votesRaw.cast<Map<String, dynamic>>() : <Map<String, dynamic>>[];
+
+        for (final d in assembled) {
+          final id = d['id'] as int;
+          _alreadyVotedForDebate[id] = votesList.any((v) => v['debate_id'] == id);
+        }
+      }
+
+      setState(() {
+        _debates = assembled.cast<Map<String, dynamic>>();
+        _loading = false;
+      });
     } catch (e) {
-      debugPrint('DebateUserPanel load error: $e');
-      _activeDebate = null;
-      _options = [];
-      _alreadyVoted = false;
-    } finally {
-      setState(() => _loading = false);
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
     }
   }
 
   Future<void> _vote() async {
-    if (_activeDebate == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Активные дебаты отсутствуют')));
+    if (_selectedDebateIndex == null) return;
+    final debate = _debates[_selectedDebateIndex!];
+    final debateId = debate['id'] as int;
+
+    if (_alreadyVotedForDebate[debateId] == true) {
+      _showSnack('Вы уже голосовали в этих дебатах');
       return;
     }
-    if (_alreadyVoted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Вы уже голосовали')));
+
+    final voices = int.tryParse(_voicesCtrl.text.trim());
+    if (voices == null || voices <= 0) {
+      _showSnack('Введите количество войсов > 0');
       return;
     }
-    final voices = int.tryParse(_voicesCtrl.text.trim()) ?? 0;
-    if (voices <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Введите корректное количество войсов')));
-      return;
-    }
+
     if (_selectedOptionId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Выберите вариант')));
+      _showSnack('Выберите вариант');
       return;
     }
 
     try {
-      final debateId = _activeDebate!['id'] as int;
-      await _service.rpcVoteInDebate(debateId: debateId, userId: widget.currentUserId, optionId: _selectedOptionId!, voices: voices);
+      // fetch fresh profile (role + v_balance)
+      final profileRaw = await _supabase
+          .from('user_credentials')
+          .select('role, v_balance')
+          .eq('id', widget.currentUserId)
+          .maybeSingle();
+
+      final profile = (profileRaw is Map<String, dynamic>) ? profileRaw : null;
+      if (profile == null) throw 'Не удалось загрузить профиль';
+
+      final role = (profile['role'] ?? '').toString();
+      final vBalRaw = profile['v_balance'];
+      final vBal = (vBalRaw is num) ? vBalRaw.toInt() : int.tryParse((vBalRaw ?? '0').toString()) ?? 0;
+
+      if (role == 'politician') {
+        _showSnack('Политики не могут голосовать в дебатах');
+        return;
+      }
+
+      if (voices > vBal) {
+        _showSnack('Недостаточно войсов на балансе (у вас $vBal)');
+        return;
+      }
+
+      // Call GameService RPC (should be implemented to call supabase RPC)
+      await widget.service.rpcVoteInDebate(
+        debateId: debateId,
+        userId: widget.currentUserId,
+        optionId: _selectedOptionId!,
+        voices: voices,
+      );
+
+      // mark locally
+      setState(() {
+        _alreadyVotedForDebate[debateId] = true;
+      });
+
+      // thank you dialog
       await showDialog<void>(
         context: context,
         builder: (_) => AlertDialog(
           title: const Text('Спасибо за участие в дебатах'),
           content: const Text('Ваш голос принят'),
-          actions: [
-            TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('ОК')),
-          ],
+          actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('ОК'))],
         ),
       );
-      setState(() => _alreadyVoted = true);
+
+      await _loadActiveDebates();
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
+      _showSnack('Ошибка: $e');
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    if (_loading) return const Center(child: CircularProgressIndicator());
-    if (_activeDebate == null) {
-      return Card(
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(children: [
-            const Text('Дебаты (пользователь)'),
-            const SizedBox(height: 8),
-            const Text('В данный момент активные дебаты отсутствуют'),
-            ElevatedButton(onPressed: _loadState, child: const Text('Обновить')),
-          ]),
-        ),
-      );
-    }
+  void _showSnack(String text) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  Widget _buildDebateCard(Map<String, dynamic> debate, int index) {
+    final debId = debate['id'] as int;
+    final title = debate['title'] ?? 'Дебаты #$debId';
+    final description = debate['description'] ?? '';
+    final options = (debate['options'] as List).cast<Map<String, dynamic>>();
+    final alreadyVoted = _alreadyVotedForDebate[debId] ?? false;
 
     return Card(
+      margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
       child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Дебаты: ${_activeDebate!['title']}', style: const TextStyle(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          const Text('Выберите цвет (вариант):'),
-          ..._options.map((o) {
-            final id = o['id'] as int;
-            final color = (o['color'] ?? '').toString();
-            return RadioListTile<int>(
-              value: id,
-              groupValue: _selectedOptionId,
-              onChanged: _alreadyVoted ? null : (v) => setState(() => _selectedOptionId = v),
-              title: Row(children: [
-                Container(width: 20, height: 20, decoration: BoxDecoration(color: _parseHexColor(color) ?? Colors.grey, borderRadius: BorderRadius.circular(4))),
-                const SizedBox(width: 8),
-                Text(color),
-              ]),
-            );
-          }).toList(),
-          const SizedBox(height: 8),
-          TextField(controller: _voicesCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Количество войсов (целое)')),
-          const SizedBox(height: 8),
-          ElevatedButton(onPressed: _alreadyVoted ? null : _vote, child: const Text('Проголосовать')),
-        ]),
+        padding: const EdgeInsets.all(12.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(child: Text(title.toString(), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600))),
+                if (alreadyVoted) const Chip(label: Text('Вы голосовали'))
+              ],
+            ),
+            if ((description as String).isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(description.toString()),
+            ],
+            const SizedBox(height: 12),
+            Column(
+              children: options.map((opt) {
+                final optId = opt['id'] as int;
+                final optLabel = opt['label'] ?? 'Вариант';
+                final color = opt['color'] ?? 'unknown';
+                return RadioListTile<int>(
+                  value: optId,
+                  groupValue: (_selectedDebateIndex == index) ? _selectedOptionId : null,
+                  onChanged: alreadyVoted
+                      ? null
+                      : (v) {
+                          setState(() {
+                            _selectedDebateIndex = index;
+                            _selectedOptionId = v;
+                          });
+                        },
+                  title: Text(optLabel.toString()),
+                  subtitle: Text('Цвет: $color'),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _voicesCtrl,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'Количество войсов', border: OutlineInputBorder()),
+                    enabled: !alreadyVoted,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                ElevatedButton(
+                  onPressed: alreadyVoted ? null : _vote,
+                  child: const Text('Проголосовать'),
+                )
+              ],
+            )
+          ],
+        ),
       ),
     );
   }
 
-  Color? _parseHexColor(String? s) {
-    if (s == null) return null;
-    final str = s.trim();
-    if (!str.startsWith('#')) return null;
-    String hex = str.substring(1);
-    if (hex.length == 6) hex = 'FF' + hex;
-    if (hex.length != 8) return null;
-    final val = int.tryParse(hex, radix: 16);
-    if (val == null) return null;
-    return Color(val);
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Дебаты'),
+        actions: [
+          IconButton(icon: const Icon(Icons.refresh), onPressed: _loadActiveDebates, tooltip: 'Обновить')
+        ],
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _error != null
+              ? Center(child: Text('Ошибка: $_error'))
+              : _debates.isEmpty
+                  ? const Center(child: Text('Нет активных дебатов'))
+                  : RefreshIndicator(
+                      onRefresh: _loadActiveDebates,
+                      child: ListView.builder(
+                        padding: const EdgeInsets.only(bottom: 24, top: 12),
+                        itemCount: _debates.length,
+                        itemBuilder: (context, i) => _buildDebateCard(_debates[i], i),
+                      ),
+                    ),
+    );
   }
 }
