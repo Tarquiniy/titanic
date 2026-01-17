@@ -1,4 +1,4 @@
-// lib/inventory_screen.dart
+// lib/screens/inventory_screen.dart
 //
 // Экран "Инвентарь" — показывает список предметов пользователя и их количества,
 // а также строку "Итого" с суммой всех чисел предметов.
@@ -13,6 +13,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/app_user.dart';
+import '../services/game_service.dart';
 
 class InventoryScreen extends StatefulWidget {
   final AppUser user;
@@ -24,6 +25,7 @@ class InventoryScreen extends StatefulWidget {
 
 class _InventoryScreenState extends State<InventoryScreen> {
   final supabase = Supabase.instance.client;
+  final GameService _svc = GameService();
 
   bool _loading = false;
   String? _error;
@@ -86,104 +88,395 @@ class _InventoryScreenState extends State<InventoryScreen> {
     if (inv == null) return out;
 
     dynamic decoded = inv;
-
-    // Если inv — строка, пытаемся распарсить JSON
-    if (decoded is String) {
+    if (inv is String) {
       try {
-        decoded = jsonDecode(decoded);
+        decoded = jsonDecode(inv);
       } catch (_) {
-        return out;
+        decoded = null;
       }
     }
 
-    // Если это объект/Map: превращаем каждый ключ в один элемент списка
+    if (decoded == null) return out;
+
     if (decoded is Map) {
-      decoded.forEach((key, value) {
-        try {
-          final name = key?.toString() ?? '';
-          if (name.isEmpty) return;
-          final count = _toInt(value) ?? 0;
-          out.add({name: count});
-        } catch (_) {}
+      decoded.forEach((k, v) {
+        final cnt = (v is num) ? v.toInt() : int.tryParse(v?.toString() ?? '0') ?? 0;
+        out.add({k.toString(): cnt});
       });
       return out;
     }
 
-    // Если это список — обрабатываем элементы по-элементно
     if (decoded is List) {
       for (final el in decoded) {
-        try {
-          if (el is Map) {
-            // Вариант: { "name": "...", "count": N }
-            if (el.containsKey('name')) {
-              final name = (el['name'] ?? '').toString();
-              if (name.isEmpty) continue;
-              final count = _toInt(el['count'] ?? el['qty'] ?? el['value']) ?? 0;
-              out.add({name: count});
-              continue;
-            }
-
-            // Вариант: одноключевой объект { "Дополнительный ход": 0 }
-            if (el.keys.isNotEmpty) {
-              final firstKey = el.keys.first.toString();
-              final firstVal = el[firstKey];
-              final count = _toInt(firstVal) ?? 0;
-              out.add({firstKey: count});
-              continue;
-            }
-
-            // Пустой объект — пропускаем
-            continue;
-          } else if (el is List && el.length >= 2) {
-            // Вариант: ["name", count]
-            final name = el[0].toString();
-            final count = _toInt(el[1]) ?? 0;
-            if (name.isNotEmpty) {
-              out.add({name: count});
-            }
-            continue;
+        if (el is Map) {
+          // object with name/count or single-key map
+          if (el.containsKey('name') && el.containsKey('count')) {
+            final name = el['name']?.toString() ?? 'item';
+            final cnt = (el['count'] is num) ? (el['count'] as num).toInt() : int.tryParse(el['count']?.toString() ?? '0') ?? 0;
+            out.add({name: cnt});
+          } else if (el.keys.length == 1) {
+            final k = el.keys.first;
+            final v = el[k];
+            final cnt = (v is num) ? v.toInt() : int.tryParse(v?.toString() ?? '0') ?? 0;
+            out.add({k.toString(): cnt});
           } else {
-            // Нестандартный элемент — попробуем интерпретировать как строковое имя с count 0
-            final s = el?.toString() ?? '';
-            if (s.isNotEmpty) {
-              out.add({s: 0});
-            }
-            continue;
+            // fallback: stringify whole map
+            try {
+              final nm = jsonEncode(el);
+              out.add({nm: 1});
+            } catch (_) {}
           }
-        } catch (_) {
-          // malformed element — пропускаем
-          continue;
+        } else if (el is List && el.length >= 2) {
+          final k = el[0]?.toString() ?? 'item';
+          final v = el[1];
+          final cnt = (v is num) ? v.toInt() : int.tryParse(v?.toString() ?? '0') ?? 0;
+          out.add({k: cnt});
+        } else {
+          out.add({el.toString(): 1});
         }
       }
       return out;
     }
 
-    // Неизвестный формат — ничего не делаем
+    // unknown format
     return out;
   }
 
-  int? _toInt(dynamic v) {
-    if (v == null) return null;
-    if (v is int) return v;
-    if (v is double) return v.toInt();
-    if (v is num) return v.toInt();
-    final s = v.toString();
-    final parsed = int.tryParse(s);
-    if (parsed != null) return parsed;
-    final parsedDouble = double.tryParse(s);
-    if (parsedDouble != null) return parsedDouble.toInt();
-    return null;
+  int _totalItemsCount() {
+    int s = 0;
+    for (final it in _itemsList) {
+      final v = it.values.first;
+      s += v;
+    }
+    return s;
   }
 
-  // Итого — сумма всех count в списке
-  int get _total {
-    int sum = 0;
-    for (final m in _itemsList) {
-      if (m.isEmpty) continue;
-      final val = m.values.first;
-      sum += val;
+  Future<void> _openSellToPlayer(String itemName, int availableCount) async {
+    // 1) load candidate buyers
+    List<Map<String, dynamic>> players = [];
+    try {
+      final res = await supabase
+          .from('user_credentials')
+          .select('id, telegram_username, first_name, last_name')
+          .neq('id', widget.user.id)
+          .order('first_name');
+      if (res is List) players = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Не удалось загрузить список игроков: $e')));
+      return;
     }
-    return sum;
+
+    if (players.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Нет доступных покупателей')));
+      return;
+    }
+
+    // 2) pick buyer
+    final Map<String, dynamic>? chosen = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) {
+        String q = '';
+        List<Map<String, dynamic>> filtered = List.from(players);
+        return StatefulBuilder(builder: (ctx2, setStateSheet) {
+          void doFilter(String s) {
+            q = s.trim().toLowerCase();
+            if (q.isEmpty) {
+              filtered = List.from(players);
+            } else {
+              filtered = players.where((p) {
+                final fn = (p['first_name'] ?? '').toString().toLowerCase();
+                final ln = (p['last_name'] ?? '').toString().toLowerCase();
+                final un = (p['telegram_username'] ?? '').toString().toLowerCase();
+                return fn.contains(q) || ln.contains(q) || un.contains(q);
+              }).toList();
+            }
+            setStateSheet(() {});
+          }
+
+          return SafeArea(
+            child: FractionallySizedBox(
+              heightFactor: 0.85,
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.all(12.0),
+                    child: TextField(
+                      decoration: const InputDecoration(hintText: 'Поиск покупателя', prefixIcon: Icon(Icons.search)),
+                      onChanged: doFilter,
+                    ),
+                  ),
+                  const Divider(height: 0),
+                  Expanded(
+                    child: filtered.isEmpty
+                        ? const Center(child: Text('Не найдено'))
+                        : ListView.separated(
+                            itemCount: filtered.length,
+                            separatorBuilder: (_, __) => const Divider(height: 0),
+                            itemBuilder: (context, i) {
+                              final p = filtered[i];
+                              final first = (p['first_name'] ?? '').toString();
+                              final last = (p['last_name'] ?? '').toString();
+                              final displayName = ('$first $last').trim().isEmpty ? (p['telegram_username'] ?? 'Без имени') : '$first $last';
+                              return ListTile(
+                                title: Text(displayName),
+                                subtitle: Text(p['telegram_username']?.toString() ?? ''),
+                                onTap: () => Navigator.of(context).pop(p),
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        });
+      },
+    );
+
+    if (chosen == null) return;
+
+    // 3) ask quantity and price
+    final qtyCtrl = TextEditingController(text: availableCount > 0 ? '1' : '1');
+    final priceCtrl = TextEditingController();
+    final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) {
+          return AlertDialog(
+            title: Text('Продать "$itemName" игроку'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (availableCount > 0) Text('Доступно: $availableCount'),
+                TextField(
+                  controller: qtyCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'Количество'),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: priceCtrl,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(labelText: 'Цена за единицу (V)'),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Отмена')),
+              ElevatedButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Продать')),
+            ],
+          );
+        });
+
+    try {
+      qtyCtrl.dispose();
+      // don't dispose priceCtrl yet in case needed below
+    } catch (_) {}
+
+    if (confirmed != true) {
+      try {
+        priceCtrl.dispose();
+      } catch (_) {}
+      return;
+    }
+
+    final qtyRaw = qtyCtrl.text.trim();
+    final priceRaw = priceCtrl.text.trim().replaceAll(',', '.');
+
+    final qty = int.tryParse(qtyRaw) ?? 0;
+    final price = double.tryParse(priceRaw) ?? 0.0;
+
+    if (qty <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Введите корректное количество')));
+      try {
+        priceCtrl.dispose();
+      } catch (_) {}
+      return;
+    }
+    if (availableCount > 0 && qty > availableCount) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Количество больше доступного')));
+      try {
+        priceCtrl.dispose();
+      } catch (_) {}
+      return;
+    }
+    if (price <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Введите корректную цену')));
+      try {
+        priceCtrl.dispose();
+      } catch (_) {}
+      return;
+    }
+
+    // 4) perform RPC call
+    showDialog(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator()));
+    try {
+      final rpcRes = await _svc.rpcSellItemToUser(
+        fromUserId: widget.user.id,
+        toUserId: chosen['id'].toString(),
+        itemName: itemName,
+        quantity: qty,
+        price: price,
+      );
+
+      // try to update local balances if RPC returned them
+      try {
+        Map<String, dynamic>? parsed;
+        if (rpcRes is Map<String, dynamic>) parsed = rpcRes;
+        else if (rpcRes is List && rpcRes.isNotEmpty && rpcRes[0] is Map) parsed = Map<String, dynamic>.from(rpcRes[0] as Map);
+
+        if (parsed != null && parsed.containsKey('from_balance')) {
+          final fb = parsed['from_balance'];
+          if (fb is num) widget.user.vBalance = (fb).toDouble();
+        }
+      } catch (_) {}
+
+      if (!mounted) return;
+      Navigator.of(context).pop(); // close progress
+
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Продажа завершена')));
+      await _loadInventory();
+      // optionally refresh profile to reflect balance changes
+      final profile = await _svc.fetchUserProfile(widget.user.id);
+      if (profile != null) {
+        final v = profile['v_balance'];
+        final m = profile['m_balance'];
+        if (v is num) widget.user.vBalance = (v).toDouble();
+        if (m is num) widget.user.mBalance = (m).toDouble();
+        setState(() {});
+      }
+    } catch (e) {
+      if (mounted) Navigator.of(context).pop();
+      final msg = (e is PostgrestException) ? (e.message ?? e.toString()) : e.toString();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка при продаже: $msg')));
+    } finally {
+      try {
+        priceCtrl.dispose();
+      } catch (_) {}
+    }
+  }
+
+  Future<void> _openSellToBank(String itemName, int availableCount) async {
+    final qtyCtrl = TextEditingController(text: availableCount > 0 ? '1' : '1');
+    final priceCtrl = TextEditingController();
+
+    final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) {
+          return AlertDialog(
+            title: Text('Продать "$itemName" в Банк'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (availableCount > 0) Text('Доступно: $availableCount'),
+                TextField(
+                  controller: qtyCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'Количество'),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: priceCtrl,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(labelText: 'Цена за единицу (M)'),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Отмена')),
+              ElevatedButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Продать')),
+            ],
+          );
+        });
+
+    if (confirmed != true) {
+      try {
+        qtyCtrl.dispose();
+        priceCtrl.dispose();
+      } catch (_) {}
+      return;
+    }
+
+    final qty = int.tryParse(qtyCtrl.text.trim()) ?? 0;
+    final price = double.tryParse(priceCtrl.text.trim().replaceAll(',', '.')) ?? 0.0;
+
+    if (qty <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Введите корректное количество')));
+      return;
+    }
+    if (availableCount > 0 && qty > availableCount) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Количество больше доступного')));
+      return;
+    }
+    if (price <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Введите корректную цену')));
+      return;
+    }
+
+    showDialog(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator()));
+    try {
+      final rpcRes = await _svc.rpcSellItemToBank(
+        userId: widget.user.id,
+        itemName: itemName,
+        quantity: qty,
+        price: price,
+      );
+
+      // update balances if RPC returned them
+      try {
+        Map<String, dynamic>? parsed;
+        if (rpcRes is Map<String, dynamic>) parsed = rpcRes;
+        else if (rpcRes is List && rpcRes.isNotEmpty && rpcRes[0] is Map) parsed = Map<String, dynamic>.from(rpcRes[0] as Map);
+
+        if (parsed != null && parsed.containsKey('user_balance')) {
+          final ub = parsed['user_balance'];
+          if (ub is num) widget.user.mBalance = (ub).toDouble();
+        }
+      } catch (_) {}
+
+      if (!mounted) return;
+      Navigator.of(context).pop(); // close progress
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Предмет продан в банк')));
+      await _loadInventory();
+
+      final profile = await _svc.fetchUserProfile(widget.user.id);
+      if (profile != null) {
+        final v = profile['v_balance'];
+        final m = profile['m_balance'];
+        if (v is num) widget.user.vBalance = (v).toDouble();
+        if (m is num) widget.user.mBalance = (m).toDouble();
+        setState(() {});
+      }
+    } catch (e) {
+      if (mounted) Navigator.of(context).pop();
+      final msg = (e is PostgrestException) ? (e.message ?? e.toString()) : e.toString();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка при продаже в банк: $msg')));
+    }
+  }
+
+  Widget _buildItemRow(Map<String, int> itemMap) {
+    final name = itemMap.keys.first;
+    final count = itemMap.values.first;
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      child: ListTile(
+        title: Text(name),
+        subtitle: Text('Количество: $count'),
+        trailing: PopupMenuButton<String>(
+          onSelected: (v) async {
+            if (v == 'sell_player') {
+              await _openSellToPlayer(name, count);
+            } else if (v == 'sell_bank') {
+              await _openSellToBank(name, count);
+            }
+          },
+          itemBuilder: (_) => [
+            const PopupMenuItem(value: 'sell_player', child: Text('Продать игроку')),
+            const PopupMenuItem(value: 'sell_bank', child: Text('Продать в Банк')),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -192,76 +485,44 @@ class _InventoryScreenState extends State<InventoryScreen> {
       appBar: AppBar(
         title: const Text('Инвентарь'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loading ? null : _loadInventory,
-            tooltip: 'Обновить',
-          ),
+          IconButton(icon: const Icon(Icons.refresh), onPressed: _loadInventory),
         ],
       ),
       body: RefreshIndicator(
         onRefresh: _loadInventory,
-        child: _loading
-            ? ListView(
-                children: const [
-                  SizedBox(height: 24),
-                  Center(child: CircularProgressIndicator()),
-                ],
-              )
-            : _buildContent(context),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: _loading
+              ? const Center(child: CircularProgressIndicator())
+              : _error != null
+                  ? Center(child: Text(_error!, style: const TextStyle(color: Colors.red)))
+                  : _itemsList.isEmpty
+                      ? const Center(child: Text('Инвентарь пуст'))
+                      : Column(
+                          children: [
+                            Expanded(
+                              child: ListView.separated(
+                                itemCount: _itemsList.length,
+                                separatorBuilder: (_, __) => const Divider(height: 0),
+                                itemBuilder: (context, i) => _buildItemRow(_itemsList[i]),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+                              decoration: BoxDecoration(color: Colors.grey.shade50, borderRadius: BorderRadius.circular(8)),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const Text('Итого', style: TextStyle(fontWeight: FontWeight.w600)),
+                                  Text('${_totalItemsCount()}'),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+        ),
       ),
-    );
-  }
-
-  Widget _buildContent(BuildContext context) {
-    if (_error != null) {
-      return ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Text(_error!, style: const TextStyle(color: Colors.red)),
-        ],
-      );
-    }
-
-    // Для красоты сортируем: сначала агрегированные (если есть), но сохраняем порядок появления.
-    // Поскольку у нас список элементов, просто отображаем в порядке _itemsList.
-    final items = _itemsList;
-
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: items.length + 1, // +1 для строки "Итого"
-      itemBuilder: (context, index) {
-        if (index == 0) {
-          return Container(
-            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
-            margin: const EdgeInsets.only(bottom: 12),
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surfaceVariant,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Row(
-              children: [
-                const Expanded(child: Text('Итого', style: TextStyle(fontWeight: FontWeight.w600))),
-                Text('+ $_total войсов', style: const TextStyle(fontWeight: FontWeight.w600)),
-              ],
-            ),
-          );
-        }
-
-        final entry = items[index - 1];
-        final name = entry.keys.first;
-        final count = entry.values.first;
-
-        return Column(
-          children: [
-            ListTile(
-              title: Text(name),
-              trailing: Text('+ $count войсов', style: const TextStyle(fontWeight: FontWeight.w500)),
-            ),
-            const Divider(height: 0),
-          ],
-        );
-      },
     );
   }
 }

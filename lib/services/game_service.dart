@@ -1063,4 +1063,80 @@ class GameService {
       rethrow;
     }
   }
+
+
+  // ---------------------------
+  // Selling / Inventory RPCs
+  // ---------------------------
+  /// RPC: транзакционная продажа предмета от одного пользователя другому.
+  /// Ожидаемые параметры на сервере: p_from, p_to, p_item, p_qty, p_price
+  /// Ожидаемый ответ: map с подробностями или throw PostgrestException при ошибке.
+  Future<dynamic> rpcSellItemToUser({
+    required String fromUserId,
+    required String toUserId,
+    required String itemName,
+    required int quantity,
+    required num price,
+  }) async {
+    try {
+      final params = {
+        'p_from': fromUserId,
+        'p_to': toUserId,
+        'p_item': itemName,
+        'p_qty': quantity,
+        'p_price': price,
+      };
+      debugPrint('GameService.rpcSellItemToUser params: $params');
+      final res = await client.rpc('sell_item_to_user', params: params);
+      debugPrint('GameService.rpcSellItemToUser -> $res');
+      return res;
+    } on PostgrestException catch (e) {
+      _logPostgrestException(e);
+      rethrow;
+    } catch (e) {
+      debugPrint('rpcSellItemToUser error: $e');
+      rethrow;
+    }
+  }
+
+  /// RPC: продажа предмета пользователем в игровой Банк.
+  /// Ожидаемые параметры на сервере: p_user, p_item, p_qty, p_price
+  Future<dynamic> rpcSellItemToBank({
+    required String userId,
+    required String itemName,
+    required int quantity,
+    required num price,
+  }) async {
+    try {
+      final params = {
+        'p_user': userId,
+        'p_item': itemName,
+        'p_qty': quantity,
+        'p_price': price,
+      };
+      debugPrint('GameService.rpcSellItemToBank params: $params');
+      final res = await client.rpc('sell_item_to_bank', params: params);
+      debugPrint('GameService.rpcSellItemToBank -> $res');
+      return res;
+    } on PostgrestException catch (e) {
+      _logPostgrestException(e);
+      rethrow;
+    } catch (e) {
+      debugPrint('rpcSellItemToBank error: $e');
+      rethrow;
+    }
+  }
+
+
+   /// Вспомогательный метод: попытаться обновить профиль пользователя (клиент-side refresh)
+  Future<Map<String, dynamic>?> fetchUserProfile(String userId) async {
+    try {
+      final res = await client.from('user_credentials').select('id, v_balance, m_balance, inventory').eq('id', userId).maybeSingle();
+      if (res is Map<String, dynamic>) return res;
+      return null;
+    } catch (e) {
+      debugPrint('fetchUserProfile error: $e');
+      return null;
+    }
+  }
 }
