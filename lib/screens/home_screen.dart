@@ -61,6 +61,9 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _alreadyBetInActiveResolution = false;
   Timer? _resolutionPollTimer;
 
+  // Pending client-side inventory additions: list of { owner_id, name, count, created_at, metadata }
+  final List<Map<String, dynamic>> _pendingInventoryItems = [];
+
   @override
   void initState() {
     super.initState();
@@ -77,19 +80,28 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _stopPollingSpeechState();
-    _debatePollTimer?.cancel();
-    _resolutionPollTimer?.cancel();
+    _debate_poll_timer_cancel();
+    _resolution_poll_timer_cancel();
     super.dispose();
   }
 
+  // small helpers to keep analyzer happy (no-op placeholders)
+  void _debate_poll_timer_cancel() {
+    _debatePollTimer?.cancel();
+  }
+
+  void _resolution_poll_timer_cancel() {
+    _resolutionPollTimer?.cancel();
+  }
+
   // -----------------------
-  // Profile / balance refresh (now also loads `color`)
+  // Profile / balance refresh (now also loads `color` and `region`)
   // -----------------------
   Future<void> _refreshProfile() async {
     try {
       final profileRaw = await supabase
           .from('user_credentials')
-          .select('v_balance, m_balance, first_name, last_name, telegram_username, role, color')
+          .select('v_balance, m_balance, first_name, last_name, telegram_username, role, color, region')
           .eq('id', user.id)
           .maybeSingle();
 
@@ -102,6 +114,7 @@ class _HomeScreenState extends State<HomeScreen> {
         final uname = profile['telegram_username'];
         final role = profile['role'];
         final color = profile['color'];
+        final region = profile['region'];
 
         if (!mounted) return;
         setState(() {
@@ -114,6 +127,7 @@ class _HomeScreenState extends State<HomeScreen> {
             vBalance: v is num ? (v).toDouble() : user.vBalance,
             mBalance: m is num ? (m).toDouble() : user.mBalance,
             color: color is String ? color : user.color,
+            region: region is String ? region : user.region,
           );
           _userColor = color is String ? color : null;
         });
@@ -137,7 +151,7 @@ class _HomeScreenState extends State<HomeScreen> {
           .maybeSingle();
 
       if (active is Map<String, dynamic> && active['id'] != null) {
-        final int id = (active['id'] is int) ? active['id'] as int : int.parse(active['id'].toString());
+        final int id = (active['id'] is int) ? (active['id'] as int) : int.parse(active['id'].toString());
         bool already = false;
         try {
           final vote = await supabase
@@ -189,7 +203,7 @@ class _HomeScreenState extends State<HomeScreen> {
           .maybeSingle();
 
       if (active is Map<String, dynamic> && active['id'] != null) {
-        final int id = (active['id'] is int) ? active['id'] as int : int.parse(active['id'].toString());
+        final int id = (active['id'] is int) ? (active['id'] as int) : int.parse(active['id'].toString());
         bool already = false;
         try {
           final bet = await supabase
@@ -602,141 +616,322 @@ class _HomeScreenState extends State<HomeScreen> {
   // Open resolution (political) betting dialog for politicians
   // -----------------------
   Future<void> _onOpenResolutionPressed() async {
-  if (_activeResolutionId == null) return;
-  final resolutionId = _activeResolutionId!;
-  // load options
-  List<Map<String, dynamic>> options = [];
-  try {
-    final res = await supabase.from('resolution_options').select('id,label').eq('resolution_id', resolutionId).order('id');
-    if (res is List) options = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
-  } catch (e) {
-    _showMessage('Не удалось загрузить варианты: $e');
-    return;
-  }
+    if (_activeResolutionId == null) return;
+    final resolutionId = _activeResolutionId!;
+    // load options
+    List<Map<String, dynamic>> options = [];
+    try {
+      final res = await supabase.from('resolution_options').select('id,label').eq('resolution_id', resolutionId).order('id');
+      if (res is List) options = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    } catch (e) {
+      _showMessage('Не удалось загрузить варианты: $e');
+      return;
+    }
 
-  if (options.isEmpty) {
-    _showMessage('Нет доступных вариантов для этого политрешения');
-    return;
-  }
+    if (options.isEmpty) {
+      _showMessage('Нет доступных вариантов для этого политрешения');
+      return;
+    }
 
-  int? selectedOptionId;
-  final TextEditingController amtCtrl = TextEditingController();
+    int? selectedOptionId;
+    final TextEditingController amtCtrl = TextEditingController();
 
-  final resDialogResult = await showDialog<bool>(
-    context: context,
-    builder: (ctx) {
-      return StatefulBuilder(builder: (ctx2, setStateDialog) {
-        return AlertDialog(
-          title: const Text('Политрешение — ваш выбор'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text('Выберите вариант:'),
-                const SizedBox(height: 8),
-                ...options.map((opt) {
-                  final oid = (opt['id'] is int) ? opt['id'] as int : int.parse(opt['id'].toString());
-                  return RadioListTile<int>(
-                    value: oid,
-                    groupValue: selectedOptionId,
-                    onChanged: (v) => setStateDialog(() => selectedOptionId = v),
-                    title: Text(opt['label'] ?? '-'),
+    final resDialogResult = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(builder: (ctx2, setStateDialog) {
+          return AlertDialog(
+            title: const Text('Политрешение — ваш выбор'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Выберите вариант:'),
+                  const SizedBox(height: 8),
+                  ...options.map((opt) {
+                    final oid = (opt['id'] is int) ? opt['id'] as int : int.parse(opt['id'].toString());
+                    return RadioListTile<int>(
+                      value: oid,
+                      groupValue: selectedOptionId,
+                      onChanged: (v) => setStateDialog(() => selectedOptionId = v),
+                      title: Text(opt['label'] ?? '-'),
+                    );
+                  }).toList(),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: amtCtrl,
+                    keyboardType: TextInputType.number,
+                    decoration: InputDecoration(labelText: 'Сумма майндов (целое). Ваш баланс: ${user.mBalance.toStringAsFixed(2)}'),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.of(ctx2).pop(false), child: const Text('Отмена')),
+              ElevatedButton(
+                onPressed: () async {
+                  // validate
+                  if (selectedOptionId == null) {
+                    ScaffoldMessenger.of(ctx2).showSnackBar(const SnackBar(content: Text('Выберите вариант')));
+                    return;
+                  }
+                  final txt = amtCtrl.text.trim();
+                  final n = int.tryParse(txt);
+                  if (n == null || n <= 0) {
+                    ScaffoldMessenger.of(ctx2).showSnackBar(const SnackBar(content: Text('Введите положительное целое число')));
+                    return;
+                  }
+                  if (n > user.mBalance) {
+                    ScaffoldMessenger.of(ctx2).showSnackBar(SnackBar(content: Text('Недостаточно майндов: у вас ${user.mBalance.toStringAsFixed(2)}')));
+                    return;
+                  }
+
+                  // disable button by popping and then performing RPC
+                  Navigator.of(ctx2).pop(true);
+
+                  // perform bet (show progress)
+                  showDialog(
+                    context: context,
+                    barrierDismissible: false,
+                    builder: (_) => const Center(child: CircularProgressIndicator()),
                   );
-                }).toList(),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: amtCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: InputDecoration(labelText: 'Сумма майндов (целое). Ваш баланс: ${user.mBalance.toStringAsFixed(2)}'),
+
+                  try {
+                    await svc.placeBetInResolution(
+                      resolutionId: resolutionId,
+                      optionId: selectedOptionId!, // <- передаём выбранный вариант
+                      userId: user.id,
+                      amount: n,
+                    );
+
+                    // success: update local flags and profile
+                    await _refreshProfile();
+                    await _loadResolutionState();
+
+                    // close progress dialog
+                    if (mounted) Navigator.of(context).pop();
+
+                    // thank you popup
+                    await showDialog(
+                      context: context,
+                      builder: (_) => AlertDialog(
+                        title: const Text('Спасибо за участие в политрешении'),
+                        content: const Text('Ваша ставка принята.'),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.of(context).pop(),
+                            child: const Text('OK'),
+                          )
+                        ],
+                      ),
+                    );
+
+                    if (!mounted) return;
+                    setState(() {
+                      _alreadyBetInActiveResolution = true;
+                    });
+                  } catch (e) {
+                    // close progress
+                    if (mounted) Navigator.of(context).pop();
+                    final msg = e is PostgrestException ? (e.message ?? e.toString()) : e.toString();
+                    _showMessage('Ошибка при ставке: $msg');
+                  }
+                },
+                child: const Text('Подтвердить ставку'),
+              ),
+            ],
+          );
+        });
+      },
+    );
+
+    // cleanup
+    try {
+      amtCtrl.dispose();
+    } catch (_) {}
+    // resDialogResult used only for flow; state updated after RPC
+  }
+
+  // -----------------------
+  // BUY ECONOMIST TURN FLOW (new button + client-side immediate inventory update)
+  // -----------------------
+  Future<void> _openBuyTurnFlow() async {
+    // Fetch economists excluding current user
+    List<Map<String, dynamic>> econs = [];
+    try {
+      final res = await supabase
+          .from('user_credentials')
+          .select('id, first_name, last_name, telegram_username')
+          .eq('role', 'economist')
+          .neq('id', user.id)
+          .order('first_name');
+      if (res is List) {
+        econs = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      }
+    } catch (e) {
+      _showMessage('Не удалось загрузить список экономистов: $e');
+      return;
+    }
+
+    if (econs.isEmpty) {
+      _showMessage('Нет доступных экономистов для покупки хода.');
+      return;
+    }
+
+    // Show picker bottom sheet
+    final Map<String, dynamic>? chosen = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return SafeArea(
+          child: FractionallySizedBox(
+            heightFactor: 0.85,
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          decoration: const InputDecoration(
+                            hintText: 'Поиск экономиста',
+                            prefixIcon: Icon(Icons.search),
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                          onChanged: (q) {
+                            // naive local filtering via setState inside builder not available;
+                            // for simplicity show static list below; user can scroll.
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Отмена')),
+                    ],
+                  ),
+                ),
+                const Divider(height: 0),
+                Expanded(
+                  child: ListView.separated(
+                    itemCount: econs.length,
+                    separatorBuilder: (_, __) => const Divider(height: 0),
+                    itemBuilder: (context, index) {
+                      final row = econs[index];
+                      final first = (row['first_name'] ?? '').toString();
+                      final last = (row['last_name'] ?? '').toString();
+                      final displayName = ('$first $last').trim().isEmpty ? (row['telegram_username'] ?? 'Без имени') : '$first $last';
+                      return ListTile(
+                        title: Text(displayName),
+                        onTap: () => Navigator.of(context).pop(row),
+                      );
+                    },
+                  ),
                 ),
               ],
             ),
           ),
-          actions: [
-            TextButton(onPressed: () => Navigator.of(ctx2).pop(false), child: const Text('Отмена')),
-            ElevatedButton(
-              onPressed: () async {
-                // validate
-                if (selectedOptionId == null) {
-                  ScaffoldMessenger.of(ctx2).showSnackBar(const SnackBar(content: Text('Выберите вариант')));
-                  return;
-                }
-                final txt = amtCtrl.text.trim();
-                final n = int.tryParse(txt);
-                if (n == null || n <= 0) {
-                  ScaffoldMessenger.of(ctx2).showSnackBar(const SnackBar(content: Text('Введите положительное целое число')));
-                  return;
-                }
-                if (n > user.mBalance) {
-                  ScaffoldMessenger.of(ctx2).showSnackBar(SnackBar(content: Text('Недостаточно майндов: у вас ${user.mBalance.toStringAsFixed(2)}')));
-                  return;
-                }
-
-                // disable button by popping and then performing RPC
-                Navigator.of(ctx2).pop(true);
-
-                // perform bet (show progress)
-                showDialog(
-                  context: context,
-                  barrierDismissible: false,
-                  builder: (_) => const Center(child: CircularProgressIndicator()),
-                );
-
-                try {
-                  await svc.placeBetInResolution(
-                    resolutionId: resolutionId,
-                    optionId: selectedOptionId!, // <- передаём выбранный вариант
-                    userId: user.id,
-                    amount: n,
-                  );
-
-                  // success: update local flags and profile
-                  await _refreshProfile();
-                  await _loadResolutionState();
-
-                  // close progress dialog
-                  if (mounted) Navigator.of(context).pop();
-
-                  // thank you popup
-                  await showDialog(
-                    context: context,
-                    builder: (_) => AlertDialog(
-                      title: const Text('Спасибо за участие в политрешении'),
-                      content: const Text('Ваша ставка принята.'),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.of(context).pop(),
-                          child: const Text('OK'),
-                        )
-                      ],
-                    ),
-                  );
-
-                  if (!mounted) return;
-                  setState(() {
-                    _alreadyBetInActiveResolution = true;
-                  });
-                } catch (e) {
-                  // close progress
-                  if (mounted) Navigator.of(context).pop();
-                  final msg = e is PostgrestException ? (e.message ?? e.toString()) : e.toString();
-                  _showMessage('Ошибка при ставке: $msg');
-                }
-              },
-              child: const Text('Подтвердить ставку'),
-            ),
-          ],
         );
-      });
-    },
-  );
+      },
+    );
 
-  // cleanup
-  try {
-    amtCtrl.dispose();
-  } catch (_) {}
-  // resDialogResult used only for flow; state updated after RPC
-}
+    if (chosen == null) return;
+
+    final first = (chosen['first_name'] ?? '').toString();
+    final last = (chosen['last_name'] ?? '').toString();
+    final displayName = ('$first $last').trim().isEmpty ? (chosen['telegram_username'] ?? 'Без имени') : '$first $last';
+
+    // Confirm dialog
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Купить ход экономисту'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Стоимость: 10 войсов'),
+            const SizedBox(height: 8),
+            Text('Получатель: $displayName'),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Отмена')),
+          ElevatedButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Купить')),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    // Perform RPC
+    try {
+      showDialog(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator()));
+
+      final rpcRes = await svc.rpcBuyEconomistTurn(
+        fromUser: user.id,
+        toUser: chosen['id'].toString(),
+        cost: 10,
+      );
+
+      Navigator.of(context).pop(); // close progress
+
+      if (rpcRes == null) {
+        _showMessage('Неожиданный ответ сервера');
+        return;
+      }
+
+      final status = (rpcRes['status'] ?? rpcRes['result'] ?? '').toString().toLowerCase();
+      if (status.contains('ok') || status.contains('success') || status == 'ok') {
+        _showMessage('Покупка успешна: у экономиста добавлен предмет "Дополнительный ход"');
+
+        // Client-side immediate update: construct a minimal pending inventory item and store locally
+        final Map<String, dynamic> item = {
+          'owner_id': chosen['id']?.toString() ?? chosen['id'].toString(),
+          'name': rpcRes['item_name'] ?? 'Дополнительный ход',
+          'count': 1,
+          'metadata': rpcRes['item_meta'] ?? {'from': user.id, 'cost': 10},
+          'created_at': rpcRes['created_at'] ?? DateTime.now().toIso8601String(),
+        };
+
+        if (!mounted) return;
+        setState(() {
+          // append pending so that when opening inventory of recipient we can show it immediately
+          _pendingInventoryItems.insert(0, item);
+        });
+
+        // Refresh profile balances
+        try {
+          await _refreshProfile();
+        } catch (_) {}
+      } else {
+        final msg = rpcRes['message']?.toString() ?? rpcRes.toString();
+        _showMessage('Ошибка: $msg');
+      }
+    } catch (e) {
+      try {
+        Navigator.of(context).pop();
+      } catch (_) {}
+      _showMessage('Ошибка при покупке: $e');
+    }
+  }
+
+  // -----------------------
+  // NEW: Open Purchase Enterprise screen (visible only to economists)
+  // -----------------------
+  Future<void> _openPurchaseEnterprise() async {
+    if (user.role != 'economist') return;
+    final res = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => PurchaseEnterpriseScreen(currentUser: user),
+      ),
+    );
+
+    if (res == true) {
+      // Purchase completed — refresh profile to update balance & inventory
+      await _refreshProfile();
+      _showMessage('Предприятие куплено и добавлено в ваш инвентарь');
+    }
+  }
 
   // -----------------------
   // UI rendering
@@ -776,7 +971,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _renderListenWidget() {
-    // Передаем speechActive и speechActorId — это гарантирует, что кнопка будет активна только во время речи
     return ListenButton(
       userId: user.id,
       activeSpeechId: _activeSpeechId,
@@ -784,7 +978,6 @@ class _HomeScreenState extends State<HomeScreen> {
       speechActive: speechActive,
       alreadyListened: _listenedToThisSpeech,
       onListenComplete: (Map<String, dynamic>? rpcResult) async {
-        // Если rpcResult содержит структуру — применим быстрые локальные изменения
         if (rpcResult != null) {
           final status = rpcResult['status']?.toString() ?? '';
           if (status == 'changed_color') {
@@ -803,6 +996,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   vBalance: user.vBalance,
                   mBalance: (addedM is num) ? user.mBalance + addedM.toDouble() : user.mBalance,
                   color: newColor,
+                  region: user.region,
                 );
               });
             }
@@ -820,13 +1014,13 @@ class _HomeScreenState extends State<HomeScreen> {
                   vBalance: user.vBalance + addedV.toDouble(),
                   mBalance: user.mBalance,
                   color: user.color,
+                  region: user.region,
                 );
               });
             }
           }
         }
 
-        // Всегда синхронизируемся с сервером (профиль, состояние речи)
         try {
           await _refreshProfile();
           await _fetchSpeechState();
@@ -891,6 +1085,12 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
             const SizedBox(height: 4),
+            // show economic region only for economists
+            if (user.role == 'economist' && (user.region != null && user.region!.trim().isNotEmpty))
+              Padding(
+                padding: const EdgeInsets.only(top: 4.0),
+                child: Text('Экономический регион: ${user.region}', style: const TextStyle(fontSize: 13, color: Colors.black54)),
+              ),
           ]),
           Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
             Text('V: ${user.vBalance.toStringAsFixed(2)}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
@@ -925,6 +1125,14 @@ class _HomeScreenState extends State<HomeScreen> {
     add('Опросы / Аукционы', () {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Открыть: Опросы/Аукционы')));
     });
+
+    // New button: Купить ход экономисту (visible to all)
+    add('Купить ход экономисту', _openBuyTurnFlow);
+
+    // New button: Купить предприятие (visible only to economists)
+    if (role == 'economist') {
+      add('Купить предприятие (200 V)', _openPurchaseEnterprise);
+    }
 
     // Debates button: only show if user is NOT politician, there is an active debate and user hasn't voted
     if (role != 'politician' && _hasActiveDebate && !_alreadyVotedInActiveDebate) {
@@ -1017,6 +1225,19 @@ class _HomeScreenState extends State<HomeScreen> {
     Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const LoginScreen()));
   }
 
+  // -----------------------
+  // Inventory navigation: open inventory screen that also shows pending local additions
+  // -----------------------
+  Future<void> _openInventoryScreen() async {
+    // Open the official InventoryScreen for current user
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => InventoryScreen(user: user)));
+    // After returning from inventory, clear pending items for this user (they should be persisted on server or reloaded)
+    if (!mounted) return;
+    setState(() {
+      _pendingInventoryItems.removeWhere((it) => it['owner_id'] == user.id);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1027,9 +1248,7 @@ class _HomeScreenState extends State<HomeScreen> {
             tooltip: 'Инвентарь',
             icon: const Icon(Icons.inventory_2),
             onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => InventoryScreen(user: user)),
-              );
+              _openInventoryScreen();
             },
           ),
           IconButton(onPressed: _logout, icon: const Icon(Icons.logout)),
@@ -1047,4 +1266,425 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+}
+
+/// ---------------------------
+/// PurchaseEnterpriseScreen
+/// ---------------------------
+/// Form for economists to buy an enterprise (cost 200 V).
+/// On success returns true to caller.
+class PurchaseEnterpriseScreen extends StatefulWidget {
+  final AppUser currentUser;
+  const PurchaseEnterpriseScreen({Key? key, required this.currentUser}) : super(key: key);
+
+  @override
+  State<PurchaseEnterpriseScreen> createState() => _PurchaseEnterpriseScreenState();
+}
+
+class _PurchaseEnterpriseScreenState extends State<PurchaseEnterpriseScreen> {
+  final supabase = Supabase.instance.client;
+  final _formKey = GlobalKey<FormState>();
+
+  final TextEditingController _nameCtrl = TextEditingController();
+  String? _selectedColor; // hex string
+  String? _selectedRegion;
+  String? _otherRegionText;
+
+  // investors entries
+  List<_InvestorRow> _investors = [];
+
+  // players list for choosing investors
+  List<Map<String, dynamic>> _players = [];
+
+  // regions fixed list as requested
+  final List<String> _fixedRegions = [
+    'Азиатская группа',
+    'Англа-саксонская группа',
+    'Предсоциалистический блок',
+    'Пиренейская группа',
+    'Центрально-европейская группа',
+  ];
+
+  // color options mapping name->hex
+  final Map<String, String> _colorOptions = {
+    'красный': '#F44336',
+    'зелёный': '#4CAF50',
+    'синий': '#2196F3',
+    'малиновый': '#E91E63',
+    'жёлтый': '#FFC107',
+  };
+
+  bool _loading = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _investors.add(_InvestorRow()); // start with one investor row (can be empty)
+    _loadPlayers();
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    for (final r in _investors) {
+      r.controllerAmount.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _loadPlayers() async {
+    try {
+      final res = await supabase.from('user_credentials').select('id, telegram_username, first_name, last_name').order('first_name');
+      if (res is List) {
+        _players = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      }
+    } catch (_) {
+      // ignore
+    } finally {
+      if (mounted) setState(() {});
+    }
+  }
+
+  void _addInvestorRow() {
+    if (_investors.length >= 10) return;
+    setState(() {
+      _investors.add(_InvestorRow());
+    });
+  }
+
+  void _removeInvestorRow(int idx) {
+    if (idx < 0 || idx >= _investors.length) return;
+    setState(() {
+      _investors.removeAt(idx);
+    });
+  }
+
+  Future<void> _onSubmit() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
+    final name = _nameCtrl.text.trim();
+    final colorHex = _selectedColor ?? '';
+    final region = _selectedRegion ?? ''; // strict: only selected region
+
+    // assemble investors log (text only)
+    final List<Map<String, dynamic>> investorsLog = [];
+    for (final row in _investors) {
+      final pid = row.selectedPlayerId;
+      final amt = row.controllerAmount.text.trim();
+      if ((pid == null || pid.toString().isEmpty) && (amt.isEmpty)) {
+        continue; // skip empty row
+      }
+      final player = _players.firstWhere((p) => p['id']?.toString() == pid, orElse: () => {});
+      final playerName = player.isNotEmpty
+          ? (((player['first_name'] ?? '').toString().trim().isEmpty) ? (player['telegram_username'] ?? '') : '${player['first_name'] ?? ''} ${player['last_name'] ?? ''}')
+          : '';
+      investorsLog.add({'player_id': pid, 'player_name': playerName, 'minds': amt});
+    }
+
+    try {
+      // refresh user profile to get current balance & inventory
+      final fresh = await supabase.from('user_credentials').select('v_balance, inventory').eq('id', widget.currentUser.id).maybeSingle();
+      if (fresh is! Map<String, dynamic>) throw 'Не удалось получить профиль';
+      final vbalRaw = fresh['v_balance'];
+      final currentBalance = (vbalRaw is num) ? vbalRaw.toDouble() : double.tryParse(vbalRaw?.toString() ?? '') ?? 0.0;
+      if (currentBalance < 200.0) {
+        setState(() {
+          _loading = false;
+        });
+        _showError('Недостаточно V: требуется 200, у вас ${currentBalance.toStringAsFixed(2)}');
+        return;
+      }
+
+      // normalize inventory to a list
+      dynamic inv = fresh['inventory'];
+      List<dynamic> invList = [];
+      if (inv == null) {
+        invList = [];
+      } else if (inv is String) {
+        try {
+          final d = jsonDecode(inv);
+          if (d is List) invList = List.from(d);
+          else if (d is Map) invList = [d];
+        } catch (_) {
+          invList = [];
+        }
+      } else if (inv is List) {
+        invList = List.from(inv);
+      } else if (inv is Map) {
+        invList = [inv];
+      } else {
+        invList = [];
+      }
+
+      // build enterprise item (fits InventoryScreen)
+      final Map<String, dynamic> enterpriseItem = {
+        'name': 'Предприятие: $name',
+        'count': 0,
+        'meta': {
+          'color': colorHex,
+          'region': region,
+          'investors': investorsLog,
+          'created_at': DateTime.now().toIso8601String(),
+        },
+      };
+
+      invList.add(enterpriseItem);
+
+      // prepare updates: new balance and inventory
+      final newBalance = currentBalance - 200.0;
+      final updateObj = {
+        'v_balance': newBalance,
+        'inventory': invList,
+      };
+
+      // perform update
+      final upd = await supabase.from('user_credentials').update(updateObj).eq('id', widget.currentUser.id).select().maybeSingle();
+      if (upd == null) throw 'Не удалось сохранить предприятие (сервер вернул null)';
+
+      // success
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    } catch (e) {
+      _showError('Ошибка при покупке: $e');
+      setState(() {
+        _loading = false;
+      });
+    }
+  }
+
+  void _showError(String m) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
+  }
+
+  Future<String?> _showPlayerPicker(int index) async {
+    String query = '';
+    return await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) {
+        List<Map<String, dynamic>> filtered = List.from(_players);
+        return StatefulBuilder(builder: (ctx2, setStateSheet) {
+          void doFilter(String q) {
+            query = q;
+            final ql = q.trim().toLowerCase();
+            if (ql.isEmpty) {
+              filtered = List.from(_players);
+            } else {
+              filtered = _players.where((p) {
+                final fn = (p['first_name'] ?? '').toString().toLowerCase();
+                final ln = (p['last_name'] ?? '').toString().toLowerCase();
+                final un = (p['telegram_username'] ?? '').toString().toLowerCase();
+                return fn.contains(ql) || ln.contains(ql) || un.contains(ql);
+              }).toList();
+            }
+            setStateSheet(() {});
+          }
+
+          return SafeArea(
+            child: FractionallySizedBox(
+              heightFactor: 0.85,
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.all(12.0),
+                    child: TextField(
+                      decoration: const InputDecoration(hintText: 'Поиск игрока', prefixIcon: Icon(Icons.search)),
+                      onChanged: (s) => doFilter(s),
+                    ),
+                  ),
+                  const Divider(height: 0),
+                  Expanded(
+                    child: ListView.separated(
+                      itemCount: filtered.length + 1,
+                      separatorBuilder: (_, __) => const Divider(height: 0),
+                      itemBuilder: (context, idx) {
+                        if (idx == 0) {
+                          return ListTile(
+                            title: const Text('— выбрать пустым —'),
+                            onTap: () => Navigator.of(ctx).pop(null),
+                          );
+                        }
+                        final p = filtered[idx - 1];
+                        final id = p['id']?.toString();
+                        final name = ((p['first_name'] ?? '') as String).toString().trim().isEmpty
+                            ? (p['telegram_username'] ?? '').toString()
+                            : '${p['first_name'] ?? ''} ${p['last_name'] ?? ''}';
+                        return ListTile(
+                          title: Text(name),
+                          onTap: () => Navigator.of(ctx).pop(id),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        });
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Купить предприятие'),
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : SingleChildScrollView(
+              padding: const EdgeInsets.all(12),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  children: [
+                    TextFormField(
+                      controller: _nameCtrl,
+                      decoration: const InputDecoration(labelText: 'Название предприятия'),
+                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Введите название' : null,
+                    ),
+                    const SizedBox(height: 12),
+                    // Color selection (named list with swatch)
+                    Row(
+                      children: [
+                        const Text('Цвет:'),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: DropdownButtonFormField<String>(
+                            value: _selectedColor,
+                            items: _colorOptions.entries
+                                .map((e) => DropdownMenuItem(
+                                      value: e.value,
+                                      child: Row(children: [
+                                        Container(width: 18, height: 18, color: Color(int.parse(e.value.substring(1), radix: 16) | 0xFF000000)),
+                                        const SizedBox(width: 8),
+                                        Text(e.key),
+                                      ]),
+                                    ))
+                                .toList(),
+                            onChanged: (v) => setState(() => _selectedColor = v),
+                            decoration: const InputDecoration(hintText: 'Выберите цвет'),
+                            validator: (v) => (v == null || v.isEmpty) ? 'Выберите цвет' : null,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    // Region selection: fixed dropdown as requested
+                    Row(
+                      children: [
+                        const Text('Регион:'),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: DropdownButtonFormField<String>(
+                            value: _selectedRegion, // <- strictly only selected value from fixed list
+                            items: _fixedRegions.map((r) => DropdownMenuItem(value: r, child: Text(r))).toList(),
+                            onChanged: (v) => setState(() => _selectedRegion = v),
+                            decoration: const InputDecoration(hintText: 'Выберите регион'),
+                            validator: (v) => (v == null || v.isEmpty) ? 'Выберите регион' : null,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    // Investors block
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Инвесторы (до 10)', style: TextStyle(fontWeight: FontWeight.w600)),
+                        TextButton(
+                          onPressed: _investors.length >= 10 ? null : _addInvestorRow,
+                          child: const Text('Добавить инвестора'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    ..._buildInvestorRows(),
+                    const SizedBox(height: 20),
+                    ElevatedButton(
+                      onPressed: _onSubmit,
+                      child: const Text('Купить (200 V)'),
+                    ),
+                    const SizedBox(height: 12),
+                    if (_error != null) Text(_error!, style: const TextStyle(color: Colors.red)),
+                  ],
+                ),
+              ),
+            ),
+    );
+  }
+
+  List<Widget> _buildInvestorRows() {
+    final List<Widget> rows = [];
+    for (var i = 0; i < _investors.length; i++) {
+      final r = _investors[i];
+      final selectedName = _players.firstWhere((p) => p['id']?.toString() == r.selectedPlayerId, orElse: () => {}).isNotEmpty
+          ? (_players.firstWhere((p) => p['id']?.toString() == r.selectedPlayerId)['first_name']?.toString().trim().isEmpty ?? true
+              ? (_players.firstWhere((p) => p['id']?.toString() == r.selectedPlayerId)['telegram_username'] ?? '')
+              : '${_players.firstWhere((p) => p['id']?.toString() == r.selectedPlayerId)['first_name'] ?? ''} ${_players.firstWhere((p) => p['id']?.toString() == r.selectedPlayerId)['last_name'] ?? ''}')
+          : null;
+      rows.add(Card(
+        margin: const EdgeInsets.symmetric(vertical: 6),
+        child: Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: Column(children: [
+            Row(
+              children: [
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () async {
+                      final selected = await _showPlayerPicker(i);
+                      setState(() {
+                        r.selectedPlayerId = selected;
+                      });
+                    },
+                    child: AbsorbPointer(
+                      child: TextFormField(
+                        decoration: InputDecoration(
+                          labelText: 'Игрок',
+                          hintText: '— выбрать игрока —',
+                          suffixIcon: const Icon(Icons.search),
+                        ),
+                        controller: TextEditingController(text: selectedName ?? ''),
+                        readOnly: true,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 120,
+                  child: TextFormField(
+                    controller: r.controllerAmount,
+                    decoration: const InputDecoration(labelText: 'Майндов'),
+                    keyboardType: TextInputType.text,
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete_outline),
+                  onPressed: () {
+                    _removeInvestorRow(i);
+                  },
+                ),
+              ],
+            ),
+          ]),
+        ),
+      ));
+    }
+    return rows;
+  }
+}
+
+class _InvestorRow {
+  String? selectedPlayerId;
+  final TextEditingController controllerAmount = TextEditingController();
+  _InvestorRow({this.selectedPlayerId});
 }

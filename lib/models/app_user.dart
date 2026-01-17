@@ -8,6 +8,7 @@ class AppUser {
   double vBalance;
   double mBalance;
   final String? color;
+  final String? region; // новый столбец region (text в БД)
 
   AppUser({
     required this.id,
@@ -18,6 +19,7 @@ class AppUser {
     required this.vBalance,
     required this.mBalance,
     this.color,
+    this.region,
   });
 
   AppUser copyWith({
@@ -29,6 +31,7 @@ class AppUser {
     double? vBalance,
     double? mBalance,
     String? color,
+    String? region,
   }) =>
       AppUser(
         id: id ?? this.id,
@@ -39,6 +42,7 @@ class AppUser {
         vBalance: vBalance ?? this.vBalance,
         mBalance: mBalance ?? this.mBalance,
         color: color ?? this.color,
+        region: region ?? this.region,
       );
 
   factory AppUser.fromMap(Map<String, dynamic> m) {
@@ -51,6 +55,7 @@ class AppUser {
       vBalance: (m['v_balance'] is num) ? (m['v_balance'] as num).toDouble() : 0.0,
       mBalance: (m['m_balance'] is num) ? (m['m_balance'] as num).toDouble() : 0.0,
       color: m['color'] as String?,
+      region: m['region'] is String ? m['region'] as String : (m['region']?.toString()),
     );
   }
 }

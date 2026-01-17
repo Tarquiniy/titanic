@@ -1039,4 +1039,28 @@ class GameService {
       rethrow;
     }
   }
+
+
+   Future<Map<String, dynamic>?> rpcBuyEconomistTurn({
+    required String fromUser,
+    required String toUser,
+    required int cost,
+  }) async {
+    try {
+      final params = {'p_from': fromUser, 'p_to': toUser, 'p_cost': cost};
+      debugPrint('GameService.rpcBuyEconomistTurn params: $params');
+      final res = await client.rpc('buy_economist_turn', params: params);
+      debugPrint('GameService.rpcBuyEconomistTurn raw res: $res');
+      if (res == null) return null;
+      if (res is Map) return Map<String, dynamic>.from(res);
+      if (res is List && res.isNotEmpty && res[0] is Map) return Map<String, dynamic>.from(res[0] as Map);
+      return {'result': res.toString()};
+    } on PostgrestException catch (e) {
+      _logPostgrestException(e);
+      rethrow;
+    } catch (e) {
+      debugPrint('rpcBuyEconomistTurn error: $e');
+      rethrow;
+    }
+  }
 }
