@@ -3,6 +3,7 @@
 // Главное окно — навигация на transfer_v_screen и логика "Речь жизни".
 import 'dart:async';
 import 'dart:convert';
+import 'dart:html' as html;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:titanic/models/app_user.dart';
@@ -25,6 +26,12 @@ class _HomeScreenState extends State<HomeScreen> {
   late AppUser user;
   final supabase = Supabase.instance.client;
   final GameService svc = GameService();
+
+  RealtimeChannel? _eventsChannel;
+  final List<Map<String, dynamic>> _userEvents = [];
+
+  html.AudioElement? _notifyAudio;
+  bool _audioUnlocked = false;
 
   // Speech state
   bool speechActive = false;
@@ -75,6 +82,10 @@ class _HomeScreenState extends State<HomeScreen> {
     _startDebatePolling();
     _loadResolutionState();
     _startResolutionPolling();
+    _initWebAudio();
+    _requestBrowserPermission();
+    _subscribeToUserEvents();
+    _loadUserEvents();
   }
 
   @override
@@ -82,8 +93,117 @@ class _HomeScreenState extends State<HomeScreen> {
     _stopPollingSpeechState();
     _debate_poll_timer_cancel();
     _resolution_poll_timer_cancel();
+    _eventsChannel?.unsubscribe();
     super.dispose();
   }
+
+  // ===============================
+// WEB AUDIO
+// ===============================
+void _initWebAudio() {
+  _notifyAudio = html.AudioElement('assets/notify.mp3');
+}
+
+void _unlockAudio() {
+  if (_audioUnlocked) return;
+  _audioUnlocked = true;
+  _notifyAudio?.play().catchError((_) {});
+}
+
+void _playNotifySound() {
+  if (!_audioUnlocked) return;
+  _notifyAudio?.currentTime = 0;
+  _notifyAudio?.play().catchError((_) {});
+}
+
+// ===============================
+// BROWSER NOTIFICATIONS
+// ===============================
+void _requestBrowserPermission() {
+  if (html.Notification.supported &&
+      html.Notification.permission == 'default') {
+    html.Notification.requestPermission();
+  }
+}
+
+void _showBrowserNotification(String title, String body) {
+  if (!html.Notification.supported) return;
+  if (html.Notification.permission != 'granted') return;
+  html.Notification(title, body: body);
+}
+
+// ===============================
+// REALTIME EVENTS
+// ===============================
+void _subscribeToUserEvents() {
+  _eventsChannel = supabase.channel('user-events-${user.id}');
+
+  _eventsChannel!
+      .onPostgresChanges(
+        event: PostgresChangeEvent.insert,
+        schema: 'public',
+        table: 'user_events',
+        filter: PostgresChangeFilter(
+          type: PostgresChangeFilterType.eq,
+          column: 'user_id',
+          value: user.id,
+        ),
+        callback: (payload) {
+          final data = payload.newRecord;
+          _handleIncomingEvent(data);
+        },
+      )
+      .subscribe();
+}
+
+Future<void> _loadUserEvents() async {
+  try {
+    final res = await supabase
+        .from('user_events')
+        .select()
+        .eq('user_id', user.id)
+        .order('created_at', ascending: false)
+        .limit(50);
+
+    if (res is List) {
+      setState(() {
+        _userEvents.addAll(res.cast<Map<String, dynamic>>());
+      });
+    }
+  } catch (_) {}
+}
+
+void _handleIncomingEvent(Map<String, dynamic> event) {
+  if (!mounted) return;
+
+  setState(() {
+    _userEvents.insert(0, event);
+  });
+
+  _playNotifySound();
+  _showBrowserNotification(
+    event['title'] ?? 'Новое событие',
+    event['message'] ?? '',
+  );
+
+  _showEventPopup(event);
+}
+
+void _showEventPopup(Map<String, dynamic> event) {
+  showDialog(
+    context: context,
+    builder: (_) => AlertDialog(
+      title: Text(event['title'] ?? 'Событие'),
+      content: Text(event['message'] ?? ''),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('OK'),
+        ),
+      ],
+    ),
+  );
+}
 
   // small helpers to keep analyzer happy (no-op placeholders)
   void _debate_poll_timer_cancel() {
@@ -1239,8 +1359,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
+Widget build(BuildContext context) {
+  return GestureDetector(
+    onTap: _unlockAudio, // 🔊 разблокировка звука для WEB
+    child: Scaffold(
       appBar: AppBar(
         title: const Text('Главная'),
         actions: [
@@ -1251,22 +1373,71 @@ class _HomeScreenState extends State<HomeScreen> {
               _openInventoryScreen();
             },
           ),
-          IconButton(onPressed: _logout, icon: const Icon(Icons.logout)),
+          IconButton(
+            onPressed: _logout,
+            icon: const Icon(Icons.logout),
+          ),
         ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(12),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             _balanceCard(),
             const SizedBox(height: 12),
+
+            // ===== КНОПКИ РОЛЕЙ =====
             ..._roleButtons(),
+
+            const SizedBox(height: 20),
+
+            // ===== СОБЫТИЯ =====
+            const Text(
+              'События',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 8),
+
+            _userEvents.isEmpty
+                ? const Text(
+                    'Пока нет событий',
+                    style: TextStyle(color: Colors.grey),
+                  )
+                : ListView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: _userEvents.length,
+                    itemBuilder: (context, index) {
+                      final e = _userEvents[index];
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        child: ListTile(
+                          title: Text(e['title'] ?? 'Событие'),
+                          subtitle: Text(e['message'] ?? ''),
+                          trailing: Text(
+                            e['created_at']
+                                    ?.toString()
+                                    .substring(11, 16) ??
+                                '',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey,
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
           ],
         ),
       ),
-    );
-  }
-}
+    ),
+  );
+}}
 
 /// ---------------------------
 /// PurchaseEnterpriseScreen
@@ -1369,7 +1540,7 @@ class _PurchaseEnterpriseScreenState extends State<PurchaseEnterpriseScreen> {
 
     final name = _nameCtrl.text.trim();
     final colorHex = _selectedColor ?? '';
-    final region = _selectedRegion ?? ''; // strict: only selected region
+    final region = _selectedRegion ?? widget.currentUser.region ?? '';
 
     // assemble investors log (text only)
     final List<Map<String, dynamic>> investorsLog = [];
@@ -1584,7 +1755,7 @@ class _PurchaseEnterpriseScreenState extends State<PurchaseEnterpriseScreen> {
                         const SizedBox(width: 12),
                         Expanded(
                           child: DropdownButtonFormField<String>(
-                            value: _selectedRegion, // <- strictly only selected value from fixed list
+                            value: _selectedRegion ?? widget.currentUser.region,
                             items: _fixedRegions.map((r) => DropdownMenuItem(value: r, child: Text(r))).toList(),
                             onChanged: (v) => setState(() => _selectedRegion = v),
                             decoration: const InputDecoration(hintText: 'Выберите регион'),
