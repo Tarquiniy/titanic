@@ -1,6 +1,7 @@
-// lib/login_screen.dart
+// lib/screens/login_screen.dart
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/app_user.dart';
 import 'home_screen.dart';
 import 'admin_screen.dart';
@@ -19,6 +20,55 @@ class _LoginScreenState extends State<LoginScreen> {
   String? _error;
 
   final _supabase = Supabase.instance.client;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkSavedLogin();
+  }
+
+  Future<void> _checkSavedLogin() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedId = prefs.getString('saved_user_id');
+      if (savedId == null || savedId.isEmpty) return;
+
+      // try to fetch profile by id
+      final data = await _supabase
+          .from('user_credentials')
+          .select('id, telegram_username, role, first_name, last_name, v_balance, m_balance, color, region')
+          .eq('id', savedId)
+          .maybeSingle();
+
+      if (data == null) {
+        await prefs.remove('saved_user_id');
+        return;
+      }
+
+      final row = Map<String, dynamic>.from(data as Map);
+      final user = AppUser(
+        id: row['id']?.toString() ?? '',
+        username: row['telegram_username']?.toString() ?? '',
+        role: row['role']?.toString() ?? 'public_figure',
+        firstName: row['first_name']?.toString() ?? '',
+        lastName: row['last_name']?.toString() ?? '',
+        vBalance: (row['v_balance'] is num) ? (row['v_balance'] as num).toDouble() : 0.0,
+        mBalance: (row['m_balance'] is num) ? (row['m_balance'] as num).toDouble() : 0.0,
+        color: row['color']?.toString(),
+        region: row['region'] is String ? row['region'] as String : (row['region']?.toString()),
+      );
+
+      if (!mounted) return;
+      final role = (row['role'] ?? '').toString().toLowerCase();
+      if (role == 'admin') {
+        Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const AdminScreen()));
+      } else {
+        Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => HomeScreen(user: user)));
+      }
+    } catch (_) {
+      // ignore — remain on login screen
+    }
+  }
 
   @override
   void dispose() {
@@ -40,7 +90,7 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       final data = await _supabase
           .from('user_credentials')
-          .select('id, telegram_username, role, first_name, last_name, v_balance, m_balance, password, color')
+          .select('id, telegram_username, role, first_name, last_name, v_balance, m_balance, password, color, region')
           .eq('telegram_username', username)
           .maybeSingle();
 
@@ -49,12 +99,9 @@ class _LoginScreenState extends State<LoginScreen> {
         return;
       }
 
-      // Приведение типов: data — динамический Map
       final row = Map<String, dynamic>.from(data as Map);
 
       final storedPassword = (row['password'] ?? '').toString();
-
-      // СРАВНЕНИЕ ПАРОЛЕЙ БЕЗ ХЕШИРОВАНИЯ (пароль хранится как plain string)
       if (storedPassword.isEmpty || storedPassword != password) {
         setState(() => _error = 'Неверный username или пароль');
         return;
@@ -68,13 +115,21 @@ class _LoginScreenState extends State<LoginScreen> {
         lastName: row['last_name']?.toString() ?? '',
         vBalance: (row['v_balance'] is num) ? (row['v_balance'] as num).toDouble() : 0.0,
         mBalance: (row['m_balance'] is num) ? (row['m_balance'] as num).toDouble() : 0.0,
-        color: row['color']!.toString(),
+        color: row['color']?.toString(),
+        region: row['region'] is String ? row['region'] as String : (row['region']?.toString()),
       );
 
       if (!mounted) return;
 
-      final role = (row['role'] ?? '').toString().toLowerCase();
+      // Persist logged-in user id
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('saved_user_id', user.id);
+      } catch (_) {
+        // ignore preferences errors
+      }
 
+      final role = (row['role'] ?? '').toString().toLowerCase();
       if (role == 'admin') {
         Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const AdminScreen()));
       } else {

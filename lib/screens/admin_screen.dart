@@ -1,6 +1,7 @@
 // lib/admin_screen.dart
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:titanic/services/game_service.dart';
 import 'login_screen.dart';
@@ -15,6 +16,14 @@ class _AdminScreenState extends State<AdminScreen> {
   final supabase = Supabase.instance.client;
 
   int _tabIndex = 0;
+
+  Future<void> _logout() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('saved_user_id');
+    } catch (_) {}
+    Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const LoginScreen()));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -32,9 +41,7 @@ class _AdminScreenState extends State<AdminScreen> {
           IconButton(
             tooltip: 'Выйти',
             icon: const Icon(Icons.logout),
-            onPressed: () {
-              Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const LoginScreen()));
-            },
+            onPressed: _logout,
           ),
         ],
       ),
