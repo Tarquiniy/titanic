@@ -1,8 +1,8 @@
 // lib/admin_login.dart
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:titanic/screens/admin_screen.dart';
+import 'package:titanic/services/persistent_storage.dart';
 
 class AdminLoginScreen extends StatefulWidget {
   const AdminLoginScreen({Key? key}) : super(key: key);
@@ -66,11 +66,10 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
         return;
       }
 
-      // persist admin id in SharedPreferences
+      // persist admin id using platform-appropriate storage
       try {
-        final prefs = await SharedPreferences.getInstance();
         final idStr = row['id']?.toString() ?? user.id;
-        await prefs.setString('saved_user_id', idStr);
+        await saveUserId(idStr);
       } catch (_) {}
 
       // success -> replace with AdminScreen

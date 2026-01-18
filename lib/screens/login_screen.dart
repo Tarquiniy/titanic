@@ -1,8 +1,7 @@
-// lib/screens/login_screen.dart
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../models/app_user.dart';
+import '../services/persistent_storage.dart';
 import 'home_screen.dart';
 import 'admin_screen.dart';
 
@@ -29,8 +28,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _checkSavedLogin() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final savedId = prefs.getString('saved_user_id');
+      final savedId = await getSavedUserId();
       if (savedId == null || savedId.isEmpty) return;
 
       // try to fetch profile by id
@@ -41,7 +39,9 @@ class _LoginScreenState extends State<LoginScreen> {
           .maybeSingle();
 
       if (data == null) {
-        await prefs.remove('saved_user_id');
+        try {
+          await removeSavedUserId();
+        } catch (_) {}
         return;
       }
 
@@ -121,10 +121,9 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (!mounted) return;
 
-      // Persist logged-in user id
+      // Persist logged-in user id (web -> localStorage, else -> shared_preferences)
       try {
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('saved_user_id', user.id);
+        await saveUserId(user.id);
       } catch (_) {
         // ignore preferences errors
       }

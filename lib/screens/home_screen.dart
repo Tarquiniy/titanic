@@ -5,11 +5,11 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:html' as html;
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:titanic/models/app_user.dart';
 import 'package:titanic/screens/debates_screen.dart';
 import 'package:titanic/services/game_service.dart';
+import 'package:titanic/services/persistent_storage.dart';
 import 'login_screen.dart';
 import 'transfer_v_screen.dart';
 import 'inventory_screen.dart';
@@ -99,112 +99,112 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // ===============================
-// WEB AUDIO
-// ===============================
-void _initWebAudio() {
-  _notifyAudio = html.AudioElement('assets/notify.mp3');
-}
-
-void _unlockAudio() {
-  if (_audioUnlocked) return;
-  _audioUnlocked = true;
-  _notifyAudio?.play().catchError((_) {});
-}
-
-void _playNotifySound() {
-  if (!_audioUnlocked) return;
-  _notifyAudio?.currentTime = 0;
-  _notifyAudio?.play().catchError((_) {});
-}
-
-// ===============================
-// BROWSER NOTIFICATIONS
-// ===============================
-void _requestBrowserPermission() {
-  if (html.Notification.supported &&
-      html.Notification.permission == 'default') {
-    html.Notification.requestPermission();
+  // WEB AUDIO
+  // ===============================
+  void _initWebAudio() {
+    _notifyAudio = html.AudioElement('assets/notify.mp3');
   }
-}
 
-void _showBrowserNotification(String title, String body) {
-  if (!html.Notification.supported) return;
-  if (html.Notification.permission != 'granted') return;
-  html.Notification(title, body: body);
-}
+  void _unlockAudio() {
+    if (_audioUnlocked) return;
+    _audioUnlocked = true;
+    _notifyAudio?.play().catchError((_) {});
+  }
 
-// ===============================
-// REALTIME EVENTS
-// ===============================
-void _subscribeToUserEvents() {
-  _eventsChannel = supabase.channel('user-events-${user.id}');
+  void _playNotifySound() {
+    if (!_audioUnlocked) return;
+    _notifyAudio?.currentTime = 0;
+    _notifyAudio?.play().catchError((_) {});
+  }
 
-  _eventsChannel!
-      .onPostgresChanges(
-        event: PostgresChangeEvent.insert,
-        schema: 'public',
-        table: 'user_events',
-        filter: PostgresChangeFilter(
-          type: PostgresChangeFilterType.eq,
-          column: 'user_id',
-          value: user.id,
-        ),
-        callback: (payload) {
-          final data = payload.newRecord;
-          _handleIncomingEvent(data);
-        },
-      )
-      .subscribe();
-}
-
-Future<void> _loadUserEvents() async {
-  try {
-    final res = await supabase
-        .from('user_events')
-        .select()
-        .eq('user_id', user.id)
-        .order('created_at', ascending: false)
-        .limit(50);
-
-    if (res is List) {
-      setState(() {
-        _userEvents.addAll(res.cast<Map<String, dynamic>>());
-      });
+  // ===============================
+  // BROWSER NOTIFICATIONS
+  // ===============================
+  void _requestBrowserPermission() {
+    if (html.Notification.supported &&
+        html.Notification.permission == 'default') {
+      html.Notification.requestPermission();
     }
-  } catch (_) {}
-}
+  }
 
-void _handleIncomingEvent(Map<String, dynamic> event) {
-  if (!mounted) return;
+  void _showBrowserNotification(String title, String body) {
+    if (!html.Notification.supported) return;
+    if (html.Notification.permission != 'granted') return;
+    html.Notification(title, body: body);
+  }
 
-  setState(() {
-    _userEvents.insert(0, event);
-  });
+  // ===============================
+  // REALTIME EVENTS
+  // ===============================
+  void _subscribeToUserEvents() {
+    _eventsChannel = supabase.channel('user-events-${user.id}');
 
-  _playNotifySound();
-  _showBrowserNotification(
-    event['title'] ?? 'Новое событие',
-    event['message'] ?? '',
-  );
+    _eventsChannel!
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'user_events',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'user_id',
+            value: user.id,
+          ),
+          callback: (payload) {
+            final data = payload.newRecord;
+            _handleIncomingEvent(data);
+          },
+        )
+        .subscribe();
+  }
 
-  _showEventPopup(event);
-}
+  Future<void> _loadUserEvents() async {
+    try {
+      final res = await supabase
+          .from('user_events')
+          .select()
+          .eq('user_id', user.id)
+          .order('created_at', ascending: false)
+          .limit(50);
 
-void _showEventPopup(Map<String, dynamic> event) {
-  showDialog(
-    context: context,
-    builder: (_) => AlertDialog(
-      title: Text(event['title'] ?? 'Событие'),
-      content: Text(event['message'] ?? ''),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('OK'),
-        ),
-      ],
-    ),
-  );
-}
+      if (res is List) {
+        setState(() {
+          _userEvents.addAll(res.cast<Map<String, dynamic>>());
+        });
+      }
+    } catch (_) {}
+  }
+
+  void _handleIncomingEvent(Map<String, dynamic> event) {
+    if (!mounted) return;
+
+    setState(() {
+      _userEvents.insert(0, event);
+    });
+
+    _playNotifySound();
+    _showBrowserNotification(
+      event['title'] ?? 'Новое событие',
+      event['message'] ?? '',
+    );
+
+    _showEventPopup(event);
+  }
+
+  void _showEventPopup(Map<String, dynamic> event) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text(event['title'] ?? 'Событие'),
+        content: Text(event['message'] ?? ''),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
 
   // small helpers to keep analyzer happy (no-op placeholders)
   void _debate_poll_timer_cancel() {
@@ -356,8 +356,6 @@ void _showEventPopup(Map<String, dynamic> event) {
       // ignore
     }
   }
-
-  
 
   void _startResolutionPolling({int seconds = 5}) {
     _resolutionPollTimer?.cancel();
@@ -1345,16 +1343,18 @@ void _showEventPopup(Map<String, dynamic> event) {
   }
 
   void _logout() async {
-  try {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('saved_user_id');
-  } catch (_) {}
-  if (!mounted) return;
-  Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) {
-    // Возвращаемся на экран логина
-    return const LoginScreen();
-  }));
-}
+    try {
+      await removeSavedUserId();
+    } catch (_) {}
+    try {
+      await supabase.auth.signOut();
+    } catch (_) {}
+    if (!mounted) return;
+    Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) {
+      // Возвращаемся на экран логина
+      return const LoginScreen();
+    }));
+  }
 
   // -----------------------
   // Inventory navigation: open inventory screen that also shows pending local additions
@@ -1370,85 +1370,86 @@ void _showEventPopup(Map<String, dynamic> event) {
   }
 
   @override
-Widget build(BuildContext context) {
-  return GestureDetector(
-    onTap: _unlockAudio, // 🔊 разблокировка звука для WEB
-    child: Scaffold(
-      appBar: AppBar(
-        title: const Text('Главная'),
-        actions: [
-          IconButton(
-            tooltip: 'Инвентарь',
-            icon: const Icon(Icons.inventory_2),
-            onPressed: () {
-              _openInventoryScreen();
-            },
-          ),
-          IconButton(
-            onPressed: _logout,
-            icon: const Icon(Icons.logout),
-          ),
-        ],
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _balanceCard(),
-            const SizedBox(height: 12),
-
-            // ===== КНОПКИ РОЛЕЙ =====
-            ..._roleButtons(),
-
-            const SizedBox(height: 20),
-
-            // ===== СОБЫТИЯ =====
-            const Text(
-              'События',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: _unlockAudio, // 🔊 разблокировка звука для WEB
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Главная'),
+          actions: [
+            IconButton(
+              tooltip: 'Инвентарь',
+              icon: const Icon(Icons.inventory_2),
+              onPressed: () {
+                _openInventoryScreen();
+              },
             ),
-            const SizedBox(height: 8),
-
-            _userEvents.isEmpty
-                ? const Text(
-                    'Пока нет событий',
-                    style: TextStyle(color: Colors.grey),
-                  )
-                : ListView.builder(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    itemCount: _userEvents.length,
-                    itemBuilder: (context, index) {
-                      final e = _userEvents[index];
-                      return Card(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        child: ListTile(
-                          title: Text(e['title'] ?? 'Событие'),
-                          subtitle: Text(e['message'] ?? ''),
-                          trailing: Text(
-                            e['created_at']
-                                    ?.toString()
-                                    .substring(11, 16) ??
-                                '',
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey,
-                            ),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
+            IconButton(
+              onPressed: _logout,
+              icon: const Icon(Icons.logout),
+            ),
           ],
         ),
+        body: SingleChildScrollView(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _balanceCard(),
+              const SizedBox(height: 12),
+
+              // ===== КНОПКИ РОЛЕЙ =====
+              ..._roleButtons(),
+
+              const SizedBox(height: 20),
+
+              // ===== СОБЫТИЯ =====
+              const Text(
+                'События',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+
+              _userEvents.isEmpty
+                  ? const Text(
+                      'Пока нет событий',
+                      style: TextStyle(color: Colors.grey),
+                    )
+                  : ListView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: _userEvents.length,
+                      itemBuilder: (context, index) {
+                        final e = _userEvents[index];
+                        return Card(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          child: ListTile(
+                            title: Text(e['title'] ?? 'Событие'),
+                            subtitle: Text(e['message'] ?? ''),
+                            trailing: Text(
+                              e['created_at']
+                                      ?.toString()
+                                      .substring(11, 16) ??
+                                  '',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ],
+          ),
+        ),
       ),
-    ),
-  );
-}}
+    );
+  }
+}
 
 /// ---------------------------
 /// PurchaseEnterpriseScreen

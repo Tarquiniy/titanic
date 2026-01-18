@@ -1,9 +1,9 @@
 // lib/admin_screen.dart
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:titanic/services/game_service.dart';
+import 'package:titanic/services/persistent_storage.dart';
 import 'login_screen.dart';
 
 class AdminScreen extends StatefulWidget {
@@ -19,9 +19,12 @@ class _AdminScreenState extends State<AdminScreen> {
 
   Future<void> _logout() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove('saved_user_id');
+      await removeSavedUserId();
     } catch (_) {}
+    try {
+      await supabase.auth.signOut();
+    } catch (_) {}
+    if (!mounted) return;
     Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const LoginScreen()));
   }
 
@@ -775,7 +778,7 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
         ? null
         : (r['winning_option_id'] is int
             ? r['winning_option_id'] as int
-            : int.tryParse(r['winning_option_id'].toString()));
+            : int.tryParse(r['winning_option_id'].toString())) ;
 
     // combined future: load options + results together for consistent display
     final combinedFuture = Future.wait([
