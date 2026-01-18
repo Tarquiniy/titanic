@@ -1,20 +1,14 @@
 // lib/screens/home_screen.dart
 //
-// NOTE: This file was updated to:
-//  - Poll offer-related events via RPC `pull_offer_events`
-//  - Feed new events into existing `handleIncomingEvent` (which already plays sound and shows UI)
-
+// Главное окно — навигация на transfer_v_screen и логика "Речь жизни".
 import 'dart:async';
 import 'dart:convert';
 import 'dart:html' as html;
-
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
 import 'package:titanic/models/app_user.dart';
 import 'package:titanic/screens/debates_screen.dart';
 import 'package:titanic/services/game_service.dart';
-
 import 'login_screen.dart';
 import 'transfer_v_screen.dart';
 import 'inventory_screen.dart';
@@ -22,247 +16,208 @@ import 'package:titanic/widgets/listen_button.dart';
 
 class HomeScreen extends StatefulWidget {
   final AppUser user;
-
   const HomeScreen({Key? key, required this.user}) : super(key: key);
 
   @override
-  State<HomeScreen> createState() => HomeScreenState();
+  State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> {
   late AppUser user;
-
   final supabase = Supabase.instance.client;
   final GameService svc = GameService();
 
-  RealtimeChannel? eventsChannel;
+  RealtimeChannel? _eventsChannel;
+  final List<Map<String, dynamic>> _userEvents = [];
 
-  final List<Map<String, dynamic>> userEvents = [];
-
-  html.AudioElement? notifyAudio;
-  bool audioUnlocked = false;
+  html.AudioElement? _notifyAudio;
+  bool _audioUnlocked = false;
 
   // Speech state
   bool speechActive = false;
   String? speechActorId;
   DateTime? speechExpiresAt; // UTC - client lock/unlock time
-  int? activeSpeechId; // Active lifespeech record id needed for listen RPC
 
-  // color usercredentials
-  String? userColor;
+  // Active life_speech record id (needed for listen RPC)
+  int? _activeSpeechId;
+
+  // Поле цвета пользователя (из колонки color в user_credentials)
+  String? _userColor;
 
   // Polling
-  Timer? pollTimer;
+  Timer? _pollTimer;
 
-  // RPC loading flags
-  bool rpcLoading = false;
+  // RPC/loading flags
+  bool _rpcLoading = false;
 
-  // Waiting for server confirm after startSpeech
-  bool waitingForServerConfirm = false;
+  // Waiting for server confirm after start_speech
+  bool _waitingForServerConfirm = false;
 
-  // Listen historical flag
-  bool listenedToThisSpeech = false;
+  // Listen/historical flag (user already listened to this speech according to server)
+  bool _listenedToThisSpeech = false;
 
   // ---- Debates state ----
-  bool hasActiveDebate = false;
-  int? activeDebateId;
-  bool alreadyVotedInActiveDebate = false;
-  Timer? debatePollTimer;
+  bool _hasActiveDebate = false;
+  int? _activeDebateId;
+  bool _alreadyVotedInActiveDebate = false;
+  Timer? _debatePollTimer;
 
   // ---- Political resolutions state ----
-  bool hasActiveResolution = false;
-  int? activeResolutionId;
-  bool alreadyBetInActiveResolution = false;
-  Timer? resolutionPollTimer;
+  bool _hasActiveResolution = false;
+  int? _activeResolutionId;
+  bool _alreadyBetInActiveResolution = false;
+  Timer? _resolutionPollTimer;
 
-  // Pending client-side inventory additions list of owner_id, name, count, created_at, metadata
-  final List<Map<String, dynamic>> pendingInventoryItems = [];
-
-  // === NEW: Offer events polling ===
-  Timer? offerPollTimer;
-  final Set<String> _seenOfferEventIds = <String>{};
+  // Pending client-side inventory additions: list of { owner_id, name, count, created_at, metadata }
+  final List<Map<String, dynamic>> _pendingInventoryItems = [];
 
   @override
   void initState() {
     super.initState();
     user = widget.user;
-
-    refreshProfile();
-    fetchSpeechState();
-
-    startPollingSpeechState();
-    loadDebateState();
-    startDebatePolling();
-    loadResolutionState();
-    startResolutionPolling();
-
-    initWebAudio();
-    requestBrowserPermission();
-    subscribeToUserEvents();
-    loadUserEvents();
-
-    // NEW: start polling offer events (in addition to realtime channel)
-    startOfferPolling(4);
+    _refreshProfile();
+    _fetchSpeechState();
+    _startPollingSpeechState();
+    _loadDebateState();
+    _startDebatePolling();
+    _loadResolutionState();
+    _startResolutionPolling();
+    _initWebAudio();
+    _requestBrowserPermission();
+    _subscribeToUserEvents();
+    _loadUserEvents();
   }
 
   @override
   void dispose() {
-    stopPollingSpeechState();
-    debatePollTimerCancel();
-    resolutionPollTimerCancel();
-
-    // NEW
-    stopOfferPolling();
-
-    eventsChannel?.unsubscribe();
+    _stopPollingSpeechState();
+    _debate_poll_timer_cancel();
+    _resolution_poll_timer_cancel();
+    _eventsChannel?.unsubscribe();
     super.dispose();
   }
 
-  // ----------------------- WEB AUDIO -----------------------
-  void initWebAudio() {
-    notifyAudio = html.AudioElement('assets/notify.mp3');
+  // ===============================
+// WEB AUDIO
+// ===============================
+void _initWebAudio() {
+  _notifyAudio = html.AudioElement('assets/notify.mp3');
+}
+
+void _unlockAudio() {
+  if (_audioUnlocked) return;
+  _audioUnlocked = true;
+  _notifyAudio?.play().catchError((_) {});
+}
+
+void _playNotifySound() {
+  if (!_audioUnlocked) return;
+  _notifyAudio?.currentTime = 0;
+  _notifyAudio?.play().catchError((_) {});
+}
+
+// ===============================
+// BROWSER NOTIFICATIONS
+// ===============================
+void _requestBrowserPermission() {
+  if (html.Notification.supported &&
+      html.Notification.permission == 'default') {
+    html.Notification.requestPermission();
   }
+}
 
-  void unlockAudio() {
-    if (audioUnlocked) return;
-    audioUnlocked = true;
-    notifyAudio?.play().catchError((_) {});
-  }
+void _showBrowserNotification(String title, String body) {
+  if (!html.Notification.supported) return;
+  if (html.Notification.permission != 'granted') return;
+  html.Notification(title, body: body);
+}
 
-  void playNotifySound() {
-    if (!audioUnlocked) return;
-    notifyAudio?.currentTime = 0;
-    notifyAudio?.play().catchError((_) {});
-  }
+// ===============================
+// REALTIME EVENTS
+// ===============================
+void _subscribeToUserEvents() {
+  _eventsChannel = supabase.channel('user-events-${user.id}');
 
-  // ----------------------- BROWSER NOTIFICATIONS -----------------------
-  void requestBrowserPermission() {
-    if (html.Notification.supported) {
-      if (html.Notification.permission == 'default') {
-        html.Notification.requestPermission();
-      }
-    }
-  }
+  _eventsChannel!
+      .onPostgresChanges(
+        event: PostgresChangeEvent.insert,
+        schema: 'public',
+        table: 'user_events',
+        filter: PostgresChangeFilter(
+          type: PostgresChangeFilterType.eq,
+          column: 'user_id',
+          value: user.id,
+        ),
+        callback: (payload) {
+          final data = payload.newRecord;
+          _handleIncomingEvent(data);
+        },
+      )
+      .subscribe();
+}
 
-  void showBrowserNotification(String title, String body) {
-    if (!html.Notification.supported) return;
-    if (html.Notification.permission != 'granted') return;
-    html.Notification(title, body: body);
-  }
+Future<void> _loadUserEvents() async {
+  try {
+    final res = await supabase
+        .from('user_events')
+        .select()
+        .eq('user_id', user.id)
+        .order('created_at', ascending: false)
+        .limit(50);
 
-  // ----------------------- REALTIME EVENTS -----------------------
-  void subscribeToUserEvents() {
-    eventsChannel = supabase.channel('user-events-${user.id}');
-
-    eventsChannel!
-        .onPostgresChanges(
-          event: PostgresChangeEvent.insert,
-          schema: 'public',
-          table: 'user_events',
-          filter: PostgresChangeFilter(
-            type: PostgresChangeFilterType.eq,
-            column: 'user_id',
-            value: user.id,
-          ),
-          callback: (payload) {
-            final data = payload.newRecord;
-            handleIncomingEvent(Map<String, dynamic>.from(data));
-          },
-        )
-        .subscribe();
-  }
-
-  Future<void> loadUserEvents() async {
-    try {
-      final res = await supabase
-          .from('user_events')
-          .select()
-          .eq('user_id', user.id)
-          .order('created_at', ascending: false)
-          .limit(50);
-
-      if (res is List) {
-        setState(() => userEvents.addAll(res.cast<Map<String, dynamic>>()));
-      }
-    } catch (_) {}
-  }
-
-  void handleIncomingEvent(Map<String, dynamic> event) {
-    if (!mounted) return;
-    setState(() => userEvents.insert(0, event));
-    playNotifySound();
-    showBrowserNotification(event['title'] ?? '', event['message'] ?? '');
-    showEventPopup(event);
-  }
-
-  void showEventPopup(Map<String, dynamic> event) {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text(event['title'] ?? ''),
-        content: Text(event['message'] ?? ''),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ----------------------- NEW: OFFER EVENTS POLLING -----------------------
-  void startOfferPolling([int seconds = 4]) {
-    offerPollTimer?.cancel();
-    offerPollTimer = Timer.periodic(Duration(seconds: seconds), (_) {
-      _pollOfferEvents();
-    });
-  }
-
-  void stopOfferPolling() {
-    offerPollTimer?.cancel();
-    offerPollTimer = null;
-  }
-
-  Future<void> _pollOfferEvents() async {
-    if (!mounted) return;
-
-    try {
-      final res = await supabase.rpc('pull_offer_events', params: {
-        'p_user_id': user.id,
-        'p_limit': 20,
+    if (res is List) {
+      setState(() {
+        _userEvents.addAll(res.cast<Map<String, dynamic>>());
       });
-
-      final List<Map<String, dynamic>> rows = [];
-      if (res is List) {
-        for (final r in res) {
-          if (r is Map) rows.add(Map<String, dynamic>.from(r as Map));
-        }
-      } else if (res is Map) {
-        rows.add(Map<String, dynamic>.from(res as Map));
-      }
-
-      for (final e in rows) {
-        final id = e['id']?.toString();
-        if (id == null || id.isEmpty) continue;
-
-        if (_seenOfferEventIds.contains(id)) continue;
-        _seenOfferEventIds.add(id);
-
-        // Reuse existing behavior: sound + popup + event list
-        handleIncomingEvent(e);
-      }
-    } catch (_) {
-      // silent: polling should not spam UI
     }
+  } catch (_) {}
+}
+
+void _handleIncomingEvent(Map<String, dynamic> event) {
+  if (!mounted) return;
+
+  setState(() {
+    _userEvents.insert(0, event);
+  });
+
+  _playNotifySound();
+  _showBrowserNotification(
+    event['title'] ?? 'Новое событие',
+    event['message'] ?? '',
+  );
+
+  _showEventPopup(event);
+}
+
+void _showEventPopup(Map<String, dynamic> event) {
+  showDialog(
+    context: context,
+    builder: (_) => AlertDialog(
+      title: Text(event['title'] ?? 'Событие'),
+      content: Text(event['message'] ?? ''),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('OK'),
+        ),
+      ],
+    ),
+  );
+}
+
+  // small helpers to keep analyzer happy (no-op placeholders)
+  void _debate_poll_timer_cancel() {
+    _debatePollTimer?.cancel();
   }
 
-  // Small helpers to keep analyzer happy (no-op placeholders)
-  void debatePollTimerCancel() => debatePollTimer?.cancel();
-  void resolutionPollTimerCancel() => resolutionPollTimer?.cancel();
+  void _resolution_poll_timer_cancel() {
+    _resolutionPollTimer?.cancel();
+  }
 
-  // ----------------------- Profile balance refresh now also loads color and region -----------------------
-  Future<void> refreshProfile() async {
+  // -----------------------
+  // Profile / balance refresh (now also loads `color` and `region`)
+  // -----------------------
+  Future<void> _refreshProfile() async {
     try {
       final profileRaw = await supabase
           .from('user_credentials')
@@ -270,7 +225,7 @@ class HomeScreenState extends State<HomeScreen> {
           .eq('id', user.id)
           .maybeSingle();
 
-      final profile = profileRaw is Map<String, dynamic> ? profileRaw : null;
+      final profile = (profileRaw is Map<String, dynamic>) ? profileRaw : null;
       if (profile != null) {
         final v = profile['v_balance'];
         final m = profile['m_balance'];
@@ -289,12 +244,12 @@ class HomeScreenState extends State<HomeScreen> {
             role: role is String ? role : user.role,
             firstName: fn is String ? fn : user.firstName,
             lastName: ln is String ? ln : user.lastName,
-            vBalance: v is num ? v.toDouble() : user.vBalance,
-            mBalance: m is num ? m.toDouble() : user.mBalance,
+            vBalance: v is num ? (v).toDouble() : user.vBalance,
+            mBalance: m is num ? (m).toDouble() : user.mBalance,
             color: color is String ? color : user.color,
             region: region is String ? region : user.region,
           );
-          userColor = color is String ? color : null;
+          _userColor = color is String ? color : null;
         });
       }
     } catch (_) {
@@ -302,8 +257,10 @@ class HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // ----------------------- Debates load active state and whether current user already voted -----------------------
-  Future<void> loadDebateState() async {
+  // -----------------------
+  // Debates: load active state and whether current user already voted
+  // -----------------------
+  Future<void> _loadDebateState() async {
     try {
       final active = await supabase
           .from('debates')
@@ -314,9 +271,8 @@ class HomeScreenState extends State<HomeScreen> {
           .maybeSingle();
 
       if (active is Map<String, dynamic> && active['id'] != null) {
-        final int id = active['id'] is int ? active['id'] as int : int.parse(active['id'].toString());
+        final int id = (active['id'] is int) ? (active['id'] as int) : int.parse(active['id'].toString());
         bool already = false;
-
         try {
           final vote = await supabase
               .from('debate_votes')
@@ -329,19 +285,18 @@ class HomeScreenState extends State<HomeScreen> {
         } catch (_) {
           already = false;
         }
-
         if (!mounted) return;
         setState(() {
-          hasActiveDebate = true;
-          activeDebateId = id;
-          alreadyVotedInActiveDebate = already;
+          _hasActiveDebate = true;
+          _activeDebateId = id;
+          _alreadyVotedInActiveDebate = already;
         });
       } else {
         if (!mounted) return;
         setState(() {
-          hasActiveDebate = false;
-          activeDebateId = null;
-          alreadyVotedInActiveDebate = false;
+          _hasActiveDebate = false;
+          _activeDebateId = null;
+          _alreadyVotedInActiveDebate = false;
         });
       }
     } catch (_) {
@@ -349,13 +304,15 @@ class HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  void startDebatePolling([int seconds = 5]) {
-    debatePollTimer?.cancel();
-    debatePollTimer = Timer.periodic(Duration(seconds: seconds), (_) => loadDebateState());
+  void _startDebatePolling({int seconds = 5}) {
+    _debatePollTimer?.cancel();
+    _debatePollTimer = Timer.periodic(Duration(seconds: seconds), (_) => _loadDebateState());
   }
 
-  // ----------------------- Resolutions load active resolution and whether user already bet -----------------------
-  Future<void> loadResolutionState() async {
+  // -----------------------
+  // Resolutions: load active resolution and whether user already bet
+  // -----------------------
+  Future<void> _loadResolutionState() async {
     try {
       final active = await supabase
           .from('political_resolutions')
@@ -366,9 +323,8 @@ class HomeScreenState extends State<HomeScreen> {
           .maybeSingle();
 
       if (active is Map<String, dynamic> && active['id'] != null) {
-        final int id = active['id'] is int ? active['id'] as int : int.parse(active['id'].toString());
+        final int id = (active['id'] is int) ? (active['id'] as int) : int.parse(active['id'].toString());
         bool already = false;
-
         try {
           final bet = await supabase
               .from('political_bets')
@@ -381,19 +337,18 @@ class HomeScreenState extends State<HomeScreen> {
         } catch (_) {
           already = false;
         }
-
         if (!mounted) return;
         setState(() {
-          hasActiveResolution = true;
-          activeResolutionId = id;
-          alreadyBetInActiveResolution = already;
+          _hasActiveResolution = true;
+          _activeResolutionId = id;
+          _alreadyBetInActiveResolution = already;
         });
       } else {
         if (!mounted) return;
         setState(() {
-          hasActiveResolution = false;
-          activeResolutionId = null;
-          alreadyBetInActiveResolution = false;
+          _hasActiveResolution = false;
+          _activeResolutionId = null;
+          _alreadyBetInActiveResolution = false;
         });
       }
     } catch (_) {
@@ -401,65 +356,69 @@ class HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  void startResolutionPolling([int seconds = 5]) {
-    resolutionPollTimer?.cancel();
-    resolutionPollTimer = Timer.periodic(Duration(seconds: seconds), (_) => loadResolutionState());
+  
+
+  void _startResolutionPolling({int seconds = 5}) {
+    _resolutionPollTimer?.cancel();
+    _resolutionPollTimer = Timer.periodic(Duration(seconds: seconds), (_) => _loadResolutionState());
   }
 
-  void stopResolutionPolling() {
-    resolutionPollTimer?.cancel();
-    resolutionPollTimer = null;
+  void _stopResolutionPolling() {
+    _resolutionPollTimer?.cancel();
+    _resolutionPollTimer = null;
   }
 
-  // ----------------------- Polling speech state -----------------------
-  void startPollingSpeechState([int seconds = 3]) {
-    pollTimer?.cancel();
-    pollTimer = Timer.periodic(Duration(seconds: seconds), (_) => fetchSpeechState());
+  // -----------------------
+  // Polling speech_state
+  // -----------------------
+  void _startPollingSpeechState({int seconds = 3}) {
+    _pollTimer?.cancel();
+    _pollTimer = Timer.periodic(Duration(seconds: seconds), (_) => _fetchSpeechState());
   }
 
-  void stopPollingSpeechState() {
-    pollTimer?.cancel();
-    pollTimer = null;
+  void _stopPollingSpeechState() {
+    _pollTimer?.cancel();
+    _pollTimer = null;
   }
 
-  Future<void> fetchSpeechState() async {
+  Future<void> _fetchSpeechState() async {
     try {
       final res = await svc.fetchSpeechState();
+
       if (res is Map<String, dynamic>) {
-        final active = res['active'] as bool? ?? false;
+        final active = (res['active'] as bool?) ?? false;
         final actor = res['actor_id']?.toString();
         final expiresRaw = res['expires_at'];
         final expires = expiresRaw != null ? DateTime.tryParse(expiresRaw.toString()) : null;
 
         final nowUtc = DateTime.now().toUtc();
-        final expired = expires != null ? nowUtc.isAfter(expires) : false;
 
-        if (expired) {
+        // Если сервер сообщает, что expired (expires в прошлом) -> считаем неактивным
+        if (expires != null && nowUtc.isAfter(expires)) {
           if (!mounted) return;
           setState(() {
             speechActive = false;
             speechActorId = null;
-            speechExpiresAt = null;
-            waitingForServerConfirm = false;
-            activeSpeechId = null;
-            listenedToThisSpeech = false;
+            speechExpiresAt = null; // сбрасываем локальный lock
+            _waitingForServerConfirm = false;
+            _activeSpeechId = null;
+            _listenedToThisSpeech = false;
           });
           return;
         }
 
-        if (waitingForServerConfirm) {
+        // Если мы ожидаем подтверждение от сервера — обрабатываем отдельной логикой
+        if (_waitingForServerConfirm) {
           if (active) {
             final life = await svc.getActiveLifeSpeech();
             int? speechId;
             DateTime? serverExpires;
-
             if (life is Map<String, dynamic>) {
-              speechId = life['id'] is int ? life['id'] as int : int.tryParse(life['id']?.toString() ?? '');
-              serverExpires =
-                  life['expires_at'] != null ? DateTime.tryParse(life['expires_at'].toString()) : null;
+              speechId = (life['id'] is int) ? (life['id'] as int) : int.tryParse(life['id']?.toString() ?? '');
+              serverExpires = life['expires_at'] != null ? DateTime.tryParse(life['expires_at'].toString()) : null;
             }
 
-            final clientNextSlotUtc = nextYekaterinburg12or20Utc;
+            final clientNextSlotUtc = _nextYekaterinburg12or20Utc();
             DateTime applyExpires = serverExpires ?? clientNextSlotUtc;
             if (clientNextSlotUtc.isAfter(applyExpires)) applyExpires = clientNextSlotUtc;
 
@@ -468,11 +427,11 @@ class HomeScreenState extends State<HomeScreen> {
               speechActive = true;
               speechActorId = actor;
               speechExpiresAt = applyExpires;
-              waitingForServerConfirm = false;
-              activeSpeechId = speechId;
+              _waitingForServerConfirm = false;
+              _activeSpeechId = speechId;
             });
 
-            await checkIfListened();
+            await _checkIfListened();
             return;
           } else {
             if (!mounted) return;
@@ -480,61 +439,77 @@ class HomeScreenState extends State<HomeScreen> {
               speechActive = false;
               speechActorId = null;
               speechExpiresAt = null;
-              waitingForServerConfirm = false;
-              activeSpeechId = null;
-              listenedToThisSpeech = false;
+              _waitingForServerConfirm = false;
+              _activeSpeechId = null;
+              _listenedToThisSpeech = false;
             });
             return;
           }
         }
 
+        // Обычная ветка: если сервер говорит inactive — сбрасываем локальный lock
         if (!active) {
           if (!mounted) return;
           setState(() {
             speechActive = false;
             speechActorId = null;
-            speechExpiresAt = null;
-            activeSpeechId = null;
-            listenedToThisSpeech = false;
+            speechExpiresAt = null; // **важно** — доверяем серверу и включаем кнопку
+            _activeSpeechId = null;
+            _listenedToThisSpeech = false;
           });
           return;
         }
 
+        // Если сервер сообщает active = true — применяем значения сервера
         int? speechId;
         DateTime? serverExpires;
         try {
           final life = await svc.getActiveLifeSpeech();
+
           if (life is Map<String, dynamic>) {
-            speechId = life['id'] is int ? life['id'] as int : int.tryParse(life['id']?.toString() ?? '');
-            serverExpires =
-                life['expires_at'] != null ? DateTime.tryParse(life['expires_at'].toString()) : expires;
+            speechId = (life['id'] is int) ? (life['id'] as int) : int.tryParse(life['id']?.toString() ?? '');
+            serverExpires = life['expires_at'] != null ? DateTime.tryParse(life['expires_at'].toString()) : expires;
           }
-        } catch (_) {}
+        } catch (_) {
+          // ignore
+        }
 
         if (!mounted) return;
         setState(() {
           speechActive = true;
           speechActorId = actor;
           speechExpiresAt = serverExpires ?? expires;
-          activeSpeechId = speechId;
+          _activeSpeechId = speechId;
         });
 
-        await checkIfListened();
+        await _checkIfListened();
+      } else {
+        // ничего нет — считаем inactive и сбрасываем локально
+        if (!_waitingForServerConfirm) {
+          if (!mounted) return;
+          setState(() {
+            speechActive = false;
+            speechActorId = null;
+            speechExpiresAt = null;
+            _activeSpeechId = null;
+            _listenedToThisSpeech = false;
+          });
+        }
       }
     } catch (_) {
-      // ignore errors
+      // ignore errors — оставляем текущее состояние
     }
   }
 
-  // ----------------------- Check if current user already listened to current active speech -----------------------
-  Future<void> checkIfListened() async {
-    final sid = activeSpeechId;
+  // -----------------------
+  // Check if current user already listened to current active speech
+  // -----------------------
+  Future<void> _checkIfListened() async {
+    final sid = _activeSpeechId;
     if (sid == null) {
-      if (!mounted) return;
-      setState(() => listenedToThisSpeech = false);
+      if (!mounted) return setState(() => _listenedToThisSpeech = false);
       return;
     }
-
     try {
       final res = await supabase
           .from('life_speech_listeners')
@@ -546,17 +521,20 @@ class HomeScreenState extends State<HomeScreen> {
 
       final listened = res != null;
       if (!mounted) return;
-      setState(() => listenedToThisSpeech = listened);
+      setState(() {
+        _listenedToThisSpeech = listened;
+      });
     } catch (_) {
       // ignore
     }
   }
 
-  // ----------------------- YEKT helpers -----------------------
-  DateTime get nextYekaterinburg20Utc {
+  // -----------------------
+  // YEKT helpers
+  // -----------------------
+  DateTime _nextYekaterinburg20Utc() {
     final nowUtc = DateTime.now().toUtc();
-    final nowYe = nowUtc.add(const Duration(hours: 5)); // YEKT UTC+5
-
+    final nowYe = nowUtc.add(const Duration(hours: 5)); // YEKT = UTC+5
     DateTime targetYe = DateTime(nowYe.year, nowYe.month, nowYe.day, 20, 0);
     if (!nowYe.isBefore(targetYe)) {
       final tomorrow = nowYe.add(const Duration(days: 1));
@@ -565,7 +543,7 @@ class HomeScreenState extends State<HomeScreen> {
     return targetYe.subtract(const Duration(hours: 5));
   }
 
-  DateTime get nextYekaterinburg12or20Utc {
+  DateTime _nextYekaterinburg12or20Utc() {
     final nowUtc = DateTime.now().toUtc();
     final nowYe = nowUtc.add(const Duration(hours: 5));
     final today12 = DateTime(nowYe.year, nowYe.month, nowYe.day, 12, 0);
@@ -580,62 +558,70 @@ class HomeScreenState extends State<HomeScreen> {
       final tomorrow = nowYe.add(const Duration(days: 1));
       nextYe = DateTime(tomorrow.year, tomorrow.month, tomorrow.day, 12, 0);
     }
-
     return nextYe.subtract(const Duration(hours: 5));
   }
 
-  int secondsUntilUtc(DateTime targetUtc) {
+  int _secondsUntilUtc(DateTime targetUtc) {
     final nowUtc = DateTime.now().toUtc();
     final diff = targetUtc.difference(nowUtc);
     final secs = diff.inSeconds;
     return secs > 0 ? secs : 0;
   }
 
-  bool get isSpeechButtonEnabled {
+  bool get _isSpeechButtonEnabled {
     if (user.role != 'politician') return false;
-    if (rpcLoading) return false;
+    if (_rpcLoading) return false;
 
     final nowUtc = DateTime.now().toUtc();
+
+    // Если есть локальный expiry — блокируем до этого времени
     if (speechExpiresAt != null) {
       if (nowUtc.isBefore(speechExpiresAt!)) return false;
     }
 
+    // Если сервер сообщает активность (speechActive == true) и её expiry в будущем — блокируем
     if (speechActive) {
-      if (speechExpiresAt != null) return nowUtc.isAfter(speechExpiresAt!);
-      final next20 = nextYekaterinburg20Utc;
-      return nowUtc.isAfter(next20);
+      if (speechExpiresAt != null) {
+        return nowUtc.isAfter(speechExpiresAt!);
+      } else {
+        final next20 = _nextYekaterinburg20Utc();
+        return nowUtc.isAfter(next20);
+      }
     }
 
-    if (waitingForServerConfirm) return false;
+    if (_waitingForServerConfirm) return false;
     return true;
   }
 
-  // ----------------------- start speech -----------------------
-  Future<void> onStartSpeechPressed() async {
+  // -----------------------
+  // start_speech
+  // -----------------------
+  Future<void> _onStartSpeechPressed() async {
     if (user.role != 'politician') return;
-    if (!isSpeechButtonEnabled) return;
+    if (!_isSpeechButtonEnabled) return;
 
-    final target20Utc = nextYekaterinburg20Utc;
-    final secondsForRpc = secondsUntilUtc(target20Utc);
-    if (secondsForRpc == 0) {
-      showMessage('2000 YEKT');
+    final target20Utc = _nextYekaterinburg20Utc();
+    final secondsForRpc = _secondsUntilUtc(target20Utc);
+    if (secondsForRpc <= 0) {
+      _showMessage('Невозможно вычислить время до 20:00 YEKT');
       return;
     }
 
-    final clientNextSlotUtc = nextYekaterinburg12or20Utc;
+    final clientNextSlotUtc = _nextYekaterinburg12or20Utc();
 
     if (!mounted) return;
     setState(() {
-      rpcLoading = true;
+      _rpcLoading = true;
       speechActive = true;
       speechActorId = user.id;
-      speechExpiresAt = clientNextSlotUtc;
-      waitingForServerConfirm = true;
+      speechExpiresAt = clientNextSlotUtc; // временная локальная блокировка
+      _waitingForServerConfirm = true;
     });
 
     DateTime? applyExpires = clientNextSlotUtc;
 
     try {
+      // Вызов серверного RPC (если есть)
       final dynamic rpcRes = await svc.rpcStartSpeech(actorId: user.id, durationSeconds: secondsForRpc);
 
       Map<String, dynamic>? parsed;
@@ -649,13 +635,13 @@ class HomeScreenState extends State<HomeScreen> {
         } catch (_) {
           parsed = null;
         }
+      } else {
+        parsed = null;
       }
 
       if (parsed != null) {
         final serverExpiresRaw = parsed['expires_at'];
-        final serverExpires =
-            serverExpiresRaw != null ? DateTime.tryParse(serverExpiresRaw.toString()) : null;
-
+        final serverExpires = serverExpiresRaw != null ? DateTime.tryParse(serverExpiresRaw.toString()) : null;
         DateTime chosen = serverExpires ?? clientNextSlotUtc;
         if (clientNextSlotUtc.isAfter(chosen)) chosen = clientNextSlotUtc;
         applyExpires = chosen;
@@ -665,20 +651,21 @@ class HomeScreenState extends State<HomeScreen> {
           speechActive = parsed?['active'] as bool? ?? true;
           speechActorId = parsed?['actor_id']?.toString();
           speechExpiresAt = applyExpires;
-          waitingForServerConfirm = false;
+          _waitingForServerConfirm = false;
         });
       } else {
-        await fetchSpeechState();
+        // RPC ничего не вернул — продолжаем и сохраняем в таблицу speech_state (upsert)
+        await _fetchSpeechState();
         if (!mounted) return;
         setState(() {
           if (speechExpiresAt == null || clientNextSlotUtc.isAfter(speechExpiresAt!)) {
             speechExpiresAt = clientNextSlotUtc;
           }
-          waitingForServerConfirm = false;
+          _waitingForServerConfirm = false;
         });
       }
 
-      // Persist state into speech_state upsert id=1 (kept as in your original flow)
+      // Persist state into speech_state (upsert id = 1)
       try {
         final upsertObj = {
           'id': 1,
@@ -687,79 +674,84 @@ class HomeScreenState extends State<HomeScreen> {
           'expires_at': applyExpires!.toUtc().toIso8601String(),
         };
         await svc.upsertSpeechState(obj: upsertObj);
-      } catch (_) {}
+      } catch (e) {
+        _showMessage('Не удалось сохранить состояние речи на сервере (права). Кнопка всё равно будет локально заблокирована.');
+      }
 
-      showMessage('Речь запущена до ${formatYe(applyExpires)} (YEKT)');
+      _showMessage('Речь запущена. Кнопка будет недоступна до ${_formatYe(applyExpires)} (YEKT)');
     } on PostgrestException catch (e) {
       final msg = e.message;
-      if (msg.contains('Speech already active')) {
-        await fetchSpeechState();
+      if (msg != null && msg.contains('Speech already active')) {
+        await _fetchSpeechState();
       } else {
-        showMessage(msg);
+        _showMessage(msg ?? e.toString());
+        if (!mounted) return;
+        setState(() {
+          speechActive = false;
+          speechActorId = null;
+          _waitingForServerConfirm = false;
+          speechExpiresAt = null;
+        });
       }
-      if (!mounted) return;
-      setState(() {
-        speechActive = false;
-        speechActorId = null;
-        waitingForServerConfirm = false;
-        speechExpiresAt = null;
-      });
     } catch (e) {
-      showMessage(e.toString());
+      _showMessage(e.toString());
       if (!mounted) return;
       setState(() {
         speechActive = false;
         speechActorId = null;
-        waitingForServerConfirm = false;
+        _waitingForServerConfirm = false;
         speechExpiresAt = null;
       });
     } finally {
       if (!mounted) return;
-      setState(() => rpcLoading = false);
+      setState(() => _rpcLoading = false);
     }
   }
 
-  String formatYe(DateTime? utc) {
-    if (utc == null) return '';
+  String _formatYe(DateTime? utc) {
+    if (utc == null) return '—';
     final ye = utc.toUtc().add(const Duration(hours: 5));
     String z(int n) => n.toString().padLeft(2, '0');
     return '${z(ye.day)}.${z(ye.month)} ${z(ye.hour)}:${z(ye.minute)}';
   }
 
-  void showMessage(String message) {
+  void _showMessage(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
-  // ----------------------- Transfer navigation open transfer_v_screen and refresh profile on success -----------------------
-  Future<void> openTransferScreen() async {
+  // -----------------------
+  // Transfer navigation: open transfer_v_screen and refresh profile on success
+  // -----------------------
+  Future<void> _openTransferScreen() async {
     final res = await Navigator.of(context).push<bool>(
       MaterialPageRoute(builder: (_) => TransferVScreen(user: user)),
     );
-    if (res == true) await refreshProfile();
+
+    // If returned true — refresh profile (balances)
+    if (res == true) {
+      await _refreshProfile();
+    }
   }
 
-  // ----------------------- Open resolution political betting dialog for politicians -----------------------
-  Future<void> onOpenResolutionPressed() async {
-    if (activeResolutionId == null) return;
-    final resolutionId = activeResolutionId!;
-
+  // -----------------------
+  // Open resolution (political) betting dialog for politicians
+  // -----------------------
+  Future<void> _onOpenResolutionPressed() async {
+    if (_activeResolutionId == null) return;
+    final resolutionId = _activeResolutionId!;
+    // load options
     List<Map<String, dynamic>> options = [];
     try {
-      final res = await supabase
-          .from('resolution_options')
-          .select('id,label')
-          .eq('resolution_id', resolutionId)
-          .order('id');
-
+      final res = await supabase.from('resolution_options').select('id,label').eq('resolution_id', resolutionId).order('id');
       if (res is List) options = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
     } catch (e) {
-      showMessage(e.toString());
+      _showMessage('Не удалось загрузить варианты: $e');
       return;
     }
 
     if (options.isEmpty) {
-      showMessage('Нет вариантов для голосования.');
+      _showMessage('Нет доступных вариантов для этого политрешения');
       return;
     }
 
@@ -768,18 +760,18 @@ class HomeScreenState extends State<HomeScreen> {
 
     final resDialogResult = await showDialog<bool>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx2, setStateDialog) {
+      builder: (ctx) {
+        return StatefulBuilder(builder: (ctx2, setStateDialog) {
           return AlertDialog(
-            title: const Text('Ставка'),
+            title: const Text('Политрешение — ваш выбор'),
             content: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text('Выберите вариант и сумму ставки.'),
+                  const Text('Выберите вариант:'),
                   const SizedBox(height: 8),
                   ...options.map((opt) {
-                    final oid = opt['id'] is int ? opt['id'] as int : int.parse(opt['id'].toString());
+                    final oid = (opt['id'] is int) ? opt['id'] as int : int.parse(opt['id'].toString());
                     return RadioListTile<int>(
                       value: oid,
                       groupValue: selectedOptionId,
@@ -791,9 +783,7 @@ class HomeScreenState extends State<HomeScreen> {
                   TextField(
                     controller: amtCtrl,
                     keyboardType: TextInputType.number,
-                    decoration: InputDecoration(
-                      labelText: 'Сумма (до ${user.mBalance.toStringAsFixed(2)} M)',
-                    ),
+                    decoration: InputDecoration(labelText: 'Сумма майндов (целое). Ваш баланс: ${user.mBalance.toStringAsFixed(2)}'),
                   ),
                 ],
               ),
@@ -802,88 +792,93 @@ class HomeScreenState extends State<HomeScreen> {
               TextButton(onPressed: () => Navigator.of(ctx2).pop(false), child: const Text('Отмена')),
               ElevatedButton(
                 onPressed: () async {
+                  // validate
                   if (selectedOptionId == null) {
-                    ScaffoldMessenger.of(ctx2).showSnackBar(const SnackBar(content: Text('Выберите вариант.')));
+                    ScaffoldMessenger.of(ctx2).showSnackBar(const SnackBar(content: Text('Выберите вариант')));
                     return;
                   }
                   final txt = amtCtrl.text.trim();
                   final n = int.tryParse(txt);
                   if (n == null || n <= 0) {
-                    ScaffoldMessenger.of(ctx2).showSnackBar(const SnackBar(content: Text('Введите сумму.')));
+                    ScaffoldMessenger.of(ctx2).showSnackBar(const SnackBar(content: Text('Введите положительное целое число')));
                     return;
                   }
                   if (n > user.mBalance) {
-                    ScaffoldMessenger.of(ctx2).showSnackBar(
-                      SnackBar(content: Text('Недостаточно M. Доступно: ${user.mBalance.toStringAsFixed(2)}')),
-                    );
+                    ScaffoldMessenger.of(ctx2).showSnackBar(SnackBar(content: Text('Недостаточно майндов: у вас ${user.mBalance.toStringAsFixed(2)}')));
                     return;
                   }
+
+                  // disable button by popping and then performing RPC
                   Navigator.of(ctx2).pop(true);
+
+                  // perform bet (show progress)
+                  showDialog(
+                    context: context,
+                    barrierDismissible: false,
+                    builder: (_) => const Center(child: CircularProgressIndicator()),
+                  );
+
+                  try {
+                    await svc.placeBetInResolution(
+                      resolutionId: resolutionId,
+                      optionId: selectedOptionId!, // <- передаём выбранный вариант
+                      userId: user.id,
+                      amount: n,
+                    );
+
+                    // success: update local flags and profile
+                    await _refreshProfile();
+                    await _loadResolutionState();
+
+                    // close progress dialog
+                    if (mounted) Navigator.of(context).pop();
+
+                    // thank you popup
+                    await showDialog(
+                      context: context,
+                      builder: (_) => AlertDialog(
+                        title: const Text('Спасибо за участие в политрешении'),
+                        content: const Text('Ваша ставка принята.'),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.of(context).pop(),
+                            child: const Text('OK'),
+                          )
+                        ],
+                      ),
+                    );
+
+                    if (!mounted) return;
+                    setState(() {
+                      _alreadyBetInActiveResolution = true;
+                    });
+                  } catch (e) {
+                    // close progress
+                    if (mounted) Navigator.of(context).pop();
+                    final msg = e is PostgrestException ? (e.message ?? e.toString()) : e.toString();
+                    _showMessage('Ошибка при ставке: $msg');
+                  }
                 },
-                child: const Text('Поставить'),
+                child: const Text('Подтвердить ставку'),
               ),
             ],
           );
-        },
-      ),
+        });
+      },
     );
 
-    if (resDialogResult != true) {
-      try {
-        amtCtrl.dispose();
-      } catch (_) {}
-      return;
-    }
-
-    // perform bet
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const Center(child: CircularProgressIndicator()),
-    );
-
+    // cleanup
     try {
-      await svc.placeBetInResolution(
-        resolutionId: resolutionId,
-        optionId: selectedOptionId!,
-        userId: user.id,
-        amount: int.parse(amtCtrl.text.trim()),
-      );
-
-      await refreshProfile();
-      await loadResolutionState();
-
-      if (mounted) Navigator.of(context).pop(); // close progress dialog
-
-      await showDialog<void>(
-        context: context,
-        builder: (_) => AlertDialog(
-          title: const Text('Спасибо!'),
-          content: const Text('Ставка принята.'),
-          actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('OK'))],
-        ),
-      );
-
-      if (!mounted) return;
-      setState(() => alreadyBetInActiveResolution = true);
-    } catch (e) {
-      if (mounted) {
-        try {
-          Navigator.of(context).pop();
-        } catch (_) {}
-      }
-      final msg = e is PostgrestException ? (e.message) : e.toString();
-      showMessage(msg);
-    } finally {
-      try {
-        amtCtrl.dispose();
-      } catch (_) {}
-    }
+      amtCtrl.dispose();
+    } catch (_) {}
+    // resDialogResult used only for flow; state updated after RPC
   }
 
-  // ----------------------- BUY ECONOMIST TURN FLOW new button client-side immediate inventory update -----------------------
-  Future<void> openBuyTurnFlow() async {
-    // kept as in your file (unchanged)
+  // -----------------------
+  // BUY ECONOMIST TURN FLOW (new button + client-side immediate inventory update)
+  // -----------------------
+  Future<void> _openBuyTurnFlow() async {
+    // Fetch economists excluding current user
     List<Map<String, dynamic>> econs = [];
     try {
       final res = await supabase
@@ -892,20 +887,20 @@ class HomeScreenState extends State<HomeScreen> {
           .eq('role', 'economist')
           .neq('id', user.id)
           .order('first_name');
-
       if (res is List) {
         econs = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
       }
     } catch (e) {
-      showMessage(e.toString());
+      _showMessage('Не удалось загрузить список экономистов: $e');
       return;
     }
 
     if (econs.isEmpty) {
-      showMessage('Нет экономистов.');
+      _showMessage('Нет доступных экономистов для покупки хода.');
       return;
     }
 
+    // Show picker bottom sheet
     final Map<String, dynamic>? chosen = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
@@ -922,18 +917,19 @@ class HomeScreenState extends State<HomeScreen> {
                       Expanded(
                         child: TextField(
                           decoration: const InputDecoration(
-                            hintText: 'Поиск',
+                            hintText: 'Поиск экономиста',
                             prefixIcon: Icon(Icons.search),
                             border: OutlineInputBorder(),
                             isDense: true,
                           ),
-                          onChanged: (_) {
-                            // no-op (kept simple)
+                          onChanged: (q) {
+                            // naive local filtering via setState inside builder not available;
+                            // for simplicity show static list below; user can scroll.
                           },
                         ),
                       ),
                       const SizedBox(width: 8),
-                      TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Закрыть')),
+                      TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Отмена')),
                     ],
                   ),
                 ),
@@ -944,13 +940,12 @@ class HomeScreenState extends State<HomeScreen> {
                     separatorBuilder: (_, __) => const Divider(height: 0),
                     itemBuilder: (context, index) {
                       final row = econs[index];
-                      final first = row['first_name']?.toString() ?? '';
-                      final last = row['last_name']?.toString() ?? '';
-                      final displayName =
-                          ('$first $last').trim().isEmpty ? (row['telegram_username']?.toString() ?? '') : ('$first $last');
+                      final first = (row['first_name'] ?? '').toString();
+                      final last = (row['last_name'] ?? '').toString();
+                      final displayName = ('$first $last').trim().isEmpty ? (row['telegram_username'] ?? 'Без имени') : '$first $last';
                       return ListTile(
                         title: Text(displayName),
-                        onTap: () => Navigator.of(ctx).pop(row),
+                        onTap: () => Navigator.of(context).pop(row),
                       );
                     },
                   ),
@@ -964,21 +959,21 @@ class HomeScreenState extends State<HomeScreen> {
 
     if (chosen == null) return;
 
-    final first = chosen['first_name']?.toString() ?? '';
-    final last = chosen['last_name']?.toString() ?? '';
-    final displayName =
-        ('$first $last').trim().isEmpty ? (chosen['telegram_username']?.toString() ?? '') : ('$first $last');
+    final first = (chosen['first_name'] ?? '').toString();
+    final last = (chosen['last_name'] ?? '').toString();
+    final displayName = ('$first $last').trim().isEmpty ? (chosen['telegram_username'] ?? 'Без имени') : '$first $last';
 
+    // Confirm dialog
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Покупка хода'),
+        title: const Text('Купить ход экономисту'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('Стоимость: 10 V'),
+            const Text('Стоимость: 10 войсов'),
             const SizedBox(height: 8),
-            Text(displayName),
+            Text('Получатель: $displayName'),
           ],
         ),
         actions: [
@@ -990,112 +985,120 @@ class HomeScreenState extends State<HomeScreen> {
 
     if (confirmed != true) return;
 
+    // Perform RPC
     try {
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => const Center(child: CircularProgressIndicator()),
-      );
+      showDialog(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator()));
 
       final rpcRes = await svc.rpcBuyEconomistTurn(
         fromUser: user.id,
-        toUser: chosen['id']?.toString() ?? '',
+        toUser: chosen['id'].toString(),
         cost: 10,
       );
 
       Navigator.of(context).pop(); // close progress
 
       if (rpcRes == null) {
-        showMessage('Ошибка RPC.');
+        _showMessage('Неожиданный ответ сервера');
         return;
       }
 
       final status = (rpcRes['status'] ?? rpcRes['result'] ?? '').toString().toLowerCase();
-      if (status.contains('ok') || status.contains('success')) {
-        showMessage('Успешно!');
+      if (status.contains('ok') || status.contains('success') || status == 'ok') {
+        _showMessage('Покупка успешна: у экономиста добавлен предмет "Дополнительный ход"');
 
-        final item = <String, dynamic>{
+        // Client-side immediate update: construct a minimal pending inventory item and store locally
+        final Map<String, dynamic> item = {
           'owner_id': chosen['id']?.toString() ?? chosen['id'].toString(),
-          'name': rpcRes['item_name'] ?? 'Ход экономиста',
+          'name': rpcRes['item_name'] ?? 'Дополнительный ход',
           'count': 1,
           'metadata': rpcRes['item_meta'] ?? {'from': user.id, 'cost': 10},
           'created_at': rpcRes['created_at'] ?? DateTime.now().toIso8601String(),
         };
 
         if (!mounted) return;
-        setState(() => pendingInventoryItems.insert(0, item));
+        setState(() {
+          // append pending so that when opening inventory of recipient we can show it immediately
+          _pendingInventoryItems.insert(0, item);
+        });
 
+        // Refresh profile balances
         try {
-          await refreshProfile();
+          await _refreshProfile();
         } catch (_) {}
       } else {
         final msg = rpcRes['message']?.toString() ?? rpcRes.toString();
-        showMessage(msg);
+        _showMessage('Ошибка: $msg');
       }
     } catch (e) {
       try {
         Navigator.of(context).pop();
       } catch (_) {}
-      showMessage(e.toString());
+      _showMessage('Ошибка при покупке: $e');
     }
   }
 
-  // ----------------------- NEW Open Purchase Enterprise screen visible only to economists -----------------------
-  Future<void> openPurchaseEnterprise() async {
+  // -----------------------
+  // NEW: Open Purchase Enterprise screen (visible only to economists)
+  // -----------------------
+  Future<void> _openPurchaseEnterprise() async {
     if (user.role != 'economist') return;
     final res = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => PurchaseEnterpriseScreen(currentUser: user)),
+      MaterialPageRoute(
+        builder: (_) => PurchaseEnterpriseScreen(currentUser: user),
+      ),
     );
+
     if (res == true) {
-      await refreshProfile();
-      showMessage('Предприятие куплено.');
+      // Purchase completed — refresh profile to update balance & inventory
+      await _refreshProfile();
+      _showMessage('Предприятие куплено и добавлено в ваш инвентарь');
     }
   }
 
-  // ----------------------- UI rendering -----------------------
-  Widget renderSpeechButton() {
-  if (user.role != 'politician') return const SizedBox.shrink();
+  // -----------------------
+  // UI rendering
+  // -----------------------
+  Widget _renderSpeechButton() {
+    if (user.role != 'politician') return const SizedBox.shrink();
 
-  final enabled = isSpeechButtonEnabled;
-  final actorLabel = (speechActorId == user.id) ? 'Вы' : (speechActorId ?? '');
+    final enabled = _isSpeechButtonEnabled;
+    final actorLabel = speechActorId == user.id ? 'Вы' : (speechActorId ?? '—');
 
-  return Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      ElevatedButton(
-        onPressed: enabled ? onStartSpeechPressed : null,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: enabled ? Colors.orange : Colors.grey,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ElevatedButton(
+          onPressed: enabled ? _onStartSpeechPressed : null,
+          style: ElevatedButton.styleFrom(backgroundColor: enabled ? Colors.orange : Colors.grey),
+          child: Text(enabled ? 'Речь жизни (старт)' : 'Речь жизни (неактивна)'),
         ),
-        child: Text(enabled ? 'Начать речь' : 'Недоступно'),
-      ),
-      if (speechActive && speechExpiresAt != null && DateTime.now().toUtc().isBefore(speechExpiresAt!))
-        Padding(
-          padding: const EdgeInsets.only(top: 6.0),
-          child: Text(
-            actorLabel,
-            style: const TextStyle(fontSize: 12, color: Colors.grey),
+        if (speechActive || (speechExpiresAt != null && DateTime.now().toUtc().isBefore(speechExpiresAt!)))
+          Padding(
+            padding: const EdgeInsets.only(top: 6.0),
+            child: Text(
+              speechActorId == user.id ? 'Вы инициировали речь' : 'Речь активна (инициатор: $actorLabel)',
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+            ),
           ),
-        ),
-      if (speechExpiresAt != null && DateTime.now().toUtc().isBefore(speechExpiresAt!))
-        Padding(
-          padding: const EdgeInsets.only(top: 6.0),
-          child: Text(
-            'До ${formatYe(speechExpiresAt)} YEKT.',
-            style: const TextStyle(fontSize: 12, color: Colors.grey),
+        if (speechExpiresAt != null && DateTime.now().toUtc().isBefore(speechExpiresAt!))
+          Padding(
+            padding: const EdgeInsets.only(top: 6.0),
+            child: Text(
+              'Кнопка снова станет доступна в ${_formatYe(speechExpiresAt)} (YEKT).',
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+            ),
           ),
-        ),
-    ],
-  );
-}
+      ],
+    );
+  }
 
-  Widget renderListenWidget() {
+  Widget _renderListenWidget() {
     return ListenButton(
       userId: user.id,
-      activeSpeechId: activeSpeechId,
+      activeSpeechId: _activeSpeechId,
       speechActorId: speechActorId,
       speechActive: speechActive,
-      alreadyListened: listenedToThisSpeech,
+      alreadyListened: _listenedToThisSpeech,
       onListenComplete: (Map<String, dynamic>? rpcResult) async {
         if (rpcResult != null) {
           final status = rpcResult['status']?.toString() ?? '';
@@ -1105,7 +1108,7 @@ class HomeScreenState extends State<HomeScreen> {
             if (newColor != null) {
               if (!mounted) return;
               setState(() {
-                userColor = newColor;
+                _userColor = newColor;
                 user = AppUser(
                   id: user.id,
                   username: user.username,
@@ -1113,7 +1116,7 @@ class HomeScreenState extends State<HomeScreen> {
                   firstName: user.firstName,
                   lastName: user.lastName,
                   vBalance: user.vBalance,
-                  mBalance: addedM is num ? addedM.toDouble() : user.mBalance,
+                  mBalance: (addedM is num) ? user.mBalance + addedM.toDouble() : user.mBalance,
                   color: newColor,
                   region: user.region,
                 );
@@ -1130,7 +1133,7 @@ class HomeScreenState extends State<HomeScreen> {
                   role: user.role,
                   firstName: user.firstName,
                   lastName: user.lastName,
-                  vBalance: addedV.toDouble(),
+                  vBalance: user.vBalance + addedV.toDouble(),
                   mBalance: user.mBalance,
                   color: user.color,
                   region: user.region,
@@ -1141,320 +1144,373 @@ class HomeScreenState extends State<HomeScreen> {
         }
 
         try {
-          await refreshProfile();
-          await fetchSpeechState();
+          await _refreshProfile();
+          await _fetchSpeechState();
         } catch (_) {}
 
         if (!mounted) return;
-        setState(() => listenedToThisSpeech = true);
+        setState(() {
+          _listenedToThisSpeech = true;
+        });
       },
     );
   }
 
-  Color? parseHexColor(String? s) {
+  Color? _parseHexColor(String? s) {
     if (s == null) return null;
     final str = s.trim();
     if (!str.startsWith('#')) return null;
     String hex = str.substring(1);
-
     if (hex.length == 6) {
-      hex = 'FF$hex';
+      hex = 'FF' + hex; // add alpha
     } else if (hex.length == 3) {
       final r = hex[0];
       final g = hex[1];
       final b = hex[2];
-      hex = 'FF$r$r$g$g$b$b';
+      hex = 'FF' + r + r + g + g + b + b;
     } else if (hex.length == 8) {
-      // AARRGGBB
+      // assume AARRGGBB
     } else {
       return null;
     }
-
     final intVal = int.tryParse(hex, radix: 16);
     if (intVal == null) return null;
     return Color(intVal);
   }
 
-  Widget get balanceCard {
-    final parsedColor = parseHexColor(userColor);
-
+  Widget _balanceCard() {
+    final parsedColor = _parseHexColor(_userColor);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12.0),
         child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
           Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(
-              '${user.firstName} ${user.lastName}',
-              style: const TextStyle(fontWeight: FontWeight.bold),
+            Text('${user.firstName} ${user.lastName}', style: const TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Text('Роль: ${user.role}'),
+                if (_userColor != null && _userColor!.isNotEmpty) const SizedBox(width: 12),
+                if (parsedColor != null)
+                  Container(
+                    width: 16,
+                    height: 16,
+                    decoration: BoxDecoration(
+                      color: parsedColor,
+                      borderRadius: BorderRadius.circular(3),
+                      border: Border.all(color: Colors.black12),
+                    ),
+                  ),
+                if (parsedColor != null) const SizedBox(width: 6),
+                if (_userColor != null && _userColor!.isNotEmpty)
+                  Text('Цвет: ${_userColor}', style: const TextStyle(color: Colors.black)),
+              ],
             ),
             const SizedBox(height: 4),
-            Row(children: [
-              Text(user.role),
-              if (userColor != null && userColor!.isNotEmpty) const SizedBox(width: 12),
-              if (parsedColor != null)
-                Container(
-                  width: 16,
-                  height: 16,
-                  decoration: BoxDecoration(
-                    color: parsedColor,
-                    borderRadius: BorderRadius.circular(3),
-                    border: Border.all(color: Colors.black12),
-                  ),
-                ),
-              if (parsedColor != null) const SizedBox(width: 6),
-              if (userColor != null && userColor!.isNotEmpty)
-                Text(userColor!, style: const TextStyle(color: Colors.black)),
-            ]),
-            const SizedBox(height: 4),
-            if (user.role == 'economist' && user.region != null && user.region!.trim().isNotEmpty)
+            // show economic region only for economists
+            if (user.role == 'economist' && (user.region != null && user.region!.trim().isNotEmpty))
               Padding(
                 padding: const EdgeInsets.only(top: 4.0),
-                child: Text(
-                  user.region!,
-                  style: const TextStyle(fontSize: 13, color: Colors.black54),
-                ),
+                child: Text('Экономический регион: ${user.region}', style: const TextStyle(fontSize: 13, color: Colors.black54)),
               ),
           ]),
           Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-            Text(
-              'V ${user.vBalance.toStringAsFixed(2)}',
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
+            Text('V: ${user.vBalance.toStringAsFixed(2)}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             const SizedBox(height: 4),
-            Text('M ${user.mBalance.toStringAsFixed(2)}', style: const TextStyle(fontSize: 14)),
+            Text('M: ${user.mBalance.toStringAsFixed(2)}', style: const TextStyle(fontSize: 14)),
           ]),
         ]),
       ),
     );
   }
 
-  List<Widget> get roleButtons {
+  List<Widget> _roleButtons() {
     final role = user.role;
     final List<Widget> buttons = [];
 
     void add(String title, VoidCallback onTap, {Color? color}) {
-      buttons.add(
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6.0),
-          child: SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: color),
-              onPressed: onTap,
-              child: Text(title),
-            ),
+      buttons.add(Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6.0),
+        child: SizedBox(
+          width: double.infinity,
+          child: ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: color),
+            onPressed: onTap,
+            child: Text(title),
           ),
         ),
-      );
+      ));
     }
 
-    add('Перевод V/M', openTransferScreen);
-    add('Купить ход экономиста', openBuyTurnFlow);
+    add('Перевести V/M', () => _openTransferScreen());
 
+    add('Опросы / Аукционы', () {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Открыть: Опросы/Аукционы')));
+    });
+
+    // New button: Купить ход экономисту (visible to all)
+    add('Купить ход экономисту', _openBuyTurnFlow);
+
+    // New button: Купить предприятие (visible only to economists)
     if (role == 'economist') {
-      add('Купить предприятие (200 V)', openPurchaseEnterprise);
+      add('Купить предприятие (200 V)', _openPurchaseEnterprise);
     }
 
-    // Debates button only show if user is NOT politician, there is an active debate and user hasn't voted
-    if (role != 'politician' && hasActiveDebate && !alreadyVotedInActiveDebate) {
-      buttons.add(
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6.0),
-          child: SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: () async {
-                final res = await Navigator.of(context).push<bool>(
-                  MaterialPageRoute(builder: (_) => DebatesScreen(currentUserId: user.id, service: svc)),
-                );
-                if (res == true) {
-                  if (!mounted) return;
-                  setState(() => alreadyVotedInActiveDebate = true);
-                  await refreshProfile();
-                  await loadDebateState();
-                } else {
-                  await loadDebateState();
-                }
-              },
-              child: const Text('Голосование'),
-            ),
+    // Debates button: only show if user is NOT politician, there is an active debate and user hasn't voted
+    if (role != 'politician' && _hasActiveDebate && !_alreadyVotedInActiveDebate) {
+      buttons.add(Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6.0),
+        child: SizedBox(
+          width: double.infinity,
+          child: ElevatedButton(
+            onPressed: () async {
+              // navigate to debates and wait result
+              final res = await Navigator.of(context).push<bool>(
+                MaterialPageRoute(builder: (_) => DebatesScreen(currentUserId: user.id, service: svc)),
+              );
+
+              // If DebatesScreen returned true (user voted), refresh local state and profile
+              if (res == true) {
+                // mark as voted and refresh profile/state
+                if (!mounted) return;
+                setState(() {
+                  _alreadyVotedInActiveDebate = true;
+                });
+                await _refreshProfile();
+                await _loadDebateState();
+              } else {
+                // otherwise just refresh state (maybe admin closed debate)
+                await _loadDebateState();
+              }
+            },
+            child: const Text('Дебаты'),
           ),
         ),
-      );
+      ));
     }
 
-    // Political resolution button only for politicians, only if there's an active resolution and user hasn't bet
-    if (role == 'politician' && hasActiveResolution && !alreadyBetInActiveResolution) {
-      buttons.add(
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6.0),
-          child: SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: onOpenResolutionPressed,
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent),
-              child: const Text('Политическая ставка'),
-            ),
+    // Political resolution button: only for politicians, only if there's an active resolution and user hasn't bet
+    if (role == 'politician' && _hasActiveResolution && !_alreadyBetInActiveResolution) {
+      buttons.add(Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6.0),
+        child: SizedBox(
+          width: double.infinity,
+          child: ElevatedButton(
+            onPressed: _onOpenResolutionPressed,
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent),
+            child: const Text('Выбрать политрешение'),
           ),
         ),
-      );
+      ));
     }
 
     // For politicians render start speech button
     if (role == 'politician') {
-      buttons.add(Padding(padding: const EdgeInsets.symmetric(vertical: 6.0), child: renderSpeechButton()));
+      buttons.add(Padding(padding: const EdgeInsets.symmetric(vertical: 6.0), child: _renderSpeechButton()));
     }
 
-    // Listen widget visible to all
-    buttons.add(Padding(padding: const EdgeInsets.symmetric(vertical: 6.0), child: renderListenWidget()));
+    // Listen widget visible to all (delegated)
+    buttons.add(Padding(padding: const EdgeInsets.symmetric(vertical: 6.0), child: _renderListenWidget()));
+
+    if (role == 'economist') {
+      add('Аналитика / Ставки', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Аналитика'))));
+    }
+
+    if (role == 'hollywood') {
+      add('Контент / Ставки', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Hollywood'))));
+    }
+
+    if (role == 'mafia') {
+      add('Управление предприятиями', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Предприятия'))));
+    }
+
+    if (role == 'journalist') {
+      add('Дебаты / Публикации', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Дебаты'))));
+    }
+
+    if (role == 'public_figure') {
+      add('События / Прослушал', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('События'))));
+    }
+
+    if (role == 'admin') {
+      add('Админ-панель', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Админ-панель'))), color: Colors.black87);
+      add('Пополнить V/M', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Пополнение'))));
+      add('Создать опрос', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Создать опрос'))));
+      add('Создать аукцион', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Создание аукциона'))));
+      add('Статистика цветов', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Статистика'))));
+    }
 
     return buttons;
   }
 
-  void logout() {
+  void _logout() {
     Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const LoginScreen()));
   }
 
-  // ----------------------- Inventory navigation open inventory screen that also shows pending local additions -----------------------
-  Future<void> openInventoryScreen() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => InventoryScreen(user: user)),
-    );
-
+  // -----------------------
+  // Inventory navigation: open inventory screen that also shows pending local additions
+  // -----------------------
+  Future<void> _openInventoryScreen() async {
+    // Open the official InventoryScreen for current user
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => InventoryScreen(user: user)));
+    // After returning from inventory, clear pending items for this user (they should be persisted on server or reloaded)
     if (!mounted) return;
     setState(() {
-      pendingInventoryItems.removeWhere((it) => it['owner_id']?.toString() == user.id);
+      _pendingInventoryItems.removeWhere((it) => it['owner_id'] == user.id);
     });
   }
 
   @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: unlockAudio, // WEB
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('Titanic'),
-          actions: [
-            IconButton(
-              tooltip: 'Инвентарь',
-              icon: const Icon(Icons.inventory_2),
-              onPressed: openInventoryScreen,
+Widget build(BuildContext context) {
+  return GestureDetector(
+    onTap: _unlockAudio, // 🔊 разблокировка звука для WEB
+    child: Scaffold(
+      appBar: AppBar(
+        title: const Text('Главная'),
+        actions: [
+          IconButton(
+            tooltip: 'Инвентарь',
+            icon: const Icon(Icons.inventory_2),
+            onPressed: () {
+              _openInventoryScreen();
+            },
+          ),
+          IconButton(
+            onPressed: _logout,
+            icon: const Icon(Icons.logout),
+          ),
+        ],
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _balanceCard(),
+            const SizedBox(height: 12),
+
+            // ===== КНОПКИ РОЛЕЙ =====
+            ..._roleButtons(),
+
+            const SizedBox(height: 20),
+
+            // ===== СОБЫТИЯ =====
+            const Text(
+              'События',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
             ),
-            IconButton(onPressed: logout, icon: const Icon(Icons.logout)),
+            const SizedBox(height: 8),
+
+            _userEvents.isEmpty
+                ? const Text(
+                    'Пока нет событий',
+                    style: TextStyle(color: Colors.grey),
+                  )
+                : ListView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: _userEvents.length,
+                    itemBuilder: (context, index) {
+                      final e = _userEvents[index];
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        child: ListTile(
+                          title: Text(e['title'] ?? 'Событие'),
+                          subtitle: Text(e['message'] ?? ''),
+                          trailing: Text(
+                            e['created_at']
+                                    ?.toString()
+                                    .substring(11, 16) ??
+                                '',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey,
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
           ],
         ),
-        body: SingleChildScrollView(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              balanceCard,
-              const SizedBox(height: 12),
-              ...roleButtons,
-              const SizedBox(height: 20),
-              const Text(
-                'События',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              userEvents.isEmpty
-                  ? const Text('Пока нет событий.', style: TextStyle(color: Colors.grey))
-                  : ListView.builder(
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      itemCount: userEvents.length,
-                      itemBuilder: (context, index) {
-                        final e = userEvents[index];
-                        final createdAt = e['created_at']?.toString();
-                        final time = (createdAt != null && createdAt.length >= 16) ? createdAt.substring(11, 16) : '';
-                        return Card(
-                          margin: const EdgeInsets.only(bottom: 8),
-                          child: ListTile(
-                            title: Text(e['title'] ?? ''),
-                            subtitle: Text(e['message'] ?? ''),
-                            trailing: Text(time, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                          ),
-                        );
-                      },
-                    ),
-            ],
-          ),
-        ),
       ),
-    );
-  }
-}
+    ),
+  );
+}}
 
-// --------------------------- PurchaseEnterpriseScreen ---------------------------
-// Form for economists to buy an enterprise cost 200 V. On success returns true to caller.
-
+/// ---------------------------
+/// PurchaseEnterpriseScreen
+/// ---------------------------
+/// Form for economists to buy an enterprise (cost 200 V).
+/// On success returns true to caller.
 class PurchaseEnterpriseScreen extends StatefulWidget {
   final AppUser currentUser;
-
   const PurchaseEnterpriseScreen({Key? key, required this.currentUser}) : super(key: key);
 
   @override
-  State<PurchaseEnterpriseScreen> createState() => PurchaseEnterpriseScreenState();
+  State<PurchaseEnterpriseScreen> createState() => _PurchaseEnterpriseScreenState();
 }
 
-class PurchaseEnterpriseScreenState extends State<PurchaseEnterpriseScreen> {
+class _PurchaseEnterpriseScreenState extends State<PurchaseEnterpriseScreen> {
   final supabase = Supabase.instance.client;
-  final formKey = GlobalKey<FormState>();
-  final TextEditingController nameCtrl = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
 
-  String? selectedColor; // hex string
-  String? selectedRegion;
-  String? otherRegionText;
+  final TextEditingController _nameCtrl = TextEditingController();
+  String? _selectedColor; // hex string
+  String? _selectedRegion;
+  String? _otherRegionText;
 
   // investors entries
-  List<InvestorRow> investors = [];
+  List<_InvestorRow> _investors = [];
 
   // players list for choosing investors
-  List<Map<String, dynamic>> players = [];
+  List<Map<String, dynamic>> _players = [];
 
   // regions fixed list as requested
-  final List<String> fixedRegions = [
-    'Свердловская область',
-    'Челябинская область',
-    'Тюменская область',
-    'Пермский край',
-    'ХМАО',
-    'ЯНАО',
+  final List<String> _fixedRegions = [
+    'Азиатская группа',
+    'Англа-саксонская группа',
+    'Предсоциалистический блок',
+    'Пиренейская группа',
+    'Центрально-европейская группа',
   ];
 
   // color options mapping name->hex
-  final Map<String, String> colorOptions = {
-    'Красный': '#F44336',
-    'Зелёный': '#4CAF50',
-    'Синий': '#2196F3',
-    'Розовый': '#E91E63',
-    'Жёлтый': '#FFC107',
+  final Map<String, String> _colorOptions = {
+    'красный': '#F44336',
+    'зелёный': '#4CAF50',
+    'синий': '#2196F3',
+    'малиновый': '#E91E63',
+    'жёлтый': '#FFC107',
   };
 
-  bool loading = false;
-  String? error;
+  bool _loading = false;
+  String? _error;
 
   @override
   void initState() {
     super.initState();
-    investors.add(InvestorRow()); // start with one investor row can be empty
-    loadPlayers();
+    _investors.add(_InvestorRow()); // start with one investor row (can be empty)
+    _loadPlayers();
   }
 
   @override
   void dispose() {
-    nameCtrl.dispose();
-    for (final r in investors) {
+    _nameCtrl.dispose();
+    for (final r in _investors) {
       r.controllerAmount.dispose();
     }
     super.dispose();
   }
 
-  Future<void> loadPlayers() async {
+  Future<void> _loadPlayers() async {
     try {
       final res = await supabase.from('user_credentials').select('id, telegram_username, first_name, last_name').order('first_name');
       if (res is List) {
-        players = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+        _players = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
       }
     } catch (_) {
       // ignore
@@ -1463,57 +1519,57 @@ class PurchaseEnterpriseScreenState extends State<PurchaseEnterpriseScreen> {
     }
   }
 
-  void addInvestorRow() {
-    if (investors.length >= 10) return;
-    setState(() => investors.add(InvestorRow()));
-  }
-
-  void removeInvestorRow(int idx) {
-    if (idx < 0 || idx >= investors.length) return;
-    setState(() => investors.removeAt(idx));
-  }
-
-  Future<void> onSubmit() async {
-    if (!formKey.currentState!.validate()) return;
-
+  void _addInvestorRow() {
+    if (_investors.length >= 10) return;
     setState(() {
-      loading = true;
-      error = null;
+      _investors.add(_InvestorRow());
+    });
+  }
+
+  void _removeInvestorRow(int idx) {
+    if (idx < 0 || idx >= _investors.length) return;
+    setState(() {
+      _investors.removeAt(idx);
+    });
+  }
+
+  Future<void> _onSubmit() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() {
+      _loading = true;
+      _error = null;
     });
 
-    final name = nameCtrl.text.trim();
-    final colorHex = selectedColor ?? '';
-    final region = selectedRegion ?? widget.currentUser.region ?? '';
+    final name = _nameCtrl.text.trim();
+    final colorHex = _selectedColor ?? '';
+    final region = _selectedRegion ?? widget.currentUser.region ?? '';
 
-    // assemble investors log text only
+    // assemble investors log (text only)
     final List<Map<String, dynamic>> investorsLog = [];
-    for (final row in investors) {
+    for (final row in _investors) {
       final pid = row.selectedPlayerId;
       final amt = row.controllerAmount.text.trim();
-      if (pid == null || pid.toString().isEmpty || amt.isEmpty) continue;
-
-      final player = players.firstWhere((p) => p['id']?.toString() == pid, orElse: () => {});
+      if ((pid == null || pid.toString().isEmpty) && (amt.isEmpty)) {
+        continue; // skip empty row
+      }
+      final player = _players.firstWhere((p) => p['id']?.toString() == pid, orElse: () => {});
       final playerName = player.isNotEmpty
-          ? ((player['first_name']?.toString().trim().isEmpty ?? true)
-              ? (player['telegram_username']?.toString() ?? '')
-              : '${player['first_name'] ?? ''} ${player['last_name'] ?? ''}')
-          : pid;
-
+          ? (((player['first_name'] ?? '').toString().trim().isEmpty) ? (player['telegram_username'] ?? '') : '${player['first_name'] ?? ''} ${player['last_name'] ?? ''}')
+          : '';
       investorsLog.add({'player_id': pid, 'player_name': playerName, 'minds': amt});
     }
 
     try {
-      // refresh user profile to get current balance inventory
+      // refresh user profile to get current balance & inventory
       final fresh = await supabase.from('user_credentials').select('v_balance, inventory').eq('id', widget.currentUser.id).maybeSingle();
-      if (fresh is! Map<String, dynamic>) throw Exception('Не удалось загрузить профиль');
-
+      if (fresh is! Map<String, dynamic>) throw 'Не удалось получить профиль';
       final vbalRaw = fresh['v_balance'];
-      final currentBalance =
-          vbalRaw is num ? vbalRaw.toDouble() : (double.tryParse(vbalRaw?.toString() ?? '') ?? 0.0);
-
+      final currentBalance = (vbalRaw is num) ? vbalRaw.toDouble() : double.tryParse(vbalRaw?.toString() ?? '') ?? 0.0;
       if (currentBalance < 200.0) {
-        setState(() => loading = false);
-        showError('Нужно 200 V. Доступно: ${currentBalance.toStringAsFixed(2)}');
+        setState(() {
+          _loading = false;
+        });
+        _showError('Недостаточно V: требуется 200, у вас ${currentBalance.toStringAsFixed(2)}');
         return;
       }
 
@@ -1526,284 +1582,282 @@ class PurchaseEnterpriseScreenState extends State<PurchaseEnterpriseScreen> {
         try {
           final d = jsonDecode(inv);
           if (d is List) invList = List.from(d);
-        } catch (_) {}
+          else if (d is Map) invList = [d];
+        } catch (_) {
+          invList = [];
+        }
       } else if (inv is List) {
         invList = List.from(inv);
       } else if (inv is Map) {
         invList = [inv];
+      } else {
+        invList = [];
       }
 
-      final enterpriseItem = <String, dynamic>{
-        'name': name,
+      // build enterprise item (fits InventoryScreen)
+      final Map<String, dynamic> enterpriseItem = {
+        'name': 'Предприятие: $name',
         'count': 0,
-        'meta': {'color': colorHex, 'region': region, 'investors': investorsLog},
-        'created_at': DateTime.now().toIso8601String(),
+        'meta': {
+          'color': colorHex,
+          'region': region,
+          'investors': investorsLog,
+          'created_at': DateTime.now().toIso8601String(),
+        },
       };
 
       invList.add(enterpriseItem);
 
+      // prepare updates: new balance and inventory
       final newBalance = currentBalance - 200.0;
-      final updateObj = {'v_balance': newBalance, 'inventory': invList};
+      final updateObj = {
+        'v_balance': newBalance,
+        'inventory': invList,
+      };
 
+      // perform update
       final upd = await supabase.from('user_credentials').update(updateObj).eq('id', widget.currentUser.id).select().maybeSingle();
-      if (upd == null) throw Exception('Ошибка обновления');
+      if (upd == null) throw 'Не удалось сохранить предприятие (сервер вернул null)';
 
+      // success
       if (!mounted) return;
       Navigator.of(context).pop(true);
     } catch (e) {
-      showError(e.toString());
-      setState(() => loading = false);
+      _showError('Ошибка при покупке: $e');
+      setState(() {
+        _loading = false;
+      });
     }
   }
 
-  void showError(String m) {
+  void _showError(String m) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
   }
 
-  Future<String?> showPlayerPicker(int index) async {
+  Future<String?> _showPlayerPicker(int index) async {
     String query = '';
     return await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
       builder: (ctx) {
-        List<Map<String, dynamic>> filtered = List.from(players);
-
-        return StatefulBuilder(
-          builder: (ctx2, setStateSheet) {
-            void doFilter(String q) {
-              query = q;
-              final ql = q.trim().toLowerCase();
-              if (ql.isEmpty) {
-                filtered = List.from(players);
-              } else {
-                filtered = players.where((p) {
-                  final fn = (p['first_name'] ?? '').toString().toLowerCase();
-                  final ln = (p['last_name'] ?? '').toString().toLowerCase();
-                  final un = (p['telegram_username'] ?? '').toString().toLowerCase();
-                  return fn.contains(ql) || ln.contains(ql) || un.contains(ql);
-                }).toList();
-              }
-              setStateSheet(() {});
+        List<Map<String, dynamic>> filtered = List.from(_players);
+        return StatefulBuilder(builder: (ctx2, setStateSheet) {
+          void doFilter(String q) {
+            query = q;
+            final ql = q.trim().toLowerCase();
+            if (ql.isEmpty) {
+              filtered = List.from(_players);
+            } else {
+              filtered = _players.where((p) {
+                final fn = (p['first_name'] ?? '').toString().toLowerCase();
+                final ln = (p['last_name'] ?? '').toString().toLowerCase();
+                final un = (p['telegram_username'] ?? '').toString().toLowerCase();
+                return fn.contains(ql) || ln.contains(ql) || un.contains(ql);
+              }).toList();
             }
+            setStateSheet(() {});
+          }
 
-            return SafeArea(
-              child: FractionallySizedBox(
-                heightFactor: 0.85,
-                child: Column(
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.all(12.0),
-                      child: TextField(
-                        decoration: const InputDecoration(
-                          hintText: 'Поиск игрока',
-                          prefixIcon: Icon(Icons.search),
-                        ),
-                        onChanged: doFilter,
-                      ),
+          return SafeArea(
+            child: FractionallySizedBox(
+              heightFactor: 0.85,
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.all(12.0),
+                    child: TextField(
+                      decoration: const InputDecoration(hintText: 'Поиск игрока', prefixIcon: Icon(Icons.search)),
+                      onChanged: (s) => doFilter(s),
                     ),
-                    const Divider(height: 0),
-                    Expanded(
-                      child: ListView.separated(
-                        itemCount: filtered.length + 1,
-                        separatorBuilder: (_, __) => const Divider(height: 0),
-                        itemBuilder: (context, idx) {
-                          if (idx == 0) {
-                            return ListTile(
-                              title: const Text('Не выбирать'),
-                              onTap: () => Navigator.of(ctx).pop(null),
-                            );
-                          }
-                          final p = filtered[idx - 1];
-                          final id = p['id']?.toString();
-                          final name = (p['first_name']?.toString().trim().isEmpty ?? true)
-                              ? (p['telegram_username']?.toString() ?? '')
-                              : '${p['first_name'] ?? ''} ${p['last_name'] ?? ''}';
+                  ),
+                  const Divider(height: 0),
+                  Expanded(
+                    child: ListView.separated(
+                      itemCount: filtered.length + 1,
+                      separatorBuilder: (_, __) => const Divider(height: 0),
+                      itemBuilder: (context, idx) {
+                        if (idx == 0) {
                           return ListTile(
-                            title: Text(name),
-                            onTap: () => Navigator.of(ctx).pop(id),
+                            title: const Text('— выбрать пустым —'),
+                            onTap: () => Navigator.of(ctx).pop(null),
                           );
-                        },
-                      ),
+                        }
+                        final p = filtered[idx - 1];
+                        final id = p['id']?.toString();
+                        final name = ((p['first_name'] ?? '') as String).toString().trim().isEmpty
+                            ? (p['telegram_username'] ?? '').toString()
+                            : '${p['first_name'] ?? ''} ${p['last_name'] ?? ''}';
+                        return ListTile(
+                          title: Text(name),
+                          onTap: () => Navigator.of(ctx).pop(id),
+                        );
+                      },
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            );
-          },
-        );
+            ),
+          );
+        });
       },
     );
-  }
-
-  List<Widget> buildInvestorRows() {
-    final List<Widget> rows = [];
-    for (var i = 0; i < investors.length; i++) {
-      final r = investors[i];
-
-      String? selectedName;
-      if (r.selectedPlayerId != null) {
-        final p = players.firstWhere((p) => p['id']?.toString() == r.selectedPlayerId, orElse: () => {});
-        if (p.isNotEmpty) {
-          selectedName = (p['first_name']?.toString().trim().isEmpty ?? true)
-              ? (p['telegram_username']?.toString() ?? '')
-              : '${p['first_name'] ?? ''} ${p['last_name'] ?? ''}';
-        }
-      }
-
-      rows.add(
-        Card(
-          margin: const EdgeInsets.symmetric(vertical: 6),
-          child: Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: GestureDetector(
-                        onTap: () async {
-                          final selected = await showPlayerPicker(i);
-                          setState(() => r.selectedPlayerId = selected);
-                        },
-                        child: AbsorbPointer(
-                          child: TextFormField(
-                            decoration: const InputDecoration(
-                              labelText: 'Инвестор',
-                              hintText: 'Выбрать игрока',
-                              suffixIcon: Icon(Icons.search),
-                            ),
-                            controller: TextEditingController(text: selectedName ?? ''),
-                            readOnly: true,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    SizedBox(
-                      width: 120,
-                      child: TextFormField(
-                        controller: r.controllerAmount,
-                        decoration: const InputDecoration(labelText: 'Minds'),
-                        keyboardType: TextInputType.text,
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.delete_outline),
-                      onPressed: () => removeInvestorRow(i),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-    return rows;
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Покупка предприятия')),
-      body: loading
+      appBar: AppBar(
+        title: const Text('Купить предприятие'),
+      ),
+      body: _loading
           ? const Center(child: CircularProgressIndicator())
           : SingleChildScrollView(
               padding: const EdgeInsets.all(12),
               child: Form(
-                key: formKey,
+                key: _formKey,
                 child: Column(
                   children: [
                     TextFormField(
-                      controller: nameCtrl,
+                      controller: _nameCtrl,
                       decoration: const InputDecoration(labelText: 'Название предприятия'),
                       validator: (v) => (v == null || v.trim().isEmpty) ? 'Введите название' : null,
                     ),
                     const SizedBox(height: 12),
-
-                    // Color selection
+                    // Color selection (named list with swatch)
                     Row(
                       children: [
                         const Text('Цвет:'),
                         const SizedBox(width: 12),
                         Expanded(
                           child: DropdownButtonFormField<String>(
-                            value: selectedColor,
-                            items: colorOptions.entries
-                                .map(
-                                  (e) => DropdownMenuItem(
-                                    value: e.value,
-                                    child: Row(
-                                      children: [
-                                        Container(
-                                          width: 18,
-                                          height: 18,
-                                          color: Color(int.parse(e.value.substring(1), radix: 16) + 0xFF000000),
-                                        ),
+                            value: _selectedColor,
+                            items: _colorOptions.entries
+                                .map((e) => DropdownMenuItem(
+                                      value: e.value,
+                                      child: Row(children: [
+                                        Container(width: 18, height: 18, color: Color(int.parse(e.value.substring(1), radix: 16) | 0xFF000000)),
                                         const SizedBox(width: 8),
                                         Text(e.key),
-                                      ],
-                                    ),
-                                  ),
-                                )
+                                      ]),
+                                    ))
                                 .toList(),
-                            onChanged: (v) => setState(() => selectedColor = v),
+                            onChanged: (v) => setState(() => _selectedColor = v),
                             decoration: const InputDecoration(hintText: 'Выберите цвет'),
                             validator: (v) => (v == null || v.isEmpty) ? 'Выберите цвет' : null,
                           ),
                         ),
                       ],
                     ),
-
                     const SizedBox(height: 12),
-
-                    // Region selection fixed dropdown
+                    // Region selection: fixed dropdown as requested
                     Row(
                       children: [
                         const Text('Регион:'),
                         const SizedBox(width: 12),
                         Expanded(
                           child: DropdownButtonFormField<String>(
-                            value: selectedRegion ?? widget.currentUser.region,
-                            items: fixedRegions.map((r) => DropdownMenuItem(value: r, child: Text(r))).toList(),
-                            onChanged: (v) => setState(() => selectedRegion = v),
+                            value: _selectedRegion ?? widget.currentUser.region,
+                            items: _fixedRegions.map((r) => DropdownMenuItem(value: r, child: Text(r))).toList(),
+                            onChanged: (v) => setState(() => _selectedRegion = v),
                             decoration: const InputDecoration(hintText: 'Выберите регион'),
                             validator: (v) => (v == null || v.isEmpty) ? 'Выберите регион' : null,
                           ),
                         ),
                       ],
                     ),
-
                     const SizedBox(height: 16),
-
                     // Investors block
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         const Text('Инвесторы (до 10)', style: TextStyle(fontWeight: FontWeight.w600)),
-                        TextButton(onPressed: investors.length >= 10 ? null : addInvestorRow, child: const Text('Добавить')),
+                        TextButton(
+                          onPressed: _investors.length >= 10 ? null : _addInvestorRow,
+                          child: const Text('Добавить инвестора'),
+                        ),
                       ],
                     ),
                     const SizedBox(height: 8),
-                    ...buildInvestorRows(),
+                    ..._buildInvestorRows(),
                     const SizedBox(height: 20),
-
-                    ElevatedButton(onPressed: onSubmit, child: const Text('Купить за 200 V')),
+                    ElevatedButton(
+                      onPressed: _onSubmit,
+                      child: const Text('Купить (200 V)'),
+                    ),
                     const SizedBox(height: 12),
-
-                    if (error != null) Text(error!, style: const TextStyle(color: Colors.red)),
+                    if (_error != null) Text(_error!, style: const TextStyle(color: Colors.red)),
                   ],
                 ),
               ),
             ),
     );
   }
+
+  List<Widget> _buildInvestorRows() {
+    final List<Widget> rows = [];
+    for (var i = 0; i < _investors.length; i++) {
+      final r = _investors[i];
+      final selectedName = _players.firstWhere((p) => p['id']?.toString() == r.selectedPlayerId, orElse: () => {}).isNotEmpty
+          ? (_players.firstWhere((p) => p['id']?.toString() == r.selectedPlayerId)['first_name']?.toString().trim().isEmpty ?? true
+              ? (_players.firstWhere((p) => p['id']?.toString() == r.selectedPlayerId)['telegram_username'] ?? '')
+              : '${_players.firstWhere((p) => p['id']?.toString() == r.selectedPlayerId)['first_name'] ?? ''} ${_players.firstWhere((p) => p['id']?.toString() == r.selectedPlayerId)['last_name'] ?? ''}')
+          : null;
+      rows.add(Card(
+        margin: const EdgeInsets.symmetric(vertical: 6),
+        child: Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: Column(children: [
+            Row(
+              children: [
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () async {
+                      final selected = await _showPlayerPicker(i);
+                      setState(() {
+                        r.selectedPlayerId = selected;
+                      });
+                    },
+                    child: AbsorbPointer(
+                      child: TextFormField(
+                        decoration: InputDecoration(
+                          labelText: 'Игрок',
+                          hintText: '— выбрать игрока —',
+                          suffixIcon: const Icon(Icons.search),
+                        ),
+                        controller: TextEditingController(text: selectedName ?? ''),
+                        readOnly: true,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 120,
+                  child: TextFormField(
+                    controller: r.controllerAmount,
+                    decoration: const InputDecoration(labelText: 'Майндов'),
+                    keyboardType: TextInputType.text,
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete_outline),
+                  onPressed: () {
+                    _removeInvestorRow(i);
+                  },
+                ),
+              ],
+            ),
+          ]),
+        ),
+      ));
+    }
+    return rows;
+  }
 }
 
-class InvestorRow {
+class _InvestorRow {
   String? selectedPlayerId;
   final TextEditingController controllerAmount = TextEditingController();
-
-  InvestorRow({this.selectedPlayerId});
+  _InvestorRow({this.selectedPlayerId});
 }
