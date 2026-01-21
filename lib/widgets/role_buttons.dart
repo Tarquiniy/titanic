@@ -20,6 +20,13 @@ class RoleButtons extends StatelessWidget {
   final VoidCallback onStartSpeech;
   final Widget listenWidget;
 
+  /// Callback для "Статья Чести"
+  final VoidCallbackAsync? onHonorArticle;
+  final bool honorAlreadyUsed;
+
+  /// Callback для "Вложиться в цвет"
+  final VoidCallbackAsync? onInvestInColor;
+
   const RoleButtons({
     Key? key,
     required this.user,
@@ -30,61 +37,53 @@ class RoleButtons extends StatelessWidget {
     required this.onOpenResolution,
     required this.onStartSpeech,
     required this.listenWidget,
+    this.onHonorArticle,
+    this.honorAlreadyUsed = false,
+    this.onInvestInColor,
     this.hasActiveDebate = false,
     this.alreadyVotedInActiveDebate = false,
     this.hasActiveResolution = false,
     this.alreadyBetInActiveResolution = false,
   }) : super(key: key);
 
-  void _add(BuildContext ctx, String title, VoidCallback action, {Color? color}) {
-    final btn = Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6.0),
-      child: SizedBox(
-        width: double.infinity,
-        child: ElevatedButton(
-          style: ElevatedButton.styleFrom(backgroundColor: color),
-          onPressed: action,
-          child: Text(title),
+  Widget _btn(String title, VoidCallback onTap, {Color? color}) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6.0),
+        child: SizedBox(
+          width: double.infinity,
+          child: ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: color),
+            onPressed: onTap,
+            child: Text(title),
+          ),
         ),
-      ),
-    );
-    // Directly show button by calling action - used in list building.
-  }
+      );
 
   @override
   Widget build(BuildContext context) {
-    final role = user.role;
+    final role = (user.role ?? '').toString().toLowerCase();
     final List<Widget> buttons = [];
 
-    Widget btn(String title, VoidCallback onTap, {Color? color}) => Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6.0),
-          child: SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: color),
-              onPressed: onTap,
-              child: Text(title),
-            ),
-          ),
-        );
-
-    buttons.add(btn('Перевести Войсы', onTransfer));
-    buttons.add(btn('Купить ход экономисту', () => onBuyTurn()));
+    buttons.add(_btn('Перевести Войсы', onTransfer));
+    buttons.add(_btn('Купить ход экономисту', () => onBuyTurn()));
 
     if (role == 'economist') {
-      buttons.add(btn('Купить предприятие', onPurchaseEnterprise));
+      buttons.add(_btn('Купить предприятие', onPurchaseEnterprise));
     }
 
-    if (role != 'politician' && hasActiveDebate && !alreadyVotedInActiveDebate) {
-      buttons.add(btn('Дебаты', () => onOpenDebates()));
+    // дебаты для не-политиков и не-журналистов (журналист — Статья Чести)
+    if (role != 'politician' && role != 'journalist' && hasActiveDebate && !alreadyVotedInActiveDebate) {
+      buttons.add(_btn('Дебаты', () => onOpenDebates()));
     }
 
     if (role == 'politician' && hasActiveResolution && !alreadyBetInActiveResolution) {
-      buttons.add(btn('Выбрать политрешение', onOpenResolution, color: Colors.blueAccent));
+      buttons.add(_btn('Выбрать политрешение', onOpenResolution, color: Colors.blueAccent));
     }
 
     if (role == 'politician') {
-      buttons.add(Padding(padding: const EdgeInsets.symmetric(vertical: 6.0), child: ElevatedButton(onPressed: onStartSpeech, child: const Text('Речь жизни (старт)'))));
+      buttons.add(Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6.0),
+        child: ElevatedButton(onPressed: onStartSpeech, child: const Text('Речь жизни (старт)')),
+      ));
     }
 
     // Listen widget delegated (already a widget)
@@ -92,21 +91,73 @@ class RoleButtons extends StatelessWidget {
 
     // role-specific extras
     if (role == 'economist') {
-      buttons.add(btn('Аналитика / Ставки', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Аналитика')))));
+      buttons.add(_btn('Аналитика / Ставки', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Аналитика')))));
     } else if (role == 'hollywood') {
-      buttons.add(btn('Контент / Ставки', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Hollywood')))));
+      buttons.add(_btn('Контент / Ставки', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Hollywood')))));
     } else if (role == 'mafia') {
-      buttons.add(btn('Управление предприятиями', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Предприятия')))));
+      buttons.add(_btn('Управление предприятиями', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Предприятия')))));
     } else if (role == 'journalist') {
-      buttons.add(btn('Дебаты / Публикации', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Дебаты')))));
+      // Статья Чести
+      final disabled = honorAlreadyUsed;
+      buttons.add(
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6.0),
+          child: SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: disabled ? Colors.grey : Colors.purple),
+              onPressed: disabled
+                  ? null
+                  : () async {
+                      if (onHonorArticle != null) {
+                        try {
+                          await onHonorArticle!();
+                        } catch (e) {
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
+                        }
+                      } else {
+                        await onOpenDebates();
+                      }
+                    },
+              child: Text(disabled ? 'Статья Чести — использовано' : 'Статья Чести'),
+            ),
+          ),
+        ),
+      );
     } else if (role == 'public_figure') {
-      buttons.add(btn('События / Прослушал', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('События')))));
+      // Вложиться в цвет
+      buttons.add(
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6.0),
+          child: SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
+              onPressed: () async {
+                if (onInvestInColor != null) {
+                  try {
+                    await onInvestInColor!();
+                  } catch (e) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
+                  }
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Функция не реализована')));
+                }
+              },
+              child: const Text('Вложиться в цвет'),
+            ),
+          ),
+        ),
+      );
+
+      // keep old button for events if needed
+      buttons.add(_btn('События / Прослушал', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('События')))));
     } else if (role == 'admin') {
-      buttons.add(btn('Админ-панель', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Админ-панель'))), color: Colors.black87));
-      buttons.add(btn('Пополнить V/M', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Пополнение')))));
-      buttons.add(btn('Создать опрос', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Создать опрос')))));
-      buttons.add(btn('Создать аукцион', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Создание аукциона')))));
-      buttons.add(btn('Статистика цветов', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Статистика')))));
+      buttons.add(_btn('Админ-панель', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Админ-панель'))), color: Colors.black87));
+      buttons.add(_btn('Пополнить V/M', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Пополнение')))));
+      buttons.add(_btn('Создать опрос', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Создать опрос')))));
+      buttons.add(_btn('Создать аукцион', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Создание аукциона')))));
+      buttons.add(_btn('Статистика цветов', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Статистика')))));
     }
 
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: buttons);

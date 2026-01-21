@@ -3,6 +3,127 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+/// Получить состояние "Статья Чести" для пользователя:
+/// возвращает Map { 'm_balance': double, 'used': bool }
+Future<Map<String, dynamic>> fetchHonorState(String userId) async {
+  final supabase = Supabase.instance.client;
+  try {
+    final row = await supabase
+        .from('user_credentials')
+        .select('m_balance, used_honor_article')
+        .eq('id', userId)
+        .maybeSingle();
+
+    if (row is Map<String, dynamic>) {
+      final mb = row['m_balance'];
+      double parsedM = 0.0;
+      if (mb is num) parsedM = mb.toDouble();
+      else if (mb is String) parsedM = double.tryParse(mb.replaceAll(',', '.')) ?? 0.0;
+
+      final usedFlag = row['used_honor_article'];
+      final bool used = (usedFlag == true) || (usedFlag?.toString().toLowerCase() == 'true');
+
+      return {'m_balance': parsedM, 'used': used};
+    } else {
+      return {'m_balance': 0.0, 'used': false};
+    }
+  } catch (_) {
+    return {'m_balance': 0.0, 'used': false};
+  }
+}
+
+Future<void> showHonorArticleDialog(BuildContext context, String userId, {Future<void> Function()? onPublished}) async {
+  final supabase = Supabase.instance.client;
+
+  // Загружаем баланс и флаг перед открытием диалога
+  final state = await fetchHonorState(userId);
+  final double mBalance = state['m_balance'] as double? ?? 0.0;
+  final bool used = state['used'] as bool? ?? false;
+
+  if (used) {
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Статья Чести уже использована')));
+    return;
+  }
+
+  final ctrl = TextEditingController();
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Статья Чести'),
+      content: Column(mainAxisSize: MainAxisSize.min, children: [
+        Text('Ваш доступный M: ${mBalance.toStringAsFixed(2)}'),
+        const SizedBox(height: 8),
+        TextField(
+          controller: ctrl,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: const InputDecoration(labelText: 'Сумма M'),
+        ),
+        const SizedBox(height: 8),
+        const Text('Введите целую сумму, если вы введёте не целое число, оно округлится!'),
+      ]),
+      actions: [
+        TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Отмена')),
+        ElevatedButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Подтвердить')),
+      ],
+    ),
+  );
+
+  if (confirmed != true) return;
+
+  final raw = ctrl.text.trim().replaceAll(',', '.');
+  final amountDouble = double.tryParse(raw) ?? 0.0;
+  if (amountDouble <= 0) {
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Введите корректную сумму')));
+    return;
+  }
+
+  // Округление/конвертация к целому BIGINT — используем floor (без переплат)
+  final intAmount = amountDouble.toInt();
+  if (intAmount <= 0) {
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Сумма слишком мала после округления')));
+    return;
+  }
+  if (intAmount > mBalance.floor()) {
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Недостаточно M')));
+    return;
+  }
+
+  // Вызов RPC (atomic, серверная функция должна ставить used_honor_article = true)
+  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Отправка...')));
+
+  try {
+    final res = await supabase.rpc('publish_article', params: {'p_user': userId, 'p_amount': intAmount});
+    Map<String, dynamic>? parsed;
+    if (res is Map<String, dynamic>) parsed = res;
+    else if (res is List && res.isNotEmpty && res[0] is Map) parsed = Map<String, dynamic>.from(res[0]);
+    else if (res is String) {
+      try {
+        parsed = Map<String, dynamic>.from(jsonDecode(res) as Map);
+      } catch (_) {
+        parsed = null;
+      }
+    }
+
+    if (parsed != null && (parsed['status'] == 'ok' || parsed['status'] == 'OK')) {
+      final added = parsed['added_m'] ?? intAmount;
+      final color = parsed['color'] ?? '';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Статья опубликована — $added M в банк цвета $color')));
+      // вызвать callback родителя, если требуется
+      if (onPublished != null) {
+        try {
+          await onPublished();
+        } catch (_) {}
+      }
+    } else {
+      final msg = parsed != null ? (parsed['message'] ?? parsed.toString()) : 'Неожиданный ответ от сервера';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка: $msg')));
+    }
+  } catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка RPC: $e')));
+  }
+}
+
+/// --- Stateful widget (оставлен как было, но reuses showHonorArticleDialog) ---
 class JournalistBlock extends StatefulWidget {
   final String currentUserId;
   final Future<void> Function()? onPublished;
@@ -99,78 +220,13 @@ class _JournalistBlockState extends State<JournalistBlock> {
 
   Future<void> _onPublishPressed() async {
     if (_usedAlready) return;
-    await _loadState(); // refresh before action
-    if (_usedAlready) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Вы уже использовали Статью Чести.')));
-      return;
-    }
 
-    final ctrl = TextEditingController();
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Статья Чести'),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          Text('Ваш доступный M: ${_mBalance.toStringAsFixed(2)}'),
-          const SizedBox(height: 8),
-          TextField(
-            controller: ctrl,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(labelText: 'Сумма M'),
-          ),
-        ]),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Отмена')),
-          ElevatedButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Подтвердить')),
-        ],
-      ),
-    );
-
-    if (confirmed != true) return;
-    final raw = ctrl.text.trim().replaceAll(',', '.');
-    final amount = double.tryParse(raw) ?? 0.0;
-    if (amount <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Введите корректную сумму')));
-      return;
-    }
-    if (amount > _mBalance) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Недостаточно M')));
-      return;
-    }
-
-    setState(() => _loading = true);
-    try {
-      // If your RPC expects BIGINT, ensure you're sending integer; here we send numeric and let server handle cast.
-      final res = await supabase.rpc('publish_article', params: {'p_user': widget.currentUserId, 'p_amount': amount});
-      Map<String, dynamic>? parsed;
-      if (res is Map<String, dynamic>) parsed = res;
-      else if (res is List && res.isNotEmpty && res[0] is Map) parsed = Map<String, dynamic>.from(res[0]);
-      else if (res is String) {
-        try {
-          parsed = Map<String, dynamic>.from(jsonDecode(res) as Map);
-        } catch (_) {
-          parsed = null;
-        }
-      }
-
-      debugPrint('JournalistBlock: publish_article rpc result -> $parsed');
-
-      if (parsed != null && (parsed['status'] == 'ok' || parsed['status'] == 'OK')) {
-        final added = parsed['added_m'] ?? amount;
-        final color = parsed['color'] ?? '';
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Статья опубликована — $added M в банк цвета $color')));
-        setState(() => _usedAlready = true);
-        if (widget.onPublished != null) await widget.onPublished!();
-      } else {
-        final msg = parsed != null ? (parsed['message'] ?? parsed.toString()) : 'Неожиданный ответ';
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка: $msg')));
-      }
-    } catch (e) {
-      debugPrint('JournalistBlock: publish error -> $e');
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
+    // используем универсальную функцию, которая делает весь flow
+    await showHonorArticleDialog(context, widget.currentUserId, onPublished: () async {
+      // обновим локальное состояние после успешной публикации
+      await _loadState();
+      if (widget.onPublished != null) await widget.onPublished!();
+    });
   }
 
   @override

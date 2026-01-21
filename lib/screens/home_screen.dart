@@ -19,6 +19,10 @@ import 'package:titanic/screens/debates_screen.dart';
 import 'package:titanic/screens/purchase_enterprise_screen.dart';
 import 'login_screen.dart';
 
+// helper functions for honor article are in journalist_block.dart
+import 'package:titanic/blocks/journalist_block.dart';
+import 'package:titanic/blocks/public_figure_block.dart';
+
 class HomeScreen extends StatefulWidget {
   final AppUser currentUser;
   const HomeScreen({Key? key, required this.currentUser}) : super(key: key);
@@ -73,6 +77,10 @@ class _HomeScreenState extends State<HomeScreen> {
   // single journal channel (client-side filtering)
   RealtimeChannel? _journalChannel;
 
+  // honor article local state
+  bool? _honorUsedLocal;
+  double? _honorMBalance;
+
   @override
   void initState() {
     super.initState();
@@ -94,6 +102,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
     _loadJournal();
     _subscribeToJournal();
+
+    // load local honor state (balance + used flag)
+    _loadHonorLocalState();
   }
 
   @override
@@ -106,6 +117,132 @@ class _HomeScreenState extends State<HomeScreen> {
     speechService.dispose();
     _journalChannel?.unsubscribe();
     super.dispose();
+  }
+
+  /// Load honor article state (used flag + m_balance) and update local user copy.
+  Future<void> _loadHonorLocalState() async {
+    try {
+      final st = await fetchHonorState(user.id);
+      if (!mounted) return;
+      setState(() {
+        _honorUsedLocal = (st['used'] as bool?) ?? false;
+        _honorMBalance = (st['m_balance'] as double?) ?? user.mBalance;
+        user = user.copyWith(mBalance: _honorMBalance ?? user.mBalance);
+      });
+    } catch (_) {
+      // ignore
+    }
+  }
+
+  /// Диалог "Вложиться в цвет" — показывает dropdown и поле суммы, вызывает RPC invest_in_color
+  Future<void> showInvestInColorDialog(BuildContext context, String userId, {Future<void> Function()? onCompleted}) async {
+    // available colors
+    const colors = ['красный', 'зелёный', 'жёлтый', 'синий', 'малиновый'];
+
+    // load current balance for prompt
+    double mBalance = 0.0;
+    try {
+      final row = await supabase.from('user_credentials').select('m_balance').eq('id', userId).maybeSingle();
+      if (row is Map<String, dynamic>) {
+        final mb = row['m_balance'];
+        if (mb is num) mBalance = mb.toDouble();
+        else if (mb is String) mBalance = double.tryParse(mb.replaceAll(',', '.')) ?? 0.0;
+      }
+    } catch (_) {}
+
+    String? selectedColor = colors.first;
+    final TextEditingController amtCtrl = TextEditingController();
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Вложиться в цвет'),
+        content: StatefulBuilder(builder: (ctx2, setStateDialog) {
+          return Column(mainAxisSize: MainAxisSize.min, children: [
+            DropdownButtonFormField<String>(
+              value: selectedColor,
+              items: colors.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
+              onChanged: (v) => setStateDialog(() => selectedColor = v),
+              decoration: const InputDecoration(labelText: 'Выберите цвет'),
+            ),
+            const SizedBox(height: 12),
+            Row(children: [
+              Expanded(
+                child: TextField(
+                  controller: amtCtrl,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: false),
+                  decoration: const InputDecoration(labelText: 'Сумма', hintText: '0', isDense: true),
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Padding(
+                padding: EdgeInsets.only(top: 14.0),
+                child: Text('Майндов'),
+              )
+            ]),
+            const SizedBox(height: 8),
+            Text('Ваш баланс: ${mBalance.toStringAsFixed(0)}'),
+          ]);
+        }),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Отмена')),
+          ElevatedButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Вложиться')),
+        ],
+      ),
+    );
+
+    try {
+      amtCtrl.dispose();
+    } catch (_) {}
+
+    if (confirmed != true) return;
+
+    // validate
+    final raw = amtCtrl.text.trim().replaceAll(',', '.');
+    final n = int.tryParse(raw);
+    if (n == null || n <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Введите положительное целое число')));
+      return;
+    }
+    if (n > mBalance.floor()) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Недостаточно майндов')));
+      return;
+    }
+    if (selectedColor == null || selectedColor!.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Выберите цвет')));
+      return;
+    }
+
+    // call RPC
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Отправка...')));
+    try {
+      final res = await supabase.rpc('invest_in_color', params: {'p_user': userId, 'p_color': selectedColor, 'p_amount': n});
+      Map<String, dynamic>? parsed;
+      if (res is Map<String, dynamic>) parsed = res;
+      else if (res is List && res.isNotEmpty && res[0] is Map) parsed = Map<String, dynamic>.from(res[0]);
+      else if (res is String) {
+        try {
+          parsed = Map<String, dynamic>.from(jsonDecode(res) as Map);
+        } catch (_) {
+          parsed = null;
+        }
+      }
+
+      if (parsed != null && (parsed['status'] == 'ok' || parsed['status'] == 'OK')) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Вложено $n в банк цвета $selectedColor')));
+        // refresh profile / journal
+        try {
+          await _refreshProfile();
+          await _loadJournal();
+        } catch (_) {}
+        if (onCompleted != null) await onCompleted();
+      } else {
+        final msg = parsed != null ? (parsed['message'] ?? parsed.toString()) : 'Неожиданный ответ от сервера';
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка: $msg')));
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка RPC: $e')));
+    }
   }
 
   /// Local insert to journal list (immediate UI) with dedupe, and best-effort DB insert.
@@ -168,11 +305,11 @@ class _HomeScreenState extends State<HomeScreen> {
       out = out.replaceAll(RegExp(r'Тип:\s*INSERT', caseSensitive: false), 'Создано');
       out = out.replaceAll(RegExp(r'Тип:\s*DELETE', caseSensitive: false), 'Удалено');
 
-      // v_balance -> Войсы, m_balance -> Майндсы
+      // v_balance -> Войсы, m_balance -> Майнды
       out = out.replaceAll(RegExp(r'<b>\s*v_balance\s*<\/b>', caseSensitive: false), 'Войсы');
       out = out.replaceAll(RegExp(r'\bv_balance\b', caseSensitive: false), 'Войсы');
-      out = out.replaceAll(RegExp(r'<b>\s*m_balance\s*<\/b>', caseSensitive: false), 'Майндсы');
-      out = out.replaceAll(RegExp(r'\bm_balance\b', caseSensitive: false), 'Майндсы');
+      out = out.replaceAll(RegExp(r'<b>\s*m_balance\s*<\/b>', caseSensitive: false), 'Майнды');
+      out = out.replaceAll(RegExp(r'\bm_balance\b', caseSensitive: false), 'Майнды');
 
       // compact verbose patterns
       out = out.replaceAll('Тип: Изменён статус', 'Изменён статус');
@@ -366,6 +503,8 @@ class _HomeScreenState extends State<HomeScreen> {
         });
       }
     } catch (_) {}
+    // update honor local state after refreshing profile
+    await _loadHonorLocalState();
   }
 
   // -----------------------
@@ -926,7 +1065,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   return;
                 }
                 if (n > user.mBalance) {
-                  ScaffoldMessenger.of(ctx2).showSnackBar(SnackBar(content: Text('Недостаточно майндов: у вас ${user.mBalance.toStringAsFixed(2)}')));
+                  ScaffoldMessenger.of(ctx2).showSnackBar(SnackBar(content: Text('Недостаточно майндов: у вас ${user.mBalance.toStringAsFixed(2)}'))); 
                   return;
                 }
                 Navigator.of(ctx2).pop(true);
@@ -1095,6 +1234,39 @@ class _HomeScreenState extends State<HomeScreen> {
                 });
               },
             ),
+
+            // Pass honor article flow & used flag from parent
+            onHonorArticle: () async {
+              await showHonorArticleDialog(context, user.id, onPublished: () async {
+                // update profile, journal, debate state and local honor flag after success
+                try {
+                  await _refreshProfile();
+                  await _loadJournal();
+                  await _loadDebateState();
+                } catch (_) {}
+                try {
+                  final st = await fetchHonorState(user.id);
+                  if (!mounted) return;
+                  setState(() {
+                    _honorUsedLocal = (st['used'] as bool?) ?? true;
+                    _honorMBalance = (st['m_balance'] as double?) ?? user.mBalance;
+                    user = user.copyWith(mBalance: _honorMBalance ?? user.mBalance);
+                  });
+                } catch (_) {}
+              });
+            },
+
+            // Pass invest-in-color flow
+            onInvestInColor: () async {
+              await showInvestInColorDialog(context, user.id, onCompleted: () async {
+                try {
+                  await _refreshProfile();
+                  await _loadJournal();
+                } catch (_) {}
+              });
+            },
+
+            honorAlreadyUsed: _honorUsedLocal ?? false,
           ),
           const SizedBox(height: 20),
           const Text('Журнал', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
