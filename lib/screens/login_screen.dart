@@ -63,7 +63,7 @@ class _LoginScreenState extends State<LoginScreen> {
       if (role == 'admin') {
         Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const AdminScreen()));
       } else {
-        Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => HomeScreen(user: user)));
+        Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => HomeScreen(currentUser: user)));
       }
     } catch (_) {
       // ignore — remain on login screen
@@ -132,7 +132,7 @@ class _LoginScreenState extends State<LoginScreen> {
       if (role == 'admin') {
         Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const AdminScreen()));
       } else {
-        Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => HomeScreen(user: user)));
+        Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => HomeScreen(currentUser: user)));
       }
     } on PostgrestException catch (e) {
       setState(() => _error = 'Ошибка сервера: ${e.message}');
