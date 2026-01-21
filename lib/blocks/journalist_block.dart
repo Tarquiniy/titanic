@@ -26,35 +26,80 @@ class _JournalistBlockState extends State<JournalistBlock> {
   }
 
   Future<void> _loadState() async {
+    if (widget.currentUserId.isEmpty) {
+      debugPrint('JournalistBlock: currentUserId is empty');
+      setState(() {
+        _usedAlready = true;
+        _mBalance = 0.0;
+      });
+      return;
+    }
+
     setState(() => _loading = true);
     try {
-      final row = await supabase.from('user_credentials').select('m_balance, used_honor_article, role').eq('id', widget.currentUserId).maybeSingle();
+      final row = await supabase
+          .from('user_credentials')
+          .select('m_balance, used_honor_article, role')
+          .eq('id', widget.currentUserId)
+          .maybeSingle();
+
+      debugPrint('JournalistBlock: _loadState row -> $row');
+
       if (row is Map<String, dynamic>) {
-        final role = row['role'] as String?;
-        if (role != 'journalist') {
+        // normalize role string safely
+        final roleRaw = row['role'];
+        final roleStr = (roleRaw == null) ? '' : roleRaw.toString().toLowerCase().trim();
+
+        final bool isJournalist = roleStr == 'journalist' || roleStr == 'журналист' || roleStr.contains('journal');
+
+        if (!isJournalist) {
+          // not a journalist: mark used so button stays disabled
           setState(() {
             _usedAlready = true;
             _mBalance = 0.0;
           });
         } else {
-          _mBalance = (row['m_balance'] is num) ? (row['m_balance'] as num).toDouble() : 0.0;
-          _usedAlready = (row['used_honor_article'] == true);
+          // safe parse of m_balance
+          final mb = row['m_balance'];
+          double parsedM = 0.0;
+          try {
+            if (mb is num) parsedM = mb.toDouble();
+            else if (mb is String) parsedM = double.tryParse(mb.replaceAll(',', '.')) ?? 0.0;
+            else parsedM = 0.0;
+          } catch (_) {
+            parsedM = 0.0;
+          }
+
+          final usedFlag = row['used_honor_article'];
+          final bool used = (usedFlag == true) || (usedFlag?.toString().toLowerCase() == 'true');
+
+          setState(() {
+            _mBalance = parsedM;
+            _usedAlready = used;
+          });
         }
       } else {
-        _usedAlready = false;
-        _mBalance = 0.0;
+        // no row found
+        debugPrint('JournalistBlock: user row not found for id=${widget.currentUserId}');
+        setState(() {
+          _usedAlready = true;
+          _mBalance = 0.0;
+        });
       }
-    } catch (_) {
-      _usedAlready = false;
-      _mBalance = 0.0;
+    } catch (e) {
+      debugPrint('JournalistBlock: _loadState error -> $e');
+      setState(() {
+        _usedAlready = true;
+        _mBalance = 0.0;
+      });
     } finally {
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 
   Future<void> _onPublishPressed() async {
     if (_usedAlready) return;
-    await _loadState();
+    await _loadState(); // refresh before action
     if (_usedAlready) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Вы уже использовали Статью Чести.')));
       return;
@@ -68,9 +113,16 @@ class _JournalistBlockState extends State<JournalistBlock> {
         content: Column(mainAxisSize: MainAxisSize.min, children: [
           Text('Ваш доступный M: ${_mBalance.toStringAsFixed(2)}'),
           const SizedBox(height: 8),
-          TextField(controller: ctrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Сумма M')),
+          TextField(
+            controller: ctrl,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(labelText: 'Сумма M'),
+          ),
         ]),
-        actions: [TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Отмена')), ElevatedButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Подтвердить'))],
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Отмена')),
+          ElevatedButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Подтвердить')),
+        ],
       ),
     );
 
@@ -88,6 +140,7 @@ class _JournalistBlockState extends State<JournalistBlock> {
 
     setState(() => _loading = true);
     try {
+      // If your RPC expects BIGINT, ensure you're sending integer; here we send numeric and let server handle cast.
       final res = await supabase.rpc('publish_article', params: {'p_user': widget.currentUserId, 'p_amount': amount});
       Map<String, dynamic>? parsed;
       if (res is Map<String, dynamic>) parsed = res;
@@ -100,6 +153,8 @@ class _JournalistBlockState extends State<JournalistBlock> {
         }
       }
 
+      debugPrint('JournalistBlock: publish_article rpc result -> $parsed');
+
       if (parsed != null && (parsed['status'] == 'ok' || parsed['status'] == 'OK')) {
         final added = parsed['added_m'] ?? amount;
         final color = parsed['color'] ?? '';
@@ -111,23 +166,32 @@ class _JournalistBlockState extends State<JournalistBlock> {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка: $msg')));
       }
     } catch (e) {
+      debugPrint('JournalistBlock: publish error -> $e');
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
     } finally {
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      SizedBox(width: double.infinity, child: ElevatedButton(onPressed: () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Дебаты / Публикации'))), child: const Text('Дебаты / Публикации'))),
+      SizedBox(
+        width: double.infinity,
+        child: ElevatedButton(
+          onPressed: () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Дебаты / Публикации'))),
+          child: const Text('Дебаты / Публикации'),
+        ),
+      ),
       const SizedBox(height: 8),
       SizedBox(
         width: double.infinity,
         child: ElevatedButton(
           onPressed: (_loading || _usedAlready) ? null : _onPublishPressed,
           style: ElevatedButton.styleFrom(backgroundColor: _usedAlready ? Colors.grey : Colors.purple),
-          child: _loading ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : Text(_usedAlready ? 'Статья Чести — использовано' : 'Статья Чести'),
+          child: _loading
+              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              : Text(_usedAlready ? 'Статья Чести — использовано' : 'Статья Чести'),
         ),
       ),
     ]);
