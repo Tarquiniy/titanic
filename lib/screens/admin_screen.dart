@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:titanic/services/game_service.dart';
 import 'package:titanic/services/persistent_storage.dart';
 import 'login_screen.dart';
+import 'package:titanic/screens/movie_poll_admin_screen.dart';
 
 class AdminScreen extends StatefulWidget {
   const AdminScreen({Key? key}) : super(key: key);
@@ -35,6 +36,7 @@ class _AdminScreenState extends State<AdminScreen> {
       const DebatesTab(),
       const ResolutionsTab(),
       const ColorBanksTab(),
+      const MoviePollAdminScreen(),
     ];
 
     return Scaffold(
@@ -62,6 +64,7 @@ class _AdminScreenState extends State<AdminScreen> {
           BottomNavigationBarItem(icon: Icon(Icons.forum), label: 'Дебаты'),
           BottomNavigationBarItem(icon: Icon(Icons.gavel), label: 'Политрешения'),
           BottomNavigationBarItem(icon: Icon(Icons.account_balance), label: 'Банки цветов'),
+          BottomNavigationBarItem(icon: Icon(Icons.movie), label: 'Голосование'),
         ],
       ),
     );
@@ -576,6 +579,7 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
   // form controllers
   final TextEditingController _titleCtrl = TextEditingController();
   final TextEditingController _descCtrl = TextEditingController();
+  String _SelectedColor = 'зелёный';
   String _selectedColor = 'зелёный';
 
   // dynamic options fields
@@ -906,7 +910,7 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
                               ]),
                               const SizedBox(height: 6),
                               Text('Ставок: $cnt  •  Сумма: ${sum.toString()}'),
-                            ]),
+                            ]), 
                           ),
                           Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
                             Text(color, style: const TextStyle(color: Colors.black54)),
@@ -945,7 +949,7 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
               );
             },
           ),
-        ]),
+        ]), 
       ),
     );
   }

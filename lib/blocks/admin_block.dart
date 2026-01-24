@@ -1,4 +1,3 @@
-// lib/admin_block.dart
 import 'package:flutter/material.dart';
 
 class AdminBlock extends StatelessWidget {
@@ -27,6 +26,8 @@ class AdminBlock extends StatelessWidget {
         ElevatedButton(onPressed: () => _call('Создать опрос'), child: const Text('Создать опрос')),
         const SizedBox(height: 8),
         ElevatedButton(onPressed: () => _call('Создать аукцион'), child: const Text('Создать аукцион')),
+        const SizedBox(height: 8),
+        ElevatedButton(onPressed: () => _call('Голосование за фильм'), child: const Text('Голосование за фильм')),
         const SizedBox(height: 8),
         ElevatedButton(onPressed: () => _call('Статистика цветов'), child: const Text('Статистика цветов')),
       ],

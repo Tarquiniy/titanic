@@ -22,6 +22,8 @@ import 'login_screen.dart';
 // helper functions for honor article are in journalist_block.dart
 import 'package:titanic/blocks/journalist_block.dart';
 import 'package:titanic/blocks/public_figure_block.dart';
+import 'package:titanic/blocks/generic_blocks.dart';
+import 'package:titanic/blocks/movie_vote_block.dart';
 
 class HomeScreen extends StatefulWidget {
   final AppUser currentUser;
@@ -900,7 +902,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       final row = econs[index];
                       final first = (row['first_name'] ?? '').toString();
                       final last = (row['last_name'] ?? '').toString();
-                      final displayName = ('$first $last').trim().isEmpty ? (row['telegram_username'] ?? 'Без имени') : '$first $last';
+                      final displayName = ('\$first \$last').trim().isEmpty ? (row['telegram_username'] ?? 'Без имени') : '\$first \$last';
                       return ListTile(
                         title: Text(displayName),
                         onTap: () => Navigator.of(context).pop(row),
@@ -919,7 +921,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final first = (chosen['first_name'] ?? '').toString();
     final last = (chosen['last_name'] ?? '').toString();
-    final displayName = ('$first $last').trim().isEmpty ? (chosen['telegram_username'] ?? 'Без имени') : '$first $last';
+    final displayName = ('\$first \$last').trim().isEmpty ? (chosen['telegram_username'] ?? 'Без имени') : '\$first \$last';
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -930,7 +932,7 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             const Text('Стоимость: 10 войсов'),
             const SizedBox(height: 8),
-            Text('Получатель: $displayName'),
+            Text('Получатель: \$displayName'),
           ],
         ),
         actions: [
@@ -1268,6 +1270,34 @@ class _HomeScreenState extends State<HomeScreen> {
 
             honorAlreadyUsed: _honorUsedLocal ?? false,
           ),
+
+          const SizedBox(height: 12),
+          // Watched movie button (однократное использование) — реализован в generic_blocks.dart
+          WatchedMovieBlock(
+            currentUserId: user.id,
+            onChanged: () async {
+              // after successful change, refresh profile and journal
+              try {
+                await _refreshProfile();
+                await _loadJournal();
+              } catch (_) {}
+            },
+          ),
+
+          const SizedBox(height: 12),
+          // Movie voting block: visible/enabled internally for all users except roles containing 'голливуд'/'hollywood'
+          MovieVoteBlock(
+            currentUserId: user.id,
+            currentUserRole: user.role,
+            onVoted: () async {
+              // refresh profile and journal after voting
+              try {
+                await _refreshProfile();
+                await _loadJournal();
+              } catch (_) {}
+            },
+          ),
+
           const SizedBox(height: 20),
           const Text('Журнал', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
