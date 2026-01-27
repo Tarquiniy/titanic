@@ -1,19 +1,14 @@
 // lib/blocks/movie_vote_block.dart
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:titanic/theme.dart';
 
 /// Кнопка «Я посмотрел фильм и хочу голосовать»
-/// - Показывается всем пользователям, кроме тех, у кого роль содержит 'голливуд' (case-insensitive)
-/// - Проверяет наличие активного голосования (movie_polls where is_closed = false)
-/// - Проверяет, голосовал ли пользователь в этом голосовании (movie_poll_votes where poll_id = active.id and user_id = currentUserId)
-/// - При нажатии показывает форму: чекбоксы + поля ввода количества голосов напротив отмеченных вариантов
-/// - При подтверждении: суммарное количество введённых голосов списывается с v_balance (войсов) пользователя.
-///   Перед списанием проверяется, что v_balance >= сумме голосов; операция отклоняется, если денег не хватает.
-/// - Баланс войсов не может уйти ниже 0.
+/// Логика взаимодействия с Supabase оставлена прежней, изменён внешний вид.
 class MovieVoteBlock extends StatefulWidget {
   final String currentUserId;
   final String? currentUserRole;
-  final Future<void> Function()? onVoted; // optional callback for parent to refresh
+  final Future<void> Function()? onVoted;
 
   const MovieVoteBlock({
     Key? key,
@@ -30,7 +25,7 @@ class _MovieVoteBlockState extends State<MovieVoteBlock> {
   final supabase = Supabase.instance.client;
 
   bool _loading = true;
-  bool _disabled = true; // final visual disabled
+  bool _disabled = true;
   Map<String, dynamic>? _activePoll;
   List<Map<String, dynamic>> _options = [];
 
@@ -48,7 +43,6 @@ class _MovieVoteBlockState extends State<MovieVoteBlock> {
       _options = [];
     });
 
-    // role block: any role that contains "голливуд" or "hollywood" (case-insensitive) is excluded
     final roleRaw = widget.currentUserRole ?? '';
     final roleStr = roleRaw.toString().toLowerCase().trim();
     if (roleStr.contains('голливуд') || roleStr.contains('hollywood')) {
@@ -68,7 +62,6 @@ class _MovieVoteBlockState extends State<MovieVoteBlock> {
     }
 
     try {
-      // load active poll
       final poll = await supabase
           .from('movie_polls')
           .select()
@@ -81,13 +74,11 @@ class _MovieVoteBlockState extends State<MovieVoteBlock> {
         _activePoll = Map<String, dynamic>.from(poll);
         final pollId = (_activePoll!['id'] is int) ? _activePoll!['id'] as int : int.parse(_activePoll!['id'].toString());
 
-        // load options
         final opts = await supabase.from('movie_poll_options').select().eq('poll_id', pollId).order('position');
         if (opts is List) {
           _options = opts.map((e) => Map<String, dynamic>.from(e as Map)).toList();
         }
 
-        // check if user already voted for this poll
         final voted = await supabase
             .from('movie_poll_votes')
             .select('id')
@@ -110,7 +101,6 @@ class _MovieVoteBlockState extends State<MovieVoteBlock> {
           return;
         }
       } else {
-        // no active poll
         setState(() {
           _activePoll = null;
           _options = [];
@@ -139,7 +129,6 @@ class _MovieVoteBlockState extends State<MovieVoteBlock> {
 
     final int pollId = (_activePoll!['id'] is int) ? _activePoll!['id'] as int : int.parse(_activePoll!['id'].toString());
 
-    // Build inserts and compute totalV (total войсов to deduct)
     final List<Map<String, dynamic>> inserts = [];
     int totalV = 0;
     for (final entry in result.entries) {
@@ -162,14 +151,13 @@ class _MovieVoteBlockState extends State<MovieVoteBlock> {
     }
 
     if (inserts.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Нет выбранных вариантов')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Нет выбранных вариантов')));
       return;
     }
 
     setState(() => _loading = true);
 
     try {
-      // fetch current v_balance
       double currentV = 0.0;
       try {
         final row = await supabase.from('user_credentials').select('v_balance').eq('id', widget.currentUserId).maybeSingle();
@@ -183,7 +171,7 @@ class _MovieVoteBlockState extends State<MovieVoteBlock> {
       }
 
       if (currentV < totalV) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Недостаточно войсов: требуется $totalV, у вас ${currentV.toStringAsFixed(0)}')));
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Недостаточно войсов: требуется $totalV, у вас ${currentV.toStringAsFixed(0)}')));
         setState(() => _loading = false);
         return;
       }
@@ -191,7 +179,6 @@ class _MovieVoteBlockState extends State<MovieVoteBlock> {
       final int needed = totalV;
       final double newV = (currentV - needed).clamp(0, double.infinity);
 
-      // Try atomic-ish update: ensure we only update if v_balance >= needed (race protection)
       final updateRes = await supabase
           .from('user_credentials')
           .update({'v_balance': newV})
@@ -201,42 +188,38 @@ class _MovieVoteBlockState extends State<MovieVoteBlock> {
           .maybeSingle();
 
       if (updateRes == null) {
-        // race or insufficient funds
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Не удалось списать войсы — возможно, недостаточно средств. Попробуйте снова.')));
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Не удалось списать войсы — возможно, недостаточно средств. Попробуйте снова.')));
         setState(() => _loading = false);
         return;
       }
 
-      // Insert votes
       await supabase.from('movie_poll_votes').insert(inserts);
 
-      // feedback
-      await showDialog<void>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Спасибо'),
-          content: Text('Спасибо за участие в голосовании. Списано войсов: $needed'),
-          actions: [
-            ElevatedButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('OK')),
-          ],
-        ),
-      );
+      if (mounted) {
+        await showDialog<void>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Спасибо'),
+            content: Text('Спасибо за участие в голосовании. Списано войсов: $needed'),
+            actions: [
+              ElevatedButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('OK')),
+            ],
+          ),
+        );
+      }
 
-      // navigate back to root (optional, keep as previous behavior)
       if (mounted) {
         try {
           Navigator.of(context).popUntil((route) => route.isFirst);
         } catch (_) {}
       }
 
-      // notify parent
       if (widget.onVoted != null) {
         try {
           await widget.onVoted!();
         } catch (_) {}
       }
 
-      // refresh local state (button becomes disabled for this user)
       await _loadState();
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка при отправке голосов: $e')));
@@ -245,7 +228,6 @@ class _MovieVoteBlockState extends State<MovieVoteBlock> {
     }
   }
 
-  /// Shows dialog and returns map: indexString -> {'selected': bool, 'votes': int}
   Future<Map<String, Map<String, dynamic>>?> _showVoteDialogGetData() async {
     final List<bool> selected = List<bool>.filled(_options.length, false);
     final List<TextEditingController> countCtrls = List.generate(_options.length, (_) => TextEditingController(text: '1'));
@@ -285,7 +267,6 @@ class _MovieVoteBlockState extends State<MovieVoteBlock> {
                             decoration: const InputDecoration(labelText: 'Голоса'),
                             enabled: selected[idx],
                             onChanged: (s) {
-                              // allow only digits
                               final ns = s.replaceAll(RegExp(r'[^0-9]'), '');
                               if (ns != s) {
                                 countCtrls[idx].text = ns;
@@ -330,7 +311,6 @@ class _MovieVoteBlockState extends State<MovieVoteBlock> {
       },
     );
 
-    // dispose controllers
     for (final c in countCtrls) {
       try {
         c.dispose();
@@ -342,12 +322,15 @@ class _MovieVoteBlockState extends State<MovieVoteBlock> {
 
   @override
   Widget build(BuildContext context) {
+    final disabled = _loading || _disabled;
     return SizedBox(
       width: double.infinity,
       child: ElevatedButton(
-        onPressed: (_loading || _disabled) ? null : _onPressed,
-        style: ElevatedButton.styleFrom(backgroundColor: _disabled ? Colors.grey : Colors.teal),
-        child: _loading ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Я посмотрел фильм и хочу голосовать'),
+        onPressed: disabled ? null : _onPressed,
+        style: AppTheme.vintageButtonStyle(disabled: disabled),
+        child: _loading
+            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+            : const Text('Я посмотрел фильм и хочу голосовать'),
       ),
     );
   }

@@ -151,14 +151,13 @@ class RoleButtons extends StatelessWidget {
       );
 
       // keep old button for events if needed
-      buttons.add(_btn('События / Прослушал', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('События')))));
-    } else if (role == 'admin') {
+     if (role == 'admin') {
       buttons.add(_btn('Админ-панель', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Админ-панель'))), color: Colors.black87));
       buttons.add(_btn('Пополнить V/M', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Пополнение')))));
       buttons.add(_btn('Создать опрос', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Создать опрос')))));
       buttons.add(_btn('Создать аукцион', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Создание аукциона')))));
       buttons.add(_btn('Статистика цветов', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Статистика')))));
-    }
+    }}
 
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: buttons);
   }

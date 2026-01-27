@@ -1,4 +1,6 @@
 // lib/screens/home_screen.dart
+// Redesigned to use AppTheme (vintage widgets) and show actions depending on role.
+
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -24,6 +26,8 @@ import 'package:titanic/blocks/journalist_block.dart';
 import 'package:titanic/blocks/public_figure_block.dart';
 import 'package:titanic/blocks/generic_blocks.dart';
 import 'package:titanic/blocks/movie_vote_block.dart';
+
+import 'package:titanic/theme.dart';
 
 class HomeScreen extends StatefulWidget {
   final AppUser currentUser;
@@ -138,10 +142,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// Диалог "Вложиться в цвет" — показывает dropdown и поле суммы, вызывает RPC invest_in_color
   Future<void> showInvestInColorDialog(BuildContext context, String userId, {Future<void> Function()? onCompleted}) async {
-    // available colors
     const colors = ['красный', 'зелёный', 'жёлтый', 'синий', 'малиновый'];
 
-    // load current balance for prompt
     double mBalance = 0.0;
     try {
       final row = await supabase.from('user_credentials').select('m_balance').eq('id', userId).maybeSingle();
@@ -158,6 +160,8 @@ class _HomeScreenState extends State<HomeScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.paperCard,
+        titleTextStyle: TextStyle(color: AppTheme.ink, fontFamily: 'PlayfairDisplay', fontSize: 18, fontWeight: FontWeight.w700),
         title: const Text('Вложиться в цвет'),
         content: StatefulBuilder(builder: (ctx2, setStateDialog) {
           return Column(mainAxisSize: MainAxisSize.min, children: [
@@ -183,12 +187,12 @@ class _HomeScreenState extends State<HomeScreen> {
               )
             ]),
             const SizedBox(height: 8),
-            Text('Ваш баланс: ${mBalance.toStringAsFixed(0)}'),
+            Text('Ваш баланс: ${mBalance.toStringAsFixed(0)}', style: TextStyle(color: AppTheme.inkMuted)),
           ]);
         }),
         actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Отмена')),
-          ElevatedButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Вложиться')),
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: Text('Отмена', style: TextStyle(color: AppTheme.ink))),
+          ElevatedButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Вложиться'), style: AppTheme.vintageButtonStyle()),
         ],
       ),
     );
@@ -199,7 +203,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (confirmed != true) return;
 
-    // validate
     final raw = amtCtrl.text.trim().replaceAll(',', '.');
     final n = int.tryParse(raw);
     if (n == null || n <= 0) {
@@ -215,7 +218,6 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    // call RPC
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Отправка...')));
     try {
       final res = await supabase.rpc('invest_in_color', params: {'p_user': userId, 'p_color': selectedColor, 'p_amount': n});
@@ -232,7 +234,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (parsed != null && (parsed['status'] == 'ok' || parsed['status'] == 'OK')) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Вложено $n в банк цвета $selectedColor')));
-        // refresh profile / journal
         try {
           await _refreshProfile();
           await _loadJournal();
@@ -250,7 +251,6 @@ class _HomeScreenState extends State<HomeScreen> {
   /// Local insert to journal list (immediate UI) with dedupe, and best-effort DB insert.
   Future<void> _insertJournalEntry(String title, String message, {String? visibleRole}) async {
     final nowIso = DateTime.now().toUtc().toIso8601String();
-    // avoid duplicates: if identical title+message already present locally, skip
     final existsLocally = _journalEntries.any((e) {
       final t = (e['title'] ?? '').toString();
       final m = (e['message'] ?? '').toString();
@@ -269,14 +269,12 @@ class _HomeScreenState extends State<HomeScreen> {
       'created_at': nowIso,
     };
 
-    // show immediately in UI
     if (mounted) {
       setState(() {
         _journalEntries.insert(0, localRow);
       });
     }
 
-    // best-effort persist to DB
     try {
       await supabase.from('user_journal').insert({
         'user_id': user.id,
@@ -288,47 +286,37 @@ class _HomeScreenState extends State<HomeScreen> {
         'created_at': nowIso,
       });
     } catch (_) {
-      // ignore DB write errors (we already showed local)
+      // ignore DB write errors
     }
   }
 
   // -----------------------
-  // Journal loader & subscription
+  // Journal loader & subscription (unchanged logic)
   // -----------------------
 
-  /// Normalize server message text to Russian-friendly, compact form.
   String _normalizeJournalMessage(String msg) {
     if (msg.isEmpty) return msg;
     var out = msg;
-
     try {
-      // replace english/field names using case-insensitive regex (Dart: use caseSensitive:false)
       out = out.replaceAll(RegExp(r'Тип:\s*UPDATE', caseSensitive: false), 'Изменён статус');
       out = out.replaceAll(RegExp(r'Тип:\s*INSERT', caseSensitive: false), 'Создано');
       out = out.replaceAll(RegExp(r'Тип:\s*DELETE', caseSensitive: false), 'Удалено');
-
-      // v_balance -> Войсы, m_balance -> Майнды
       out = out.replaceAll(RegExp(r'<b>\s*v_balance\s*<\/b>', caseSensitive: false), 'Войсы');
       out = out.replaceAll(RegExp(r'\bv_balance\b', caseSensitive: false), 'Войсы');
       out = out.replaceAll(RegExp(r'<b>\s*m_balance\s*<\/b>', caseSensitive: false), 'Майнды');
       out = out.replaceAll(RegExp(r'\bm_balance\b', caseSensitive: false), 'Майнды');
-
-      // compact verbose patterns
       out = out.replaceAll('Тип: Изменён статус', 'Изменён статус');
       out = out.replaceAll(RegExp(r'\s+'), ' ');
       return out.trim();
     } catch (_) {
-      // on any regex error or unexpected input, return original cleaned whitespace
       return msg.replaceAll(RegExp(r'\s+'), ' ').trim();
     }
   }
 
-  /// Loads journal entries visible to current user using a single OR filter (robust).
   Future<void> _loadJournal() async {
     try {
       final role = (user.role ?? '').toString();
       final userId = user.id;
-      // Build OR filter string: include user-specific, role-specific, all, non_politician and NULL visible_role
       final orFilter = 'user_id.eq.$userId,visible_role.eq.$role,visible_role.eq.all,visible_role.eq.non_politician,visible_role.is.null';
 
       final res = await supabase
@@ -339,11 +327,9 @@ class _HomeScreenState extends State<HomeScreen> {
           .limit(200);
 
       if (res is List) {
-        // transform and dedupe here similarly to subscription transform
         final List<Map<String, dynamic>> rows = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
         final Map<String, Map<String, dynamic>> uniq = {};
         for (final r in rows) {
-          // transform title/message
           String title = (r['title'] ?? '').toString();
           String message = (r['message'] ?? '').toString();
 
@@ -352,7 +338,6 @@ class _HomeScreenState extends State<HomeScreen> {
           }
           message = _normalizeJournalMessage(message);
 
-          // filter bland profile change entries (unless message mentions add)
           if (title.toLowerCase().contains('изменение профиля') && !message.toLowerCase().contains('добав')) {
             continue;
           }
@@ -389,14 +374,10 @@ class _HomeScreenState extends State<HomeScreen> {
           _journalEntries = merged;
         });
       } else {
-        // ensure not leaving list empty
         if (!mounted) return setState(() => _journalEntries = []);
       }
     } catch (e) {
-      // If query fails, keep previous entries; print error for debugging
-      // (do not rethrow to avoid crash)
-      // ignore: avoid_print
-      print('loadJournal error: $e');
+      // ignore
     }
   }
 
@@ -408,13 +389,11 @@ class _HomeScreenState extends State<HomeScreen> {
             event: PostgresChangeEvent.insert,
             schema: 'public',
             table: 'user_journal',
-            // no server-side filter to avoid missing any rows; do client-side visibility filtering below
             callback: (payload) {
               final rec = payload.newRecord ?? payload.oldRecord;
               if (rec == null) return;
               final Map<String, dynamic> row = Map<String, dynamic>.from(rec as Map);
 
-              // client-side visibility check
               final String? vis = row['visible_role']?.toString();
               final String role = (user.role ?? '').toString();
               final bool visibleToUser = (row['user_id']?.toString() == user.id) ||
@@ -425,7 +404,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
               if (!visibleToUser) return;
 
-              // transform title/message same as loader
               String title = (row['title'] ?? '').toString();
               String message = (row['message'] ?? '').toString();
 
@@ -434,13 +412,12 @@ class _HomeScreenState extends State<HomeScreen> {
               }
               message = _normalizeJournalMessage(message);
               if (title.toLowerCase().contains('изменение профиля') && !message.toLowerCase().contains('добав')) {
-                return; // ignore bland profile changes
+                return;
               }
               if (message.toLowerCase().contains('добавлен') && title.toLowerCase().contains('изменение профиля')) {
                 title = 'Добавлен предмет';
               }
 
-              // dedupe: by id or by title+message+created_at
               final exists = _journalEntries.any((e) =>
                   (e['id'] != null && row['id'] != null && e['id'].toString() == row['id'].toString()) ||
                   ((e['title'] ?? '').toString().trim() == title.trim() &&
@@ -460,9 +437,7 @@ class _HomeScreenState extends State<HomeScreen> {
           )
           .subscribe();
     } catch (e) {
-      // ignore subscription errors but print for debugging
-      // ignore: avoid_print
-      print('subscribeToJournal error: $e');
+      // ignore
     }
   }
 
@@ -505,7 +480,6 @@ class _HomeScreenState extends State<HomeScreen> {
         });
       }
     } catch (_) {}
-    // update honor local state after refreshing profile
     await _loadHonorLocalState();
   }
 
@@ -598,7 +572,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
         final nowUtc = DateTime.now().toUtc();
 
-        // expired according to server -> mark inactive
         if (expires != null && nowUtc.isAfter(expires)) {
           if (!mounted) return;
           setState(() {
@@ -610,7 +583,6 @@ class _HomeScreenState extends State<HomeScreen> {
             _listenedToThisSpeech = false;
           });
 
-          // detect button availability transition -> log if previously disabled -> now enabled
           final newEnabled = _isSpeechButtonEnabled;
           if (_speechButtonPreviouslyEnabled == false && newEnabled == true) {
             await _insertJournalEntry('Речь жизни доступна!', 'Кнопка "Речь жизни" снова доступна для запуска.', visibleRole: 'politician');
@@ -619,7 +591,6 @@ class _HomeScreenState extends State<HomeScreen> {
           return;
         }
 
-        // normal branch: set server-provided values
         if (!mounted) return;
         setState(() {
           speechActive = active;
@@ -627,7 +598,6 @@ class _HomeScreenState extends State<HomeScreen> {
           speechExpiresAt = expires;
         });
 
-        // get active life speech id + listen state
         try {
           final life = await svc.getActiveLifeSpeech();
           if (life is Map<String, dynamic>) {
@@ -636,14 +606,12 @@ class _HomeScreenState extends State<HomeScreen> {
           await _checkIfListened();
         } catch (_) {}
 
-        // after applying server state, detect transition of button enabledness
         final newEnabled = _isSpeechButtonEnabled;
         if (_speechButtonPreviouslyEnabled == false && newEnabled == true) {
           await _insertJournalEntry('Речь жизни доступна!', 'Кнопка "Речь жизни" снова доступна для запуска.', visibleRole: 'politician');
         }
         _speechButtonPreviouslyEnabled = newEnabled;
       } else {
-        // response missing -> treat as inactive
         if (!mounted) return;
         setState(() {
           speechActive = false;
@@ -730,7 +698,6 @@ class _HomeScreenState extends State<HomeScreen> {
       _waitingForServerConfirm = true;
     });
 
-    // Immediately mark button previously disabled and publish journal entry visible to all politicians
     try {
       _speechButtonPreviouslyEnabled = false;
       await _insertJournalEntry('Произносится Речь жизни', 'Вы начали Речь жизни — кнопка недоступна, пока длится речь.', visibleRole: 'politician');
@@ -824,7 +791,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // -----------------------
-  // Actions for buttons
+  // Actions for buttons (unchanged)
   // -----------------------
   Future<void> _openTransferScreen() async {
     final res = await Navigator.of(context).push<bool>(MaterialPageRoute(builder: (_) => TransferVScreen(user: user)));
@@ -842,7 +809,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _openBuyTurnFlow() async {
-    // Reuse the implementation you had earlier (kept compact here).
     List<Map<String, dynamic>> econs = [];
     try {
       final res = await supabase
@@ -902,7 +868,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       final row = econs[index];
                       final first = (row['first_name'] ?? '').toString();
                       final last = (row['last_name'] ?? '').toString();
-                      final displayName = ('\$first \$last').trim().isEmpty ? (row['telegram_username'] ?? 'Без имени') : '\$first \$last';
+                      final displayName = ('$first $last').trim().isEmpty ? (row['telegram_username'] ?? 'Без имени') : '$first $last';
                       return ListTile(
                         title: Text(displayName),
                         onTap: () => Navigator.of(context).pop(row),
@@ -921,23 +887,25 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final first = (chosen['first_name'] ?? '').toString();
     final last = (chosen['last_name'] ?? '').toString();
-    final displayName = ('\$first \$last').trim().isEmpty ? (chosen['telegram_username'] ?? 'Без имени') : '\$first \$last';
+    final displayName = ('$first $last').trim().isEmpty ? (chosen['telegram_username'] ?? 'Без имени') : '$first $last';
 
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.paperCard,
+        titleTextStyle: TextStyle(color: AppTheme.ink, fontFamily: 'PlayfairDisplay', fontSize: 18, fontWeight: FontWeight.w700),
         title: const Text('Купить ход экономисту'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             const Text('Стоимость: 10 войсов'),
             const SizedBox(height: 8),
-            Text('Получатель: \$displayName'),
+            Text('Получатель: $displayName'),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Отмена')),
-          ElevatedButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Купить')),
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: Text('Отмена', style: TextStyle(color: AppTheme.ink))),
+          ElevatedButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Купить'), style: AppTheme.vintageButtonStyle()),
         ],
       ),
     );
@@ -945,7 +913,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (confirmed != true) return;
 
     try {
-      showDialog(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator()));
+      showDialog(context: context, barrierDismissible: false, builder: (_) => Center(child: Container(width: 60, height: 60, padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: AppTheme.paperCard, borderRadius: BorderRadius.circular(8)), child: const CircularProgressIndicator())));
       final rpcRes = await svc.rpcBuyEconomistTurn(fromUser: user.id, toUser: chosen['id'].toString(), cost: 10);
       Navigator.of(context).pop();
 
@@ -1040,6 +1008,8 @@ class _HomeScreenState extends State<HomeScreen> {
       builder: (ctx) {
         return StatefulBuilder(builder: (ctx2, setStateDialog) {
           return AlertDialog(
+            backgroundColor: AppTheme.paperCard,
+            titleTextStyle: TextStyle(color: AppTheme.ink, fontFamily: 'PlayfairDisplay', fontSize: 18, fontWeight: FontWeight.w700),
             title: const Text('Политрешение — ваш выбор'),
             content: SingleChildScrollView(
               child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -1054,7 +1024,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ]),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.of(ctx2).pop(false), child: const Text('Отмена')),
+              TextButton(onPressed: () => Navigator.of(ctx2).pop(false), child: Text('Отмена', style: TextStyle(color: AppTheme.ink))),
               ElevatedButton(onPressed: () async {
                 if (selectedOptionId == null) {
                   ScaffoldMessenger.of(ctx2).showSnackBar(const SnackBar(content: Text('Выберите вариант')));
@@ -1067,18 +1037,18 @@ class _HomeScreenState extends State<HomeScreen> {
                   return;
                 }
                 if (n > user.mBalance) {
-                  ScaffoldMessenger.of(ctx2).showSnackBar(SnackBar(content: Text('Недостаточно майндов: у вас ${user.mBalance.toStringAsFixed(2)}'))); 
+                  ScaffoldMessenger.of(ctx2).showSnackBar(SnackBar(content: Text('Недостаточно майндов: у вас ${user.mBalance.toStringAsFixed(2)}')));
                   return;
                 }
                 Navigator.of(ctx2).pop(true);
 
-                showDialog(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator()));
+                showDialog(context: context, barrierDismissible: false, builder: (_) => Center(child: Container(width: 60, height: 60, padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: AppTheme.paperCard, borderRadius: BorderRadius.circular(8)), child: const CircularProgressIndicator())));
                 try {
                   await svc.placeBetInResolution(resolutionId: resolutionId, optionId: selectedOptionId!, userId: user.id, amount: n);
                   await _refreshProfile();
                   await _loadResolutionState();
                   if (mounted) Navigator.of(context).pop();
-                  await showDialog(context: context, builder: (_) => AlertDialog(title: const Text('Спасибо за участие в политрешении'), content: const Text('Ваша ставка принята.'), actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('OK'))]));
+                  await showDialog(context: context, builder: (_) => AlertDialog(backgroundColor: AppTheme.paperCard, title: const Text('Спасибо за участие в политрешении'), content: const Text('Ваша ставка принята.'), actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('OK'))]));
                   if (!mounted) return;
                   setState(() {
                     _alreadyBetInActiveResolution = true;
@@ -1088,7 +1058,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   final msg = e is PostgrestException ? (e.message ?? e.toString()) : e.toString();
                   _showMessage('Ошибка при ставке: $msg');
                 }
-              }, child: const Text('Подтвердить ставку')),
+              }, child: const Text('Подтвердить ставку'), style: AppTheme.vintageButtonStyle()),
             ],
           );
         });
@@ -1165,144 +1135,215 @@ class _HomeScreenState extends State<HomeScreen> {
     }));
   }
 
+  Widget _balanceCard() => VintageCard(child: BalanceCard(user: user, userColor: _userColor));
+
   // -----------------------
   // BUILD
   // -----------------------
-  Widget _balanceCard() => BalanceCard(user: user, userColor: _userColor);
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppTheme.paper,
       appBar: AppBar(
-        title: const Text('Главная'),
+        backgroundColor: AppTheme.paperCard,
+        elevation: 0,
+        title: Text(
+          'Главная',
+          style: const TextStyle(fontFamily: 'PlayfairDisplay', fontWeight: FontWeight.w700),
+        ),
         actions: [
-          IconButton(tooltip: 'Инвентарь', icon: const Icon(Icons.inventory_2), onPressed: _openInventoryScreen),
-          IconButton(onPressed: _logout, icon: const Icon(Icons.logout)),
+          IconButton(tooltip: 'Перевести', icon: Icon(Icons.send, color: AppTheme.ink), onPressed: _openTransferScreen),
+          IconButton(tooltip: 'Инвентарь', icon: Icon(Icons.inventory_2, color: AppTheme.ink), onPressed: _openInventoryScreen),
+          IconButton(onPressed: _logout, icon: Icon(Icons.logout, color: AppTheme.ink)),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(12),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          _balanceCard(),
-          const SizedBox(height: 12),
-          RoleButtons(
-            user: user,
-            hasActiveDebate: _hasActiveDebate,
-            alreadyVotedInActiveDebate: _alreadyVotedInActiveDebate,
-            hasActiveResolution: _hasActiveResolution,
-            alreadyBetInActiveResolution: _alreadyBetInActiveResolution,
-            onTransfer: _openTransferScreen,
-            onBuyTurn: _openBuyTurnFlow,
-            onPurchaseEnterprise: _openPurchaseEnterprise,
-            onOpenDebates: _openDebates,
-            onOpenResolution: _onOpenResolutionPressed,
-            onStartSpeech: _onStartSpeechPressed,
-            listenWidget: ListenButton(
-              userId: user.id,
-              activeSpeechId: _activeSpeechId,
-              speechActorId: speechActorId,
-              speechActive: speechActive,
-              alreadyListened: _listenedToThisSpeech,
-              onListenComplete: (rpcResult) async {
-                if (rpcResult != null) {
-                  final status = rpcResult['status']?.toString() ?? '';
-                  if (status == 'changed_color') {
-                    final newColor = rpcResult['new_color']?.toString();
-                    final addedM = rpcResult['added_m'];
-                    if (newColor != null) {
+      body: RefreshIndicator(
+        color: AppTheme.deepGrey,
+        onRefresh: () async {
+          await _refreshProfile();
+          await _loadJournal();
+        },
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.all(14),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            _balanceCard(),
+            const SizedBox(height: 14),
+
+            VintageSection(
+              title: 'Доступные действия',
+              padding: const EdgeInsets.all(14),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                // RoleButtons still provides role-specific items where needed
+                RoleButtons(
+                  user: user,
+                  hasActiveDebate: _hasActiveDebate,
+                  alreadyVotedInActiveDebate: _alreadyVotedInActiveDebate,
+                  hasActiveResolution: _hasActiveResolution,
+                  alreadyBetInActiveResolution: _alreadyBetInActiveResolution,
+                  onTransfer: _openTransferScreen,
+                  onBuyTurn: _openBuyTurnFlow,
+                  onPurchaseEnterprise: _openPurchaseEnterprise,
+                  onOpenDebates: _openDebates,
+                  onOpenResolution: _onOpenResolutionPressed,
+                  onStartSpeech: _onStartSpeechPressed,
+                  listenWidget: ListenButton(
+                    userId: user.id,
+                    activeSpeechId: _activeSpeechId,
+                    speechActorId: speechActorId,
+                    speechActive: speechActive,
+                    alreadyListened: _listenedToThisSpeech,
+                    onListenComplete: (rpcResult) async {
+                      if (rpcResult != null) {
+                        final status = rpcResult['status']?.toString() ?? '';
+                        if (status == 'changed_color') {
+                          final newColor = rpcResult['new_color']?.toString();
+                          final addedM = rpcResult['added_m'];
+                          if (newColor != null) {
+                            if (!mounted) return;
+                            setState(() {
+                              _userColor = newColor;
+                              user = user.copyWith(color: newColor, mBalance: (addedM is num) ? user.mBalance + addedM.toDouble() : user.mBalance);
+                            });
+                          }
+                        } else if (status == 'kept_color') {
+                          final addedV = rpcResult['added_v'];
+                          if (addedV is num) {
+                            if (!mounted) return;
+                            setState(() {
+                              user = user.copyWith(vBalance: user.vBalance + addedV.toDouble());
+                            });
+                          }
+                        }
+                      }
+                      try {
+                        await _refreshProfile();
+                        await _fetchSpeechState();
+                      } catch (_) {}
                       if (!mounted) return;
                       setState(() {
-                        _userColor = newColor;
-                        user = user.copyWith(color: newColor, mBalance: (addedM is num) ? user.mBalance + addedM.toDouble() : user.mBalance);
+                        _listenedToThisSpeech = true;
                       });
-                    }
-                  } else if (status == 'kept_color') {
-                    final addedV = rpcResult['added_v'];
-                    if (addedV is num) {
-                      if (!mounted) return;
-                      setState(() {
-                        user = user.copyWith(vBalance: user.vBalance + addedV.toDouble());
-                      });
-                    }
-                  }
-                }
-                try {
-                  await _refreshProfile();
-                  await _fetchSpeechState();
-                } catch (_) {}
-                if (!mounted) return;
-                setState(() {
-                  _listenedToThisSpeech = true;
-                });
-              },
+                    },
+                  ),
+                  onHonorArticle: () async {
+                    await showHonorArticleDialog(context, user.id, onPublished: () async {
+                      try {
+                        await _refreshProfile();
+                        await _loadJournal();
+                        await _loadDebateState();
+                      } catch (_) {}
+                      try {
+                        final st = await fetchHonorState(user.id);
+                        if (!mounted) return;
+                        setState(() {
+                          _honorUsedLocal = (st['used'] as bool?) ?? true;
+                          _honorMBalance = (st['m_balance'] as double?) ?? user.mBalance;
+                          user = user.copyWith(mBalance: _honorMBalance ?? user.mBalance);
+                        });
+                      } catch (_) {}
+                    });
+                  },
+                  onInvestInColor: () async {
+                    await showInvestInColorDialog(context, user.id, onCompleted: () async {
+                      try {
+                        await _refreshProfile();
+                        await _loadJournal();
+                      } catch (_) {}
+                    });
+                  },
+                  honorAlreadyUsed: _honorUsedLocal ?? false,
+                ),
+
+                const SizedBox(height: 12),
+
+                // Responsive action buttons arranged using Wrap (flows to next line)
+                LayoutBuilder(builder: (ctx, cons) {
+                  final width = cons.maxWidth;
+                  final isWide = width > 520;
+                  final btnWidth = isWide ? (width - 24) / 2 : width;
+                  return Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: [
+                      // Buy turn - available to all
+                      VintageAction(label: 'Купить ход', icon: Icons.shopping_cart, onPressed: _openBuyTurnFlow, fixedWidth: btnWidth),
+                      // Invest - available to all but disabled if no mBalance
+                      VintageAction(label: 'Инвестировать', icon: Icons.palette, onPressed: () => showInvestInColorDialog(context, user.id), disabled: user.mBalance <= 0, fixedWidth: btnWidth),
+                      // Purchase enterprise - only for economists
+                      if (user.role == 'economist')
+                        VintageAction(label: 'Предприятие', icon: Icons.corporate_fare, onPressed: _openPurchaseEnterprise, fixedWidth: btnWidth)
+                      else
+                        // show disabled placeholder to keep layout consistent
+                        VintageAction(label: 'Предприятие', icon: Icons.corporate_fare, onPressed: null, disabled: true, fixedWidth: btnWidth),
+                      // Inventory always visible
+                      VintageAction(label: 'Инвентарь', icon: Icons.inventory_2, onPressed: _openInventoryScreen, fixedWidth: btnWidth),
+                      // Debates - visible only when active
+                      VintageAction(label: 'Дебаты', icon: Icons.forum, onPressed: _openDebates, disabled: !_hasActiveDebate, fixedWidth: btnWidth),
+                      // Resolution - visible when active
+                      VintageAction(label: 'Политрешение', icon: Icons.how_to_vote, onPressed: _onOpenResolutionPressed, disabled: !_hasActiveResolution, fixedWidth: btnWidth),
+                      // Start speech - only for politicians
+                      if (user.role == 'politician')
+                        VintageAction(label: 'Начать Речь жизни', icon: Icons.record_voice_over, onPressed: _onStartSpeechPressed, disabled: !_isSpeechButtonEnabled, fixedWidth: btnWidth)
+                      else
+                        VintageAction(label: 'Начать Речь жизни', icon: Icons.record_voice_over, onPressed: null, disabled: true, fixedWidth: btnWidth),
+                    ],
+                  );
+                }),
+
+                if (_rpcLoading)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: Row(children: [
+                      const SizedBox(width: 6),
+                      const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+                      const SizedBox(width: 12),
+                      Text('Ожидание сервера...', style: TextStyle(color: AppTheme.inkMuted)),
+                    ]),
+                  ),
+              ]),
             ),
 
-            // Pass honor article flow & used flag from parent
-            onHonorArticle: () async {
-              await showHonorArticleDialog(context, user.id, onPublished: () async {
-                // update profile, journal, debate state and local honor flag after success
-                try {
-                  await _refreshProfile();
-                  await _loadJournal();
-                  await _loadDebateState();
-                } catch (_) {}
-                try {
-                  final st = await fetchHonorState(user.id);
-                  if (!mounted) return;
-                  setState(() {
-                    _honorUsedLocal = (st['used'] as bool?) ?? true;
-                    _honorMBalance = (st['m_balance'] as double?) ?? user.mBalance;
-                    user = user.copyWith(mBalance: _honorMBalance ?? user.mBalance);
-                  });
-                } catch (_) {}
-              });
-            },
+            const SizedBox(height: 14),
 
-            // Pass invest-in-color flow
-            onInvestInColor: () async {
-              await showInvestInColorDialog(context, user.id, onCompleted: () async {
-                try {
-                  await _refreshProfile();
-                  await _loadJournal();
-                } catch (_) {}
-              });
-            },
+            VintageSection(
+              title: 'Кино',
+              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                WatchedMovieBlock(
+                  currentUserId: user.id,
+                  onChanged: () async {
+                    try {
+                      await _refreshProfile();
+                      await _loadJournal();
+                    } catch (_) {}
+                  },
+                ),
+                const SizedBox(height: 10),
+                MovieVoteBlock(
+                  currentUserId: user.id,
+                  currentUserRole: user.role,
+                  onVoted: () async {
+                    try {
+                      await _refreshProfile();
+                      await _loadJournal();
+                    } catch (_) {}
+                  },
+                ),
+              ]),
+            ),
 
-            honorAlreadyUsed: _honorUsedLocal ?? false,
-          ),
+            const SizedBox(height: 16),
 
-          const SizedBox(height: 12),
-          // Watched movie button (однократное использование) — реализован в generic_blocks.dart
-          WatchedMovieBlock(
-            currentUserId: user.id,
-            onChanged: () async {
-              // after successful change, refresh profile and journal
-              try {
-                await _refreshProfile();
-                await _loadJournal();
-              } catch (_) {}
-            },
-          ),
+            VintageSection(
+              title: 'Журнал',
+              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                JournalWidget(entries: _journalEntries),
+              ]),
+            ),
 
-          const SizedBox(height: 12),
-          // Movie voting block: visible/enabled internally for all users except roles containing 'голливуд'/'hollywood'
-          MovieVoteBlock(
-            currentUserId: user.id,
-            currentUserRole: user.role,
-            onVoted: () async {
-              // refresh profile and journal after voting
-              try {
-                await _refreshProfile();
-                await _loadJournal();
-              } catch (_) {}
-            },
-          ),
-
-          const SizedBox(height: 20),
-          const Text('Журнал', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          JournalWidget(entries: _journalEntries),
-        ]),
+            const SizedBox(height: 28),
+          ]),
+        ),
       ),
     );
   }

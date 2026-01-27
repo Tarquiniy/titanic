@@ -50,16 +50,6 @@ class _PublicFigureBlockState extends State<PublicFigureBlock> {
           ),
         ),
       ),
-      Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6.0),
-        child: SizedBox(
-          width: double.infinity,
-          child: ElevatedButton(
-            onPressed: widget.onOpen,
-            child: const Text('События / Прослушал'),
-          ),
-        ),
-      ),
     ]);
   }
 }
