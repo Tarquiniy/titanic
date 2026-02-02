@@ -1,74 +1,11 @@
-// lib/blocks/generic_blocks.dart
+// lib/blocks/watched_movie_block.dart
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:titanic/widgets/art_deco_button.dart';
 
-class EconomistBlock extends StatelessWidget {
-  final VoidCallback? onAnalytics;
-  const EconomistBlock({super.key, this.onAnalytics});
-  @override
-  Widget build(BuildContext context) => ElevatedButton(onPressed: onAnalytics, child: const Text('Аналитика / Ставки'));
-}
-
-class HollywoodBlock extends StatelessWidget {
-  final VoidCallback? onOpen;
-  const HollywoodBlock({super.key, this.onOpen});
-  @override
-  Widget build(BuildContext context) => ElevatedButton(onPressed: onOpen, child: const Text('Контент / Ставки'));
-}
-
-class MafiaBlock extends StatelessWidget {
-  final VoidCallback? onManage;
-  const MafiaBlock({super.key, this.onManage});
-  @override
-  Widget build(BuildContext context) => ElevatedButton(onPressed: onManage, child: const Text('Управление предприятиями'));
-}
-
-class PublicFigureBlock extends StatelessWidget {
-  final VoidCallback? onOpen;
-  const PublicFigureBlock({super.key, this.onOpen});
-  @override
-  Widget build(BuildContext context) => ElevatedButton(onPressed: onOpen, child: const Text('События / Прослушал'));
-}
-
-class AdminBlock extends StatelessWidget {
-  final Future<void> Function()? onRefresh;
-  final void Function(String label)? onAction;
-  const AdminBlock({super.key, this.onRefresh, this.onAction});
-
-  void _call(String label) {
-    if (onAction != null) onAction!(label);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(children: [
-      ElevatedButton(onPressed: () => _call('Админ-панель'), style: ElevatedButton.styleFrom(backgroundColor: Colors.black87), child: const Text('Админ-панель')),
-      const SizedBox(height: 8),
-      ElevatedButton(onPressed: () => _call('Пополнить V/M'), child: const Text('Пополнить V/M')),
-      const SizedBox(height: 8),
-      ElevatedButton(onPressed: () => _call('Создать опрос'), child: const Text('Создать опрос')),
-      const SizedBox(height: 8),
-      ElevatedButton(onPressed: () => _call('Создать аукцион'), child: const Text('Создать аукцион')),
-      const SizedBox(height: 8),
-      ElevatedButton(onPressed: () => _call('Статистика цветов'), child: const Text('Статистика цветов')),
-    ]);
-  }
-}
-
-/// Виджет: кнопка «Я посмотрел фильм и изменился»
-///
-/// - Доступна для каждого пользователя ровно один раз (флаг в БД: used_watched_movie).
-/// - Показывает диалог: «Сменить цвет?»
-///   - Если "Нет": закрывает диалог и возвращает на главный экран (popUntil(isFirst)).
-///   - Если "Да": показывает выбор цвета (красный, зелёный, жёлтый, синий, малиновый) + подтверждение.
-///     После подтверждения обновляет поле `color` у пользователя и устанавливает `used_watched_movie = true`.
-///
-/// Примечания по совместимости:
-/// - Предполагается таблица `user_credentials` с колонками `id`, `color` и `used_watched_movie` (boolean/text).
-/// - Значение `color` записывается как метка цвета ('красный', 'зелёный', ...), чтобы соответствовать остальной логике приложения.
 class WatchedMovieBlock extends StatefulWidget {
   final String currentUserId;
-  final Future<void> Function()? onChanged; // callback после успешного изменения (опционально)
+  final Future<void> Function()? onChanged;
 
   const WatchedMovieBlock({super.key, required this.currentUserId, this.onChanged});
 
@@ -121,14 +58,12 @@ class _WatchedMovieBlockState extends State<WatchedMovieBlock> {
           _currentColor = color;
         });
       } else {
-        // no row -> disable button to be safe
         setState(() {
           _usedAlready = true;
           _currentColor = null;
         });
       }
     } catch (e) {
-      // on error, disable button to avoid accidental repeats
       debugPrint('WatchedMovieBlock._loadState error: $e');
       setState(() {
         _usedAlready = true;
@@ -155,7 +90,6 @@ class _WatchedMovieBlockState extends State<WatchedMovieBlock> {
     );
 
     if (change != true) {
-      // Пользователь выбрал "Нет" — закрываем диалог и возвращаемся на главный экран (попUntil первый маршрут)
       try {
         if (!mounted) return;
         Navigator.of(context).popUntil((route) => route.isFirst);
@@ -163,11 +97,9 @@ class _WatchedMovieBlockState extends State<WatchedMovieBlock> {
       return;
     }
 
-    // Пользователь выбрал "Да" — показываем выбор цвета
     final selected = await _showColorPickerDialog();
     if (selected == null) return;
 
-    // Подтверждение
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -182,7 +114,6 @@ class _WatchedMovieBlockState extends State<WatchedMovieBlock> {
 
     if (confirmed != true) return;
 
-    // Выполняем обновление в БД
     setState(() => _loading = true);
     try {
       final upd = await supabase.from('user_credentials').update({
@@ -190,7 +121,6 @@ class _WatchedMovieBlockState extends State<WatchedMovieBlock> {
         'used_watched_movie': true,
       }).eq('id', widget.currentUserId).select().maybeSingle();
 
-      // Успех — обновляем локальный стейт и вызываем callback
       setState(() {
         _usedAlready = true;
         _currentColor = selected;
@@ -248,12 +178,11 @@ class _WatchedMovieBlockState extends State<WatchedMovieBlock> {
   Widget build(BuildContext context) {
     return SizedBox(
       width: double.infinity,
-      child: ElevatedButton(
+      child: ArtDecoButton(
+        text: _loading ? 'Загрузка...' : (_usedAlready ? 'Я посмотрел фильм — уже использовано' : 'Я посмотрел фильм и изменился'),
         onPressed: (_loading || _usedAlready) ? null : _onPressed,
-        style: ElevatedButton.styleFrom(backgroundColor: _usedAlready ? Colors.grey : Colors.teal),
-        child: _loading
-            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-            : Text(_usedAlready ? 'Я посмотрел фильм — уже использовано' : 'Я посмотрел фильм и изменился'),
+        loading: _loading,
+        primary: !_usedAlready,
       ),
     );
   }

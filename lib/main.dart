@@ -1,8 +1,8 @@
 // lib/main.dart
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:titanic/theme/app_theme.dart';
 import 'screens/login_screen.dart';
-import 'package:titanic/theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -22,9 +22,13 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Titanic',
-      theme: AppTheme.vintageTheme,
+      theme: TitanicTheme.themeData,
       debugShowCheckedModeBanner: false,
       home: const LoginScreen(),
+      themeMode: ThemeMode.dark,
+      darkTheme: TitanicTheme.themeData.copyWith(
+        // Дополнительные настройки для темного режима
+      ),
     );
   }
 }

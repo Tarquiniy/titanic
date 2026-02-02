@@ -27,6 +27,11 @@ class RoleButtons extends StatelessWidget {
   /// Callback для "Вложиться в цвет"
   final VoidCallbackAsync? onInvestInColor;
 
+  /// Callback для силы мафии: одноразовая принудительная передача V/M
+  final VoidCallbackAsync? onMafiaOffer;
+  /// Флаг — уже использована ли сила мафии (если известно)
+  final bool mafiaOfferUsed;
+
   const RoleButtons({
     Key? key,
     required this.user,
@@ -40,13 +45,15 @@ class RoleButtons extends StatelessWidget {
     this.onHonorArticle,
     this.honorAlreadyUsed = false,
     this.onInvestInColor,
+    this.onMafiaOffer,
+    this.mafiaOfferUsed = false,
     this.hasActiveDebate = false,
     this.alreadyVotedInActiveDebate = false,
     this.hasActiveResolution = false,
     this.alreadyBetInActiveResolution = false,
   }) : super(key: key);
 
-  Widget _btn(String title, VoidCallback onTap, {Color? color}) => Padding(
+  Widget _btn(String title, VoidCallback? onTap, {Color? color}) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 6.0),
         child: SizedBox(
           width: double.infinity,
@@ -63,6 +70,7 @@ class RoleButtons extends StatelessWidget {
     final role = (user.role ?? '').toString().toLowerCase();
     final List<Widget> buttons = [];
 
+    // Основные общие кнопки
     buttons.add(_btn('Перевести Войсы', onTransfer));
     buttons.add(_btn('Купить ход экономисту', () => onBuyTurn()));
 
@@ -70,11 +78,12 @@ class RoleButtons extends StatelessWidget {
       buttons.add(_btn('Купить предприятие', onPurchaseEnterprise));
     }
 
-    // дебаты для не-политиков и не-журналистов (журналист — Статья Чести)
+    // Дебаты (для не-политиков и не-журналистов)
     if (role != 'politician' && role != 'journalist' && hasActiveDebate && !alreadyVotedInActiveDebate) {
       buttons.add(_btn('Дебаты', () => onOpenDebates()));
     }
 
+    // Политические решения (для политиков)
     if (role == 'politician' && hasActiveResolution && !alreadyBetInActiveResolution) {
       buttons.add(_btn('Выбрать политрешение', onOpenResolution, color: Colors.blueAccent));
     }
@@ -86,16 +95,33 @@ class RoleButtons extends StatelessWidget {
       ));
     }
 
-    // Listen widget delegated (already a widget)
+    // Listen widget (delegated)
     buttons.add(Padding(padding: const EdgeInsets.symmetric(vertical: 6.0), child: listenWidget));
 
-    // role-specific extras
-    if (role == 'economist') {
-      buttons.add(_btn('Аналитика / Ставки', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Аналитика')))));
-    } else if (role == 'hollywood') {
-      buttons.add(_btn('Контент / Ставки', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Hollywood')))));
-    } else if (role == 'mafia') {
-      buttons.add(_btn('Управление предприятиями', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Предприятия')))));
+    // Role-specific extras
+    if (role == 'mafia') {
+      // Новая кнопка: Предложение от которого нельзя отказаться
+      buttons.add(
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6.0),
+          child: SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: mafiaOfferUsed ? Colors.grey : Colors.redAccent),
+              onPressed: (mafiaOfferUsed || onMafiaOffer == null)
+                  ? null
+                  : () async {
+                      try {
+                        await onMafiaOffer!();
+                      } catch (e) {
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
+                      }
+                    },
+              child: Text(mafiaOfferUsed ? 'Предложение — использовано' : 'Предложение от которого нельзя отказаться'),
+            ),
+          ),
+        ),
+      );
     } else if (role == 'journalist') {
       // Статья Чести
       final disabled = honorAlreadyUsed;
@@ -149,15 +175,17 @@ class RoleButtons extends StatelessWidget {
           ),
         ),
       );
+    }
 
-      // keep old button for events if needed
-     if (role == 'admin') {
-      buttons.add(_btn('Админ-панель', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Админ-панель'))), color: Colors.black87));
+    // Отдельный набор для админов (не вложенный внутрь public_figure)
+    if (role == 'admin') {
+      buttons.add(_btn('Админ-панель', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Админ-панель'))),
+          color: Colors.black87));
       buttons.add(_btn('Пополнить V/M', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Пополнение')))));
       buttons.add(_btn('Создать опрос', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Создать опрос')))));
       buttons.add(_btn('Создать аукцион', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Создание аукциона')))));
       buttons.add(_btn('Статистика цветов', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Статистика')))));
-    }}
+    }
 
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: buttons);
   }

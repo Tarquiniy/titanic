@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:titanic/widgets/art_deco_button.dart';
 
 class AdminBlock extends StatelessWidget {
   final Future<void> Function()? onRefresh;
@@ -15,21 +16,54 @@ class AdminBlock extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        ElevatedButton(
-          onPressed: () => _call('Админ-панель'),
-          style: ElevatedButton.styleFrom(backgroundColor: Colors.black87),
-          child: const Text('Админ-панель'),
+        SizedBox(
+          width: double.infinity,
+          child: ArtDecoButton(
+            text: 'Админ-панель',
+            onPressed: () => _call('Админ-панель'),
+            primary: true,
+          ),
         ),
         const SizedBox(height: 8),
-        ElevatedButton(onPressed: () => _call('Пополнить V/M'), child: const Text('Пополнить V/M')),
+        SizedBox(
+          width: double.infinity,
+          child: ArtDecoButton(
+            text: 'Пополнить V/M',
+            onPressed: () => _call('Пополнить V/M'),
+          ),
+        ),
         const SizedBox(height: 8),
-        ElevatedButton(onPressed: () => _call('Создать опрос'), child: const Text('Создать опрос')),
+        SizedBox(
+          width: double.infinity,
+          child: ArtDecoButton(
+            text: 'Создать опрос',
+            onPressed: () => _call('Создать опрос'),
+          ),
+        ),
         const SizedBox(height: 8),
-        ElevatedButton(onPressed: () => _call('Создать аукцион'), child: const Text('Создать аукцион')),
+        SizedBox(
+          width: double.infinity,
+          child: ArtDecoButton(
+            text: 'Создать аукцион',
+            onPressed: () => _call('Создать аукцион'),
+          ),
+        ),
         const SizedBox(height: 8),
-        ElevatedButton(onPressed: () => _call('Голосование за фильм'), child: const Text('Голосование за фильм')),
+        SizedBox(
+          width: double.infinity,
+          child: ArtDecoButton(
+            text: 'Голосование за фильм',
+            onPressed: () => _call('Голосование за фильм'),
+          ),
+        ),
         const SizedBox(height: 8),
-        ElevatedButton(onPressed: () => _call('Статистика цветов'), child: const Text('Статистика цветов')),
+        SizedBox(
+          width: double.infinity,
+          child: ArtDecoButton(
+            text: 'Статистика цветов',
+            onPressed: () => _call('Статистика цветов'),
+          ),
+        ),
       ],
     );
   }

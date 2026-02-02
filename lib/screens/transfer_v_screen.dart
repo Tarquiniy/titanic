@@ -1,12 +1,11 @@
 // lib/transfer_v_screen.dart
 //
 // Экран для перевода V-поинтов между пользователями.
-// Интерфейс оставлен без изменений. Внесены только логические правки:
-// - при загрузке получателей теперь возвращаются все пользователи, кроме
-//   текущего отправителя (включая политиков), чтобы можно было выбирать любых.
-// - на этапе перевода добавлена проверка: если отправитель имеет роль
-//   'politician' и получатель также 'politician', перевод запрещён.
-//   Все остальные комбинации ролей допускаются.
+// ЛОГИКА:
+// - politician НЕ ВИДИТ politician в списке
+// - Hollywood видит всех и может переводить сам себе
+// - politician -> politician запрещено (кроме Hollywood)
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/app_user.dart';
@@ -21,21 +20,28 @@ class TransferVScreen extends StatefulWidget {
 
 class _TransferVScreenState extends State<TransferVScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _toCtrl = TextEditingController(); // показывает display name, не username
+  final _toCtrl = TextEditingController();
   final _amountCtrl = TextEditingController();
+
   bool _loading = false;
   String? _error;
 
   final supabase = Supabase.instance.client;
 
-  // полный список получателей (мап содержит id, telegram_username, first_name, last_name)
-  // видимый список после клиентской фильтрации
   List<Map<String, dynamic>> _visibleRecipients = [];
   bool _recipientsLoading = false;
   String _recipientsError = '';
 
-  // выбранный получатель (содержит telegram_username и id и т.д.)
   Map<String, dynamic>? _selectedRecipient;
+
+  bool get _isHollywoodSender {
+    final role = widget.user.role.toString().toLowerCase();
+    return role.contains('hollywood') || role.contains('голливуд');
+  }
+
+  bool get _isPoliticianSender {
+    return widget.user.role.toString() == 'politician';
+  }
 
   @override
   void initState() {
@@ -57,33 +63,41 @@ class _TransferVScreenState extends State<TransferVScreen> {
     });
 
     try {
-      // Запрашиваем всех пользователей, кроме текущего отправителя.
-      // Важно: не исключаем по роли на клиенте — разрешаем выбирать любого,
-      // а бизнес-правило о запрете переводов политиков политиками реализовано
-      // при попытке перевода.
       final dynamic res = await supabase
           .from('user_credentials')
           .select('id, telegram_username, first_name, last_name, role')
-          .neq('id', widget.user.id)
           .order('first_name');
 
       List<Map<String, dynamic>> list = [];
 
       if (res is List) {
         list = res
-            .where((e) => e != null)
-            .map<Map<String, dynamic>>((e) {
-              if (e is Map) return Map<String, dynamic>.from(e);
-              return <String, dynamic>{};
-            })
-            .where((m) => m.isNotEmpty)
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
             .toList();
-      } else {
-        list = [];
+      }
+
+      final List<Map<String, dynamic>> filtered = [];
+
+      for (final user in list) {
+        final userId = user['id'];
+        final userRole = (user['role'] ?? '').toString();
+
+        // ❌ Политик не видит других политиков
+        if (_isPoliticianSender && userRole == 'politician') {
+          continue;
+        }
+
+        // ❌ Никто кроме Hollywood не видит сам себя
+        if (!_isHollywoodSender && userId == widget.user.id) {
+          continue;
+        }
+
+        filtered.add(user);
       }
 
       setState(() {
-        _visibleRecipients = List<Map<String, dynamic>>.from(list);
+        _visibleRecipients = filtered;
       });
     } on PostgrestException catch (e) {
       setState(() {
@@ -92,7 +106,7 @@ class _TransferVScreenState extends State<TransferVScreen> {
       });
     } catch (e) {
       setState(() {
-        _recipientsError = 'Ошибка при загрузке получателей: ${e.toString()}';
+        _recipientsError = 'Ошибка при загрузке получателей: $e';
         _visibleRecipients = [];
       });
     } finally {
@@ -102,29 +116,24 @@ class _TransferVScreenState extends State<TransferVScreen> {
     }
   }
 
-  // Показываем modal sheet со списком и поиском
   Future<void> _openRecipientPicker() async {
     if (_recipientsLoading) return;
 
-    final Map<String, dynamic>? selected = await showModalBottomSheet<Map<String, dynamic>>(
+    final selected = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
-      builder: (_) {
-        return RecipientPickerSheet(recipients: _visibleRecipients);
-      },
+      builder: (_) => RecipientPickerSheet(recipients: _visibleRecipients),
     );
 
     if (selected != null) {
-      // Запоминаем выбранного получателя и показываем его display name в поле
       _selectedRecipient = selected;
       final first = (selected['first_name'] ?? '').toString();
       final last = (selected['last_name'] ?? '').toString();
-      final displayName = ('$first $last').trim().isEmpty ? 'Без имени' : '$first $last';
-      _toCtrl.text = displayName;
+      _toCtrl.text =
+          ('$first $last').trim().isEmpty ? 'Без имени' : '$first $last';
     }
   }
 
-  // Выполнение перевода: используем telegram_username из _selectedRecipient
   Future<void> _transfer() async {
     setState(() => _error = null);
 
@@ -135,30 +144,30 @@ class _TransferVScreenState extends State<TransferVScreen> {
       return;
     }
 
-    // Проверка бизнес-правила:
-    // - если отправитель role == 'politician' и получатель role == 'politician' => запрет
-    final senderRole = (widget.user.role).toString();
+    final senderRole = widget.user.role.toString();
     final recipientRole = (_selectedRecipient!['role'] ?? '').toString();
-    if (senderRole == 'politician' && recipientRole == 'politician') {
-      setState(() => _error = 'Пользователям с ролью politician запрещено переводить другим пользователям с ролью politician');
+
+    if (senderRole == 'politician' &&
+        recipientRole == 'politician' &&
+        !_isHollywoodSender) {
+      setState(() => _error =
+          'Пользователям с ролью politician запрещено переводить другим пользователям с ролью politician');
       return;
     }
 
-    final toUsername = (_selectedRecipient!['telegram_username'] ?? '').toString();
+    final toUsername =
+        (_selectedRecipient!['telegram_username'] ?? '').toString();
+
     if (toUsername.isEmpty) {
-      setState(() => _error = 'У получателя не задан идентификатор, выберите другого получателя');
+      setState(() => _error = 'У получателя не задан идентификатор');
       return;
     }
 
-    final amountValue = double.tryParse(_amountCtrl.text.replaceAll(',', '.'));
-    if (amountValue == null) {
-      setState(() => _error = 'Неверный формат суммы');
-      return;
-    }
-    final amount = amountValue;
+    final amount =
+        double.tryParse(_amountCtrl.text.replaceAll(',', '.'));
 
-    if (amount <= 0) {
-      setState(() => _error = 'Сумма должна быть больше нуля');
+    if (amount == null || amount <= 0) {
+      setState(() => _error = 'Некорректная сумма');
       return;
     }
 
@@ -168,41 +177,13 @@ class _TransferVScreenState extends State<TransferVScreen> {
     }
 
     setState(() => _loading = true);
+
     try {
-      final dynamic rpcRes = await supabase.rpc('transfer_v_points', params: {
+      await supabase.rpc('transfer_v_points', params: {
         'from_user': widget.user.id,
         'to_username': toUsername,
         'amount': amount,
       });
-
-      // Попробуем извлечь from_balance из ответа RPC
-      Map<String, dynamic>? parsed;
-      if (rpcRes is Map<String, dynamic>) {
-        parsed = rpcRes;
-      } else if (rpcRes is List && rpcRes.isNotEmpty && rpcRes[0] is Map) {
-        parsed = Map<String, dynamic>.from(rpcRes[0] as Map);
-      } else {
-        parsed = null;
-      }
-
-      if (parsed != null && parsed.containsKey('from_balance')) {
-        final fb = parsed['from_balance'];
-        if (fb is num) widget.user.vBalance = (fb).toDouble();
-      } else {
-        // Если RPC не вернул балансы — ре-fetchим профиль отправителя
-        final profile = await supabase
-            .from('user_credentials')
-            .select('v_balance, m_balance')
-            .eq('id', widget.user.id)
-            .maybeSingle();
-
-        if (profile is Map<String, dynamic>) {
-          final v = profile['v_balance'];
-          final m = profile['m_balance'];
-          if (v is num) widget.user.vBalance = (v).toDouble();
-          if (m is num) widget.user.mBalance = (m).toDouble();
-        }
-      }
 
       if (!mounted) return;
       Navigator.of(context).pop(true);
@@ -241,39 +222,34 @@ class _TransferVScreenState extends State<TransferVScreen> {
                     labelText: 'Получатель',
                     suffixIcon: Icon(Icons.expand_more),
                   ),
-                  validator: (_) {
-                    if (_selectedRecipient == null) return 'Выберите получателя';
-                    return null;
-                  },
+                  validator: (_) =>
+                      _selectedRecipient == null ? 'Выберите получателя' : null,
                 ),
               ),
             ),
             const SizedBox(height: 12),
             TextFormField(
               controller: _amountCtrl,
-              decoration: const InputDecoration(labelText: 'Количество V'),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration:
+                  const InputDecoration(labelText: 'Количество V'),
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
               validator: _validateAmount,
             ),
             const SizedBox(height: 12),
             if (_recipientsLoading) const LinearProgressIndicator(),
             if (_recipientsError.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Text(_recipientsError, style: const TextStyle(color: Colors.red)),
-              ),
+              Text(_recipientsError,
+                  style: const TextStyle(color: Colors.red)),
             if (_error != null)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Text(_error!, style: const TextStyle(color: Colors.red)),
-              ),
+              Text(_error!, style: const TextStyle(color: Colors.red)),
             const SizedBox(height: 8),
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: _loading ? null : _transfer,
                 child: _loading
-                    ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    ? const CircularProgressIndicator(color: Colors.white)
                     : const Text('Перевести'),
               ),
             ),
@@ -284,10 +260,11 @@ class _TransferVScreenState extends State<TransferVScreen> {
   }
 }
 
-/// Bottom sheet: список и поиск получателей (без упоминания username в UI)
+/// Bottom sheet: список и поиск получателей
 class RecipientPickerSheet extends StatefulWidget {
   final List<Map<String, dynamic>> recipients;
-  const RecipientPickerSheet({Key? key, required this.recipients}) : super(key: key);
+  const RecipientPickerSheet({Key? key, required this.recipients})
+      : super(key: key);
 
   @override
   State<RecipientPickerSheet> createState() => _RecipientPickerSheetState();
@@ -304,85 +281,46 @@ class _RecipientPickerSheetState extends State<RecipientPickerSheet> {
     _searchCtrl.addListener(_onSearchChanged);
   }
 
-  @override
-  void dispose() {
-    _searchCtrl.removeListener(_onSearchChanged);
-    _searchCtrl.dispose();
-    super.dispose();
-  }
-
   void _onSearchChanged() {
-    final q = _searchCtrl.text.trim().toLowerCase();
+    final q = _searchCtrl.text.toLowerCase();
     setState(() {
-      if (q.isEmpty) {
-        _filtered = List.from(widget.recipients);
-      } else {
-        _filtered = widget.recipients.where((row) {
-          final username = (row['telegram_username'] ?? '').toString().toLowerCase();
-          final first = (row['first_name'] ?? '').toString().toLowerCase();
-          final last = (row['last_name'] ?? '').toString().toLowerCase();
-          return username.contains(q) || first.contains(q) || last.contains(q);
-        }).toList();
-      }
+      _filtered = widget.recipients.where((row) {
+        return (row['first_name'] ?? '').toString().toLowerCase().contains(q) ||
+            (row['last_name'] ?? '').toString().toLowerCase().contains(q);
+      }).toList();
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return SafeArea(
-      child: FractionallySizedBox(
-        heightFactor: 0.85,
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _searchCtrl,
-                      decoration: InputDecoration(
-                        hintText: 'Поиск по имени или фамилии',
-                        prefixIcon: const Icon(Icons.search),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                        isDense: true,
-                        contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  TextButton(
-                    onPressed: () {
-                      _searchCtrl.clear();
-                      FocusScope.of(context).unfocus();
-                    },
-                    child: const Text('Очистить'),
-                  ),
-                ],
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: TextField(
+              controller: _searchCtrl,
+              decoration: const InputDecoration(
+                hintText: 'Поиск',
+                prefixIcon: Icon(Icons.search),
               ),
             ),
-            const Divider(height: 0),
-            Expanded(
-              child: _filtered.isEmpty
-                  ? Center(child: Text('Ничего не найдено', style: theme.textTheme.bodyLarge))
-                  : ListView.separated(
-                      itemCount: _filtered.length,
-                      separatorBuilder: (_, __) => const Divider(height: 0),
-                      itemBuilder: (context, index) {
-                        final row = _filtered[index];
-                        final first = (row['first_name'] ?? '').toString();
-                        final last = (row['last_name'] ?? '').toString();
-                        final displayName = ('$first $last').trim().isEmpty ? 'Без имени' : '$first $last';
-                        return ListTile(
-                          title: Text(displayName),
-                          onTap: () => Navigator.of(context).pop(row),
-                        );
-                      },
-                    ),
+          ),
+          Expanded(
+            child: ListView.builder(
+              itemCount: _filtered.length,
+              itemBuilder: (_, i) {
+                final row = _filtered[i];
+                final name =
+                    '${row['first_name'] ?? ''} ${row['last_name'] ?? ''}'.trim();
+                return ListTile(
+                  title: Text(name.isEmpty ? 'Без имени' : name),
+                  onTap: () => Navigator.pop(context, row),
+                );
+              },
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

@@ -1,11 +1,10 @@
 // lib/screens/home_screen.dart
-// Redesigned to use AppTheme (vintage widgets) and show actions depending on role.
-
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:titanic/blocks/blood_poker_block.dart';
 
 import 'package:titanic/models/app_user.dart';
 import 'package:titanic/services/game_service.dart';
@@ -24,10 +23,24 @@ import 'login_screen.dart';
 // helper functions for honor article are in journalist_block.dart
 import 'package:titanic/blocks/journalist_block.dart';
 import 'package:titanic/blocks/public_figure_block.dart';
-import 'package:titanic/blocks/generic_blocks.dart';
+// Убрали импорт generic_blocks.dart
 import 'package:titanic/blocks/movie_vote_block.dart';
+import 'package:titanic/blocks/watched_movie_block.dart'; // НОВЫЙ ИМПОРТ
 
-import 'package:titanic/theme.dart';
+// <-- NEW: hollywood block (contains "Оплатить фильм (100 M)" + "Потратить майнды на рецензию")
+import 'package:titanic/blocks/hollywood_block.dart';
+
+// <-- NEW: mafia block (contains "Предложение от которого нельзя отказаться")
+import 'package:titanic/blocks/mafia_block.dart' as mafia_blocks;
+
+// Theme and custom widgets
+import 'package:titanic/theme/app_theme.dart';
+
+// extracted widgets/dialogs (assume находятся в lib/screens/)
+import 'home_profile_card.dart';
+import 'home_role_section.dart';
+import 'home_journal_section.dart';
+import 'home_dialogs.dart';
 
 class HomeScreen extends StatefulWidget {
   final AppUser currentUser;
@@ -87,6 +100,15 @@ class _HomeScreenState extends State<HomeScreen> {
   bool? _honorUsedLocal;
   double? _honorMBalance;
 
+  // Helper function to check if user has a specific role
+  bool _isRole(String role) {
+    final userRole = user.role?.toLowerCase() ?? '';
+    final roleLower = role.toLowerCase();
+    return userRole.contains(roleLower) ||
+        (roleLower == 'мафия' &&
+            (userRole.contains('mafia') || userRole.contains('мафия')));
+  }
+
   @override
   void initState() {
     super.initState();
@@ -125,6 +147,27 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
+  Future<void> _onBloodPokerBetPlaced() async {
+    try {
+      await _refreshProfile();
+      await _loadJournal();
+    } catch (_) {}
+  }
+
+  Future<void> _onDebtCollected() async {
+    try {
+      await _refreshProfile();
+      await _loadJournal();
+    } catch (_) {}
+  }
+
+  Future<void> _onMafiaEnterpriseBought() async {
+    try {
+      await _refreshProfile();
+      await _loadJournal();
+    } catch (_) {}
+  }
+
   /// Load honor article state (used flag + m_balance) and update local user copy.
   Future<void> _loadHonorLocalState() async {
     try {
@@ -140,117 +183,14 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  /// Диалог "Вложиться в цвет" — показывает dropdown и поле суммы, вызывает RPC invest_in_color
-  Future<void> showInvestInColorDialog(BuildContext context, String userId, {Future<void> Function()? onCompleted}) async {
-    const colors = ['красный', 'зелёный', 'жёлтый', 'синий', 'малиновый'];
-
-    double mBalance = 0.0;
-    try {
-      final row = await supabase.from('user_credentials').select('m_balance').eq('id', userId).maybeSingle();
-      if (row is Map<String, dynamic>) {
-        final mb = row['m_balance'];
-        if (mb is num) mBalance = mb.toDouble();
-        else if (mb is String) mBalance = double.tryParse(mb.replaceAll(',', '.')) ?? 0.0;
-      }
-    } catch (_) {}
-
-    String? selectedColor = colors.first;
-    final TextEditingController amtCtrl = TextEditingController();
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.paperCard,
-        titleTextStyle: TextStyle(color: AppTheme.ink, fontFamily: 'PlayfairDisplay', fontSize: 18, fontWeight: FontWeight.w700),
-        title: const Text('Вложиться в цвет'),
-        content: StatefulBuilder(builder: (ctx2, setStateDialog) {
-          return Column(mainAxisSize: MainAxisSize.min, children: [
-            DropdownButtonFormField<String>(
-              value: selectedColor,
-              items: colors.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
-              onChanged: (v) => setStateDialog(() => selectedColor = v),
-              decoration: const InputDecoration(labelText: 'Выберите цвет'),
-            ),
-            const SizedBox(height: 12),
-            Row(children: [
-              Expanded(
-                child: TextField(
-                  controller: amtCtrl,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: false),
-                  decoration: const InputDecoration(labelText: 'Сумма', hintText: '0', isDense: true),
-                ),
-              ),
-              const SizedBox(width: 8),
-              const Padding(
-                padding: EdgeInsets.only(top: 14.0),
-                child: Text('Майндов'),
-              )
-            ]),
-            const SizedBox(height: 8),
-            Text('Ваш баланс: ${mBalance.toStringAsFixed(0)}', style: TextStyle(color: AppTheme.inkMuted)),
-          ]);
-        }),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: Text('Отмена', style: TextStyle(color: AppTheme.ink))),
-          ElevatedButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Вложиться'), style: AppTheme.vintageButtonStyle()),
-        ],
-      ),
-    );
-
-    try {
-      amtCtrl.dispose();
-    } catch (_) {}
-
-    if (confirmed != true) return;
-
-    final raw = amtCtrl.text.trim().replaceAll(',', '.');
-    final n = int.tryParse(raw);
-    if (n == null || n <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Введите положительное целое число')));
-      return;
-    }
-    if (n > mBalance.floor()) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Недостаточно майндов')));
-      return;
-    }
-    if (selectedColor == null || selectedColor!.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Выберите цвет')));
-      return;
-    }
-
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Отправка...')));
-    try {
-      final res = await supabase.rpc('invest_in_color', params: {'p_user': userId, 'p_color': selectedColor, 'p_amount': n});
-      Map<String, dynamic>? parsed;
-      if (res is Map<String, dynamic>) parsed = res;
-      else if (res is List && res.isNotEmpty && res[0] is Map) parsed = Map<String, dynamic>.from(res[0]);
-      else if (res is String) {
-        try {
-          parsed = Map<String, dynamic>.from(jsonDecode(res) as Map);
-        } catch (_) {
-          parsed = null;
-        }
-      }
-
-      if (parsed != null && (parsed['status'] == 'ok' || parsed['status'] == 'OK')) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Вложено $n в банк цвета $selectedColor')));
-        try {
-          await _refreshProfile();
-          await _loadJournal();
-        } catch (_) {}
-        if (onCompleted != null) await onCompleted();
-      } else {
-        final msg = parsed != null ? (parsed['message'] ?? parsed.toString()) : 'Неожиданный ответ от сервера';
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка: $msg')));
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка RPC: $e')));
-    }
-  }
-
   /// Local insert to journal list (immediate UI) with dedupe, and best-effort DB insert.
-  Future<void> _insertJournalEntry(String title, String message, {String? visibleRole}) async {
+  Future<void> _insertJournalEntry(
+    String title,
+    String message, {
+    String? visibleRole,
+  }) async {
     final nowIso = DateTime.now().toUtc().toIso8601String();
+    // avoid duplicates: if identical title+message already present locally, skip
     final existsLocally = _journalEntries.any((e) {
       final t = (e['title'] ?? '').toString();
       final m = (e['message'] ?? '').toString();
@@ -269,12 +209,14 @@ class _HomeScreenState extends State<HomeScreen> {
       'created_at': nowIso,
     };
 
+    // show immediately in UI
     if (mounted) {
       setState(() {
         _journalEntries.insert(0, localRow);
       });
     }
 
+    // best-effort persist to DB
     try {
       await supabase.from('user_journal').insert({
         'user_id': user.id,
@@ -286,62 +228,104 @@ class _HomeScreenState extends State<HomeScreen> {
         'created_at': nowIso,
       });
     } catch (_) {
-      // ignore DB write errors
+      // ignore DB write errors (we already showed local)
     }
   }
 
   // -----------------------
-  // Journal loader & subscription (unchanged logic)
+  // Journal loader & subscription
   // -----------------------
 
+  /// Normalize server message text to Russian-friendly, compact form.
   String _normalizeJournalMessage(String msg) {
     if (msg.isEmpty) return msg;
     var out = msg;
+
     try {
-      out = out.replaceAll(RegExp(r'Тип:\s*UPDATE', caseSensitive: false), 'Изменён статус');
-      out = out.replaceAll(RegExp(r'Тип:\s*INSERT', caseSensitive: false), 'Создано');
-      out = out.replaceAll(RegExp(r'Тип:\s*DELETE', caseSensitive: false), 'Удалено');
-      out = out.replaceAll(RegExp(r'<b>\s*v_balance\s*<\/b>', caseSensitive: false), 'Войсы');
-      out = out.replaceAll(RegExp(r'\bv_balance\b', caseSensitive: false), 'Войсы');
-      out = out.replaceAll(RegExp(r'<b>\s*m_balance\s*<\/b>', caseSensitive: false), 'Майнды');
-      out = out.replaceAll(RegExp(r'\bm_balance\b', caseSensitive: false), 'Майнды');
+      // replace english/field names using case-insensitive regex (Dart: use caseSensitive:false)
+      out = out.replaceAll(
+        RegExp(r'Тип:\s*UPDATE', caseSensitive: false),
+        'Изменён статус',
+      );
+      out = out.replaceAll(
+        RegExp(r'Тип:\s*INSERT', caseSensitive: false),
+        'Создано',
+      );
+      out = out.replaceAll(
+        RegExp(r'Тип:\s*DELETE', caseSensitive: false),
+        'Удалено',
+      );
+
+      // v_balance -> Войсы, m_balance -> Майнды
+      out = out.replaceAll(
+        RegExp(r'<b>\s*v_balance\s*<\/b>', caseSensitive: false),
+        'Войсы',
+      );
+      out = out.replaceAll(
+        RegExp(r'\bv_balance\b', caseSensitive: false),
+        'Войсы',
+      );
+      out = out.replaceAll(
+        RegExp(r'<b>\s*m_balance\s*<\/b>', caseSensitive: false),
+        'Майнды',
+      );
+      out = out.replaceAll(
+        RegExp(r'\bm_balance\b', caseSensitive: false),
+        'Майнды',
+      );
+
+      // compact verbose patterns
       out = out.replaceAll('Тип: Изменён статус', 'Изменён статус');
       out = out.replaceAll(RegExp(r'\s+'), ' ');
       return out.trim();
     } catch (_) {
+      // on any regex error or unexpected input, return original cleaned whitespace
       return msg.replaceAll(RegExp(r'\s+'), ' ').trim();
     }
   }
 
+  /// Loads journal entries visible to current user using a single OR filter (robust).
   Future<void> _loadJournal() async {
     try {
       final role = (user.role ?? '').toString();
       final userId = user.id;
-      final orFilter = 'user_id.eq.$userId,visible_role.eq.$role,visible_role.eq.all,visible_role.eq.non_politician,visible_role.is.null';
+      // Build OR filter string: include user-specific, role-specific, all, non_politician and NULL visible_role
+      final orFilter =
+          'user_id.eq.$userId,visible_role.eq.$role,visible_role.eq.all,visible_role.eq.non_politician,visible_role.is.null';
 
       final res = await supabase
           .from('user_journal')
-          .select('id,user_id,visible_role,actor_id,title,message,metadata,created_at')
+          .select(
+            'id,user_id,visible_role,actor_id,title,message,metadata,created_at',
+          )
           .or(orFilter)
           .order('created_at', ascending: false)
           .limit(200);
 
       if (res is List) {
-        final List<Map<String, dynamic>> rows = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+        // transform and dedupe here similarly to subscription transform
+        final List<Map<String, dynamic>> rows = res
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
         final Map<String, Map<String, dynamic>> uniq = {};
         for (final r in rows) {
+          // transform title/message
           String title = (r['title'] ?? '').toString();
           String message = (r['message'] ?? '').toString();
 
-          if (title.toLowerCase().contains('speech_state') || title.toLowerCase().contains('речь')) {
+          if (title.toLowerCase().contains('speech_state') ||
+              title.toLowerCase().contains('речь')) {
             title = 'Речь жизни';
           }
           message = _normalizeJournalMessage(message);
 
-          if (title.toLowerCase().contains('изменение профиля') && !message.toLowerCase().contains('добав')) {
+          // filter bland profile change entries (unless message mentions add)
+          if (title.toLowerCase().contains('изменение профиля') &&
+              !message.toLowerCase().contains('добав')) {
             continue;
           }
-          if (message.toLowerCase().contains('добавлен') && title.toLowerCase().contains('изменение профиля')) {
+          if (message.toLowerCase().contains('добавлен') &&
+              title.toLowerCase().contains('изменение профиля')) {
             title = 'Добавлен предмет';
           }
 
@@ -374,10 +358,14 @@ class _HomeScreenState extends State<HomeScreen> {
           _journalEntries = merged;
         });
       } else {
+        // ensure not leaving list empty
         if (!mounted) return setState(() => _journalEntries = []);
       }
     } catch (e) {
-      // ignore
+      // If query fails, keep previous entries; print error for debugging
+      // (do not rethrow to avoid crash)
+      // ignore: avoid_print
+      print('loadJournal error: $e');
     }
   }
 
@@ -389,14 +377,19 @@ class _HomeScreenState extends State<HomeScreen> {
             event: PostgresChangeEvent.insert,
             schema: 'public',
             table: 'user_journal',
+            // no server-side filter to avoid missing any rows; do client-side visibility filtering below
             callback: (payload) {
               final rec = payload.newRecord ?? payload.oldRecord;
               if (rec == null) return;
-              final Map<String, dynamic> row = Map<String, dynamic>.from(rec as Map);
+              final Map<String, dynamic> row = Map<String, dynamic>.from(
+                rec as Map,
+              );
 
+              // client-side visibility check
               final String? vis = row['visible_role']?.toString();
               final String role = (user.role ?? '').toString();
-              final bool visibleToUser = (row['user_id']?.toString() == user.id) ||
+              final bool visibleToUser =
+                  (row['user_id']?.toString() == user.id) ||
                   vis == null ||
                   vis == 'all' ||
                   vis == role ||
@@ -404,25 +397,36 @@ class _HomeScreenState extends State<HomeScreen> {
 
               if (!visibleToUser) return;
 
+              // transform title/message same as loader
               String title = (row['title'] ?? '').toString();
               String message = (row['message'] ?? '').toString();
 
-              if (title.toLowerCase().contains('speech_state') || title.toLowerCase().contains('речь')) {
+              if (title.toLowerCase().contains('speech_state') ||
+                  title.toLowerCase().contains('речь')) {
                 title = 'Речь жизни';
               }
               message = _normalizeJournalMessage(message);
-              if (title.toLowerCase().contains('изменение профиля') && !message.toLowerCase().contains('добав')) {
-                return;
+              if (title.toLowerCase().contains('изменение профиля') &&
+                  !message.toLowerCase().contains('добав')) {
+                return; // ignore bland profile changes
               }
-              if (message.toLowerCase().contains('добавлен') && title.toLowerCase().contains('изменение профиля')) {
+              if (message.toLowerCase().contains('добавлен') &&
+                  title.toLowerCase().contains('изменение профиля')) {
                 title = 'Добавлен предмет';
               }
 
-              final exists = _journalEntries.any((e) =>
-                  (e['id'] != null && row['id'] != null && e['id'].toString() == row['id'].toString()) ||
-                  ((e['title'] ?? '').toString().trim() == title.trim() &&
-                      (e['message'] ?? '').toString().trim() == message.trim() &&
-                      (e['created_at'] ?? '').toString().trim() == (row['created_at'] ?? '').toString().trim()));
+              // dedupe: by id or by title+message+created_at
+              final exists = _journalEntries.any(
+                (e) =>
+                    (e['id'] != null &&
+                        row['id'] != null &&
+                        e['id'].toString() == row['id'].toString()) ||
+                    ((e['title'] ?? '').toString().trim() == title.trim() &&
+                        (e['message'] ?? '').toString().trim() ==
+                            message.trim() &&
+                        (e['created_at'] ?? '').toString().trim() ==
+                            (row['created_at'] ?? '').toString().trim()),
+              );
               if (exists) return;
 
               final toInsert = Map<String, dynamic>.from(row);
@@ -437,7 +441,9 @@ class _HomeScreenState extends State<HomeScreen> {
           )
           .subscribe();
     } catch (e) {
-      // ignore
+      // ignore subscription errors but print for debugging
+      // ignore: avoid_print
+      print('subscribeToJournal error: $e');
     }
   }
 
@@ -448,7 +454,9 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final profileRaw = await supabase
           .from('user_credentials')
-          .select('v_balance, m_balance, first_name, last_name, telegram_username, role, color, region')
+          .select(
+            'v_balance, m_balance, first_name, last_name, telegram_username, role, color, region',
+          )
           .eq('id', user.id)
           .maybeSingle();
 
@@ -480,6 +488,7 @@ class _HomeScreenState extends State<HomeScreen> {
         });
       }
     } catch (_) {}
+    // update honor local state after refreshing profile
     await _loadHonorLocalState();
   }
 
@@ -510,7 +519,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _startDebatePolling({int seconds = 5}) {
     _debatePollTimer?.cancel();
-    _debatePollTimer = Timer.periodic(Duration(seconds: seconds), (_) => _loadDebateState());
+    _debatePollTimer = Timer.periodic(
+      Duration(seconds: seconds),
+      (_) => _loadDebateState(),
+    );
   }
 
   // -----------------------
@@ -527,10 +539,18 @@ class _HomeScreenState extends State<HomeScreen> {
           .maybeSingle();
 
       if (active is Map<String, dynamic> && active['id'] != null) {
-        final int id = (active['id'] is int) ? (active['id'] as int) : int.parse(active['id'].toString());
+        final int id = (active['id'] is int)
+            ? (active['id'] as int)
+            : int.parse(active['id'].toString());
         bool already = false;
         try {
-          final bet = await supabase.from('political_bets').select('id').eq('resolution_id', id).eq('user_id', user.id).limit(1).maybeSingle();
+          final bet = await supabase
+              .from('political_bets')
+              .select('id')
+              .eq('resolution_id', id)
+              .eq('user_id', user.id)
+              .limit(1)
+              .maybeSingle();
           already = bet != null;
         } catch (_) {
           already = false;
@@ -554,7 +574,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _startResolutionPolling({int seconds = 5}) {
     _resolutionPollTimer?.cancel();
-    _resolutionPollTimer = Timer.periodic(Duration(seconds: seconds), (_) => _loadResolutionState());
+    _resolutionPollTimer = Timer.periodic(
+      Duration(seconds: seconds),
+      (_) => _loadResolutionState(),
+    );
   }
 
   // -----------------------
@@ -568,10 +591,13 @@ class _HomeScreenState extends State<HomeScreen> {
         final active = (res['active'] as bool?) ?? false;
         final actor = res['actor_id']?.toString();
         final expiresRaw = res['expires_at'];
-        final expires = expiresRaw != null ? DateTime.tryParse(expiresRaw.toString()) : null;
+        final expires = expiresRaw != null
+            ? DateTime.tryParse(expiresRaw.toString())
+            : null;
 
         final nowUtc = DateTime.now().toUtc();
 
+        // expired according to server -> mark inactive
         if (expires != null && nowUtc.isAfter(expires)) {
           if (!mounted) return;
           setState(() {
@@ -583,14 +609,20 @@ class _HomeScreenState extends State<HomeScreen> {
             _listenedToThisSpeech = false;
           });
 
+          // detect button availability transition -> log if previously disabled -> now enabled
           final newEnabled = _isSpeechButtonEnabled;
           if (_speechButtonPreviouslyEnabled == false && newEnabled == true) {
-            await _insertJournalEntry('Речь жизни доступна!', 'Кнопка "Речь жизни" снова доступна для запуска.', visibleRole: 'politician');
+            await _insertJournalEntry(
+              'Речь жизни доступна!',
+              'Кнопка "Речь жизни" снова доступна для запуска.',
+              visibleRole: 'politician',
+            );
           }
           _speechButtonPreviouslyEnabled = newEnabled;
           return;
         }
 
+        // normal branch: set server-provided values
         if (!mounted) return;
         setState(() {
           speechActive = active;
@@ -598,20 +630,29 @@ class _HomeScreenState extends State<HomeScreen> {
           speechExpiresAt = expires;
         });
 
+        // get active life speech id + listen state
         try {
           final life = await svc.getActiveLifeSpeech();
           if (life is Map<String, dynamic>) {
-            _activeSpeechId = (life['id'] is int) ? (life['id'] as int) : int.tryParse(life['id']?.toString() ?? '');
+            _activeSpeechId = (life['id'] is int)
+                ? (life['id'] as int)
+                : int.tryParse(life['id']?.toString() ?? '');
           }
           await _checkIfListened();
         } catch (_) {}
 
+        // after applying server state, detect transition of button enabledness
         final newEnabled = _isSpeechButtonEnabled;
         if (_speechButtonPreviouslyEnabled == false && newEnabled == true) {
-          await _insertJournalEntry('Речь жизни доступна!', 'Кнопка "Речь жизни" снова доступна для запуска.', visibleRole: 'politician');
+          await _insertJournalEntry(
+            'Речь жизни доступна!',
+            'Кнопка "Речь жизни" снова доступна для запуска.',
+            visibleRole: 'politician',
+          );
         }
         _speechButtonPreviouslyEnabled = newEnabled;
       } else {
+        // response missing -> treat as inactive
         if (!mounted) return;
         setState(() {
           speechActive = false;
@@ -623,7 +664,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
         final newEnabled = _isSpeechButtonEnabled;
         if (_speechButtonPreviouslyEnabled == false && newEnabled == true) {
-          await _insertJournalEntry('Речь жизни доступна!', 'Кнопка "Речь жизни" снова доступна для запуска.', visibleRole: 'politician');
+          await _insertJournalEntry(
+            'Речь жизни доступна!',
+            'Кнопка "Речь жизни" снова доступна для запуска.',
+            visibleRole: 'politician',
+          );
         }
         _speechButtonPreviouslyEnabled = newEnabled;
       }
@@ -632,7 +677,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _startPollingSpeechState({int seconds = 3}) {
     _pollTimer?.cancel();
-    _pollTimer = Timer.periodic(Duration(seconds: seconds), (_) => _fetchSpeechState());
+    _pollTimer = Timer.periodic(
+      Duration(seconds: seconds),
+      (_) => _fetchSpeechState(),
+    );
   }
 
   void _stopPollingSpeechState() {
@@ -647,7 +695,13 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
     try {
-      final res = await supabase.from('life_speech_listeners').select('id').eq('speech_id', sid).eq('user_id', user.id).limit(1).maybeSingle();
+      final res = await supabase
+          .from('life_speech_listeners')
+          .select('id')
+          .eq('speech_id', sid)
+          .eq('user_id', user.id)
+          .limit(1)
+          .maybeSingle();
       final listened = res != null;
       if (!mounted) return setState(() => _listenedToThisSpeech = listened);
     } catch (_) {}
@@ -698,15 +752,23 @@ class _HomeScreenState extends State<HomeScreen> {
       _waitingForServerConfirm = true;
     });
 
+    // Immediately mark button previously disabled and publish journal entry visible to all politicians
     try {
       _speechButtonPreviouslyEnabled = false;
-      await _insertJournalEntry('Произносится Речь жизни', 'Вы начали Речь жизни — кнопка недоступна, пока длится речь.', visibleRole: 'politician');
+      await _insertJournalEntry(
+        'Произносится Речь жизни',
+        'Вы начали Речь жизни — кнопка недоступна, пока длится речь.',
+        visibleRole: 'politician',
+      );
     } catch (_) {}
 
     DateTime? applyExpires = clientNextSlotUtc;
 
     try {
-      final dynamic rpcRes = await svc.rpcStartSpeech(actorId: user.id, durationSeconds: secondsForRpc);
+      final dynamic rpcRes = await svc.rpcStartSpeech(
+        actorId: user.id,
+        durationSeconds: secondsForRpc,
+      );
 
       Map<String, dynamic>? parsed;
       if (rpcRes is Map<String, dynamic>) {
@@ -725,7 +787,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (parsed != null) {
         final serverExpiresRaw = parsed['expires_at'];
-        final serverExpires = serverExpiresRaw != null ? DateTime.tryParse(serverExpiresRaw.toString()) : null;
+        final serverExpires = serverExpiresRaw != null
+            ? DateTime.tryParse(serverExpiresRaw.toString())
+            : null;
         DateTime chosen = serverExpires ?? clientNextSlotUtc;
         if (clientNextSlotUtc.isAfter(chosen)) chosen = clientNextSlotUtc;
         applyExpires = chosen;
@@ -741,7 +805,8 @@ class _HomeScreenState extends State<HomeScreen> {
         await _fetchSpeechState();
         if (!mounted) return;
         setState(() {
-          if (speechExpiresAt == null || clientNextSlotUtc.isAfter(speechExpiresAt!)) {
+          if (speechExpiresAt == null ||
+              clientNextSlotUtc.isAfter(speechExpiresAt!)) {
             speechExpiresAt = clientNextSlotUtc;
           }
           _waitingForServerConfirm = false;
@@ -757,10 +822,14 @@ class _HomeScreenState extends State<HomeScreen> {
         };
         await svc.upsertSpeechState(obj: upsertObj);
       } catch (e) {
-        _showMessage('Не удалось сохранить состояние речи на сервере (права). Кнопка всё равно будет локально заблокирована.');
+        _showMessage(
+          'Не удалось сохранить состояние речи на сервере (права). Кнопка всё равно будет локально заблокирована.',
+        );
       }
 
-      _showMessage('Речь запущена. Кнопка будет недоступна до ${_formatYe(applyExpires)} (YEKT)');
+      _showMessage(
+        'Речь запущена. Кнопка будет недоступна до ${_formatYe(applyExpires)} (YEKT)',
+      );
     } on PostgrestException catch (e) {
       final msg = e.message;
       if (msg != null && msg.contains('Speech already active')) {
@@ -791,17 +860,21 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // -----------------------
-  // Actions for buttons (unchanged)
+  // Actions for buttons
   // -----------------------
   Future<void> _openTransferScreen() async {
-    final res = await Navigator.of(context).push<bool>(MaterialPageRoute(builder: (_) => TransferVScreen(user: user)));
+    final res = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => TransferVScreen(user: user)),
+    );
     if (res == true) {
       await _refreshProfile();
     }
   }
 
   Future<void> _openInventoryScreen() async {
-    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => InventoryScreen(user: user)));
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => InventoryScreen(user: user)));
     if (!mounted) return;
     setState(() {
       _pendingInventoryItems.removeWhere((it) => it['owner_id'] == user.id);
@@ -809,155 +882,25 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _openBuyTurnFlow() async {
-    List<Map<String, dynamic>> econs = [];
-    try {
-      final res = await supabase
-          .from('user_credentials')
-          .select('id, first_name, last_name, telegram_username')
-          .eq('role', 'economist')
-          .neq('id', user.id)
-          .order('first_name');
-      if (res is List) {
-        econs = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
-      }
-    } catch (e) {
-      _showMessage('Не удалось загрузить список экономистов: $e');
-      return;
-    }
-
-    if (econs.isEmpty) {
-      _showMessage('Нет доступных экономистов для покупки хода.');
-      return;
-    }
-
-    final Map<String, dynamic>? chosen = await showModalBottomSheet<Map<String, dynamic>>(
+    await openBuyTurnFlow(
       context: context,
-      isScrollControlled: true,
-      builder: (ctx) {
-        return SafeArea(
-          child: FractionallySizedBox(
-            heightFactor: 0.85,
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          decoration: const InputDecoration(
-                            hintText: 'Поиск экономиста',
-                            prefixIcon: Icon(Icons.search),
-                            border: OutlineInputBorder(),
-                            isDense: true,
-                          ),
-                          onChanged: (q) {},
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Отмена')),
-                    ],
-                  ),
-                ),
-                const Divider(height: 0),
-                Expanded(
-                  child: ListView.separated(
-                    itemCount: econs.length,
-                    separatorBuilder: (_, __) => const Divider(height: 0),
-                    itemBuilder: (context, index) {
-                      final row = econs[index];
-                      final first = (row['first_name'] ?? '').toString();
-                      final last = (row['last_name'] ?? '').toString();
-                      final displayName = ('$first $last').trim().isEmpty ? (row['telegram_username'] ?? 'Без имени') : '$first $last';
-                      return ListTile(
-                        title: Text(displayName),
-                        onTap: () => Navigator.of(context).pop(row),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
+      supabase: supabase,
+      svc: svc,
+      currentUser: user,
+      onRefreshProfile: () async {
+        await _refreshProfile();
+        await _loadJournal();
       },
+      showMessage: _showMessage,
     );
-
-    if (chosen == null) return;
-
-    final first = (chosen['first_name'] ?? '').toString();
-    final last = (chosen['last_name'] ?? '').toString();
-    final displayName = ('$first $last').trim().isEmpty ? (chosen['telegram_username'] ?? 'Без имени') : '$first $last';
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.paperCard,
-        titleTextStyle: TextStyle(color: AppTheme.ink, fontFamily: 'PlayfairDisplay', fontSize: 18, fontWeight: FontWeight.w700),
-        title: const Text('Купить ход экономисту'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('Стоимость: 10 войсов'),
-            const SizedBox(height: 8),
-            Text('Получатель: $displayName'),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: Text('Отмена', style: TextStyle(color: AppTheme.ink))),
-          ElevatedButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Купить'), style: AppTheme.vintageButtonStyle()),
-        ],
-      ),
-    );
-
-    if (confirmed != true) return;
-
-    try {
-      showDialog(context: context, barrierDismissible: false, builder: (_) => Center(child: Container(width: 60, height: 60, padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: AppTheme.paperCard, borderRadius: BorderRadius.circular(8)), child: const CircularProgressIndicator())));
-      final rpcRes = await svc.rpcBuyEconomistTurn(fromUser: user.id, toUser: chosen['id'].toString(), cost: 10);
-      Navigator.of(context).pop();
-
-      if (rpcRes == null) {
-        _showMessage('Неожиданный ответ сервера');
-        return;
-      }
-
-      final status = (rpcRes['status'] ?? rpcRes['result'] ?? '').toString().toLowerCase();
-      if (status.contains('ok') || status.contains('success') || status == 'ok') {
-        _showMessage('Покупка успешна: у экономиста добавлен предмет "Дополнительный ход"');
-
-        final Map<String, dynamic> item = {
-          'owner_id': chosen['id']?.toString() ?? chosen['id'].toString(),
-          'name': rpcRes['item_name'] ?? 'Дополнительный ход',
-          'count': 1,
-          'metadata': rpcRes['item_meta'] ?? {'from': user.id, 'cost': 10},
-          'created_at': rpcRes['created_at'] ?? DateTime.now().toIso8601String(),
-        };
-
-        if (!mounted) return;
-        setState(() {
-          _pendingInventoryItems.insert(0, item);
-        });
-
-        try {
-          await _refreshProfile();
-        } catch (_) {}
-      } else {
-        final msg = rpcRes['message']?.toString() ?? rpcRes.toString();
-        _showMessage('Ошибка: $msg');
-      }
-    } catch (e) {
-      try {
-        Navigator.of(context).pop();
-      } catch (_) {}
-      _showMessage('Ошибка при покупке: $e');
-    }
   }
 
   Future<void> _openPurchaseEnterprise() async {
     if (user.role != 'economist') return;
     final res = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => PurchaseEnterpriseScreen(currentUser: user)),
+      MaterialPageRoute(
+        builder: (_) => PurchaseEnterpriseScreen(currentUser: user),
+      ),
     );
     if (res == true) {
       await _refreshProfile();
@@ -967,7 +910,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _openDebates() async {
     final res = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => DebatesScreen(currentUserId: user.id, service: svc)),
+      MaterialPageRoute(
+        builder: (_) => DebatesScreen(currentUserId: user.id, service: svc),
+      ),
     );
 
     if (res == true) {
@@ -988,8 +933,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
     List<Map<String, dynamic>> options = [];
     try {
-      final res = await supabase.from('resolution_options').select('id,label').eq('resolution_id', resolutionId).order('id');
-      if (res is List) options = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      final res = await supabase
+          .from('resolution_options')
+          .select('id,label')
+          .eq('resolution_id', resolutionId)
+          .order('id');
+      if (res is List)
+        options = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
     } catch (e) {
       _showMessage('Не удалось загрузить варианты: $e');
       return;
@@ -1006,62 +956,124 @@ class _HomeScreenState extends State<HomeScreen> {
     final resDialogResult = await showDialog<bool>(
       context: context,
       builder: (ctx) {
-        return StatefulBuilder(builder: (ctx2, setStateDialog) {
-          return AlertDialog(
-            backgroundColor: AppTheme.paperCard,
-            titleTextStyle: TextStyle(color: AppTheme.ink, fontFamily: 'PlayfairDisplay', fontSize: 18, fontWeight: FontWeight.w700),
-            title: const Text('Политрешение — ваш выбор'),
-            content: SingleChildScrollView(
-              child: Column(mainAxisSize: MainAxisSize.min, children: [
-                const Text('Выберите вариант:'),
-                const SizedBox(height: 8),
-                ...options.map((opt) {
-                  final oid = (opt['id'] is int) ? opt['id'] as int : int.parse(opt['id'].toString());
-                  return RadioListTile<int>(value: oid, groupValue: selectedOptionId, onChanged: (v) => setStateDialog(() => selectedOptionId = v), title: Text(opt['label'] ?? '-'));
-                }).toList(),
-                const SizedBox(height: 8),
-                TextField(controller: amtCtrl, keyboardType: TextInputType.number, decoration: InputDecoration(labelText: 'Сумма майндов (целое). Ваш баланс: ${user.mBalance.toStringAsFixed(2)}')),
-              ]),
-            ),
-            actions: [
-              TextButton(onPressed: () => Navigator.of(ctx2).pop(false), child: Text('Отмена', style: TextStyle(color: AppTheme.ink))),
-              ElevatedButton(onPressed: () async {
-                if (selectedOptionId == null) {
-                  ScaffoldMessenger.of(ctx2).showSnackBar(const SnackBar(content: Text('Выберите вариант')));
-                  return;
-                }
-                final txt = amtCtrl.text.trim();
-                final n = int.tryParse(txt);
-                if (n == null || n <= 0) {
-                  ScaffoldMessenger.of(ctx2).showSnackBar(const SnackBar(content: Text('Введите положительное целое число')));
-                  return;
-                }
-                if (n > user.mBalance) {
-                  ScaffoldMessenger.of(ctx2).showSnackBar(SnackBar(content: Text('Недостаточно майндов: у вас ${user.mBalance.toStringAsFixed(2)}')));
-                  return;
-                }
-                Navigator.of(ctx2).pop(true);
+        return StatefulBuilder(
+          builder: (ctx2, setStateDialog) {
+            return AlertDialog(
+              title: const Text('Политрешение — ваш выбор'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('Выберите вариант:'),
+                    const SizedBox(height: 8),
+                    ...options.map((opt) {
+                      final oid = (opt['id'] is int)
+                          ? opt['id'] as int
+                          : int.parse(opt['id'].toString());
+                      return RadioListTile<int>(
+                        value: oid,
+                        groupValue: selectedOptionId,
+                        onChanged: (v) =>
+                            setStateDialog(() => selectedOptionId = v),
+                        title: Text(opt['label'] ?? '-'),
+                      );
+                    }).toList(),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: amtCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(
+                        labelText:
+                            'Сумма майндов (целое). Ваш баланс: ${user.mBalance.toStringAsFixed(2)}',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx2).pop(false),
+                  child: const Text('Отмена'),
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    if (selectedOptionId == null) {
+                      ScaffoldMessenger.of(ctx2).showSnackBar(
+                        const SnackBar(content: Text('Выберите вариант')),
+                      );
+                      return;
+                    }
+                    final txt = amtCtrl.text.trim();
+                    final n = int.tryParse(txt);
+                    if (n == null || n <= 0) {
+                      ScaffoldMessenger.of(ctx2).showSnackBar(
+                        const SnackBar(
+                          content: Text('Введите положительное целое число'),
+                        ),
+                      );
+                      return;
+                    }
+                    if (n > user.mBalance) {
+                      ScaffoldMessenger.of(ctx2).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            'Недостаточно майндов: у вас ${user.mBalance.toStringAsFixed(2)}',
+                          ),
+                        ),
+                      );
+                      return;
+                    }
+                    Navigator.of(ctx2).pop(true);
 
-                showDialog(context: context, barrierDismissible: false, builder: (_) => Center(child: Container(width: 60, height: 60, padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: AppTheme.paperCard, borderRadius: BorderRadius.circular(8)), child: const CircularProgressIndicator())));
-                try {
-                  await svc.placeBetInResolution(resolutionId: resolutionId, optionId: selectedOptionId!, userId: user.id, amount: n);
-                  await _refreshProfile();
-                  await _loadResolutionState();
-                  if (mounted) Navigator.of(context).pop();
-                  await showDialog(context: context, builder: (_) => AlertDialog(backgroundColor: AppTheme.paperCard, title: const Text('Спасибо за участие в политрешении'), content: const Text('Ваша ставка принята.'), actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('OK'))]));
-                  if (!mounted) return;
-                  setState(() {
-                    _alreadyBetInActiveResolution = true;
-                  });
-                } catch (e) {
-                  if (mounted) Navigator.of(context).pop();
-                  final msg = e is PostgrestException ? (e.message ?? e.toString()) : e.toString();
-                  _showMessage('Ошибка при ставке: $msg');
-                }
-              }, child: const Text('Подтвердить ставку'), style: AppTheme.vintageButtonStyle()),
-            ],
-          );
-        });
+                    showDialog(
+                      context: context,
+                      barrierDismissible: false,
+                      builder: (_) =>
+                          const Center(child: CircularProgressIndicator()),
+                    );
+                    try {
+                      await svc.placeBetInResolution(
+                        resolutionId: resolutionId,
+                        optionId: selectedOptionId!,
+                        userId: user.id,
+                        amount: n,
+                      );
+                      await _refreshProfile();
+                      await _loadResolutionState();
+                      if (mounted) Navigator.of(context).pop();
+                      await showDialog(
+                        context: context,
+                        builder: (_) => AlertDialog(
+                          title: const Text(
+                            'Спасибо за участие в политрешении',
+                          ),
+                          content: const Text('Ваша ставка принята.'),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.of(context).pop(),
+                              child: const Text('OK'),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (!mounted) return;
+                      setState(() {
+                        _alreadyBetInActiveResolution = true;
+                      });
+                    } catch (e) {
+                      if (mounted) Navigator.of(context).pop();
+                      final msg = e is PostgrestException
+                          ? (e.message ?? e.toString())
+                          : e.toString();
+                      _showMessage('Ошибка при ставке: $msg');
+                    }
+                  },
+                  child: const Text('Подтвердить ставку'),
+                ),
+              ],
+            );
+          },
+        );
       },
     );
 
@@ -1130,12 +1142,14 @@ class _HomeScreenState extends State<HomeScreen> {
       await supabase.auth.signOut();
     } catch (_) {}
     if (!mounted) return;
-    Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) {
-      return const LoginScreen();
-    }));
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (_) {
+          return const LoginScreen();
+        },
+      ),
+    );
   }
-
-  Widget _balanceCard() => VintageCard(child: BalanceCard(user: user, userColor: _userColor));
 
   // -----------------------
   // BUILD
@@ -1143,91 +1157,143 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.paper,
       appBar: AppBar(
-        backgroundColor: AppTheme.paperCard,
-        elevation: 0,
-        title: Text(
-          'Главная',
-          style: const TextStyle(fontFamily: 'PlayfairDisplay', fontWeight: FontWeight.w700),
+        title: Row(
+          children: [
+            Icon(Icons.directions_boat, color: TitanicTheme.gold),
+            const SizedBox(width: 12),
+            Text(
+              'ГЛАВНАЯ ПАЛУБА',
+              style: TextStyle(
+                color: TitanicTheme.softIvory,
+                fontFamily: 'PlayfairDisplay',
+                letterSpacing: 1.2,
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: TitanicTheme.deepTeal,
+        elevation: 8,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(bottom: Radius.circular(20)),
         ),
         actions: [
-          IconButton(tooltip: 'Перевести', icon: Icon(Icons.send, color: AppTheme.ink), onPressed: _openTransferScreen),
-          IconButton(tooltip: 'Инвентарь', icon: Icon(Icons.inventory_2, color: AppTheme.ink), onPressed: _openInventoryScreen),
-          IconButton(onPressed: _logout, icon: Icon(Icons.logout, color: AppTheme.ink)),
+          Container(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: TitanicTheme.gold, width: 1),
+            ),
+            child: IconButton(
+              tooltip: 'Инвентарь',
+              icon: Icon(Icons.inventory_2, color: TitanicTheme.gold),
+              onPressed: _openInventoryScreen,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Container(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: TitanicTheme.warmGold, width: 1),
+            ),
+            child: IconButton(
+              onPressed: _logout,
+              icon: Icon(Icons.logout, color: TitanicTheme.warmGold),
+            ),
+          ),
+          const SizedBox(width: 12),
         ],
       ),
-      body: RefreshIndicator(
-        color: AppTheme.deepGrey,
-        onRefresh: () async {
-          await _refreshProfile();
-          await _loadJournal();
-        },
+      body: Container(
+        decoration: BoxDecoration(gradient: TitanicTheme.backgroundGradient),
         child: SingleChildScrollView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.all(14),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            _balanceCard(),
-            const SizedBox(height: 14),
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Decorative top element
+              Container(
+                height: 4,
+                decoration: BoxDecoration(
+                  gradient: TitanicTheme.goldGradient,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 20),
 
-            VintageSection(
-              title: 'Доступные действия',
-              padding: const EdgeInsets.all(14),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                // RoleButtons still provides role-specific items where needed
-                RoleButtons(
-                  user: user,
-                  hasActiveDebate: _hasActiveDebate,
-                  alreadyVotedInActiveDebate: _alreadyVotedInActiveDebate,
-                  hasActiveResolution: _hasActiveResolution,
-                  alreadyBetInActiveResolution: _alreadyBetInActiveResolution,
-                  onTransfer: _openTransferScreen,
-                  onBuyTurn: _openBuyTurnFlow,
-                  onPurchaseEnterprise: _openPurchaseEnterprise,
-                  onOpenDebates: _openDebates,
-                  onOpenResolution: _onOpenResolutionPressed,
-                  onStartSpeech: _onStartSpeechPressed,
-                  listenWidget: ListenButton(
-                    userId: user.id,
-                    activeSpeechId: _activeSpeechId,
-                    speechActorId: speechActorId,
-                    speechActive: speechActive,
-                    alreadyListened: _listenedToThisSpeech,
-                    onListenComplete: (rpcResult) async {
-                      if (rpcResult != null) {
-                        final status = rpcResult['status']?.toString() ?? '';
-                        if (status == 'changed_color') {
-                          final newColor = rpcResult['new_color']?.toString();
-                          final addedM = rpcResult['added_m'];
-                          if (newColor != null) {
-                            if (!mounted) return;
-                            setState(() {
-                              _userColor = newColor;
-                              user = user.copyWith(color: newColor, mBalance: (addedM is num) ? user.mBalance + addedM.toDouble() : user.mBalance);
-                            });
-                          }
-                        } else if (status == 'kept_color') {
-                          final addedV = rpcResult['added_v'];
-                          if (addedV is num) {
-                            if (!mounted) return;
-                            setState(() {
-                              user = user.copyWith(vBalance: user.vBalance + addedV.toDouble());
-                            });
-                          }
+              // User profile card
+              HomeProfileCard(
+                user: user,
+                onTransfer: _openTransferScreen,
+                onOpenInventory: _openInventoryScreen,
+              ),
+
+              const SizedBox(height: 20),
+
+              // Role section
+              HomeRoleSection(
+                user: user,
+                hasActiveDebate: _hasActiveDebate,
+                alreadyVotedInActiveDebate: _alreadyVotedInActiveDebate,
+                hasActiveResolution: _hasActiveResolution,
+                alreadyBetInActiveResolution: _alreadyBetInActiveResolution,
+                onTransfer: _openTransferScreen,
+                onBuyTurn: _openBuyTurnFlow,
+                onPurchaseEnterprise: _openPurchaseEnterprise,
+                onOpenDebates: _openDebates,
+                onOpenResolution: _onOpenResolutionPressed,
+                onStartSpeech: _onStartSpeechPressed,
+                listenWidget: ListenButton(
+                  userId: user.id,
+                  activeSpeechId: _activeSpeechId,
+                  speechActorId: speechActorId,
+                  speechActive: speechActive,
+                  alreadyListened: _listenedToThisSpeech,
+                  onListenComplete: (rpcResult) async {
+                    if (rpcResult != null) {
+                      final status = rpcResult['status']?.toString() ?? '';
+                      if (status == 'changed_color') {
+                        final newColor = rpcResult['new_color']?.toString();
+                        final addedM = rpcResult['added_m'];
+                        if (newColor != null) {
+                          if (!mounted) return;
+                          setState(() {
+                            _userColor = newColor;
+                            user = user.copyWith(
+                              color: newColor,
+                              mBalance: (addedM is num)
+                                  ? user.mBalance + addedM.toDouble()
+                                  : user.mBalance,
+                            );
+                          });
+                        }
+                      } else if (status == 'kept_color') {
+                        final addedV = rpcResult['added_v'];
+                        if (addedV is num) {
+                          if (!mounted) return;
+                          setState(() {
+                            user = user.copyWith(
+                              vBalance: user.vBalance + addedV.toDouble(),
+                            );
+                          });
                         }
                       }
-                      try {
-                        await _refreshProfile();
-                        await _fetchSpeechState();
-                      } catch (_) {}
-                      if (!mounted) return;
-                      setState(() {
-                        _listenedToThisSpeech = true;
-                      });
-                    },
-                  ),
-                  onHonorArticle: () async {
-                    await showHonorArticleDialog(context, user.id, onPublished: () async {
+                    }
+                    try {
+                      await _refreshProfile();
+                      await _fetchSpeechState();
+                    } catch (_) {}
+                    if (!mounted) return;
+                    setState(() {
+                      _listenedToThisSpeech = true;
+                    });
+                  },
+                ),
+                onHonorArticle: () async {
+                  await showHonorArticleDialog(
+                    context,
+                    user.id,
+                    onPublished: () async {
+                      // update profile, journal, debate state and local honor flag after success
                       try {
                         await _refreshProfile();
                         await _loadJournal();
@@ -1238,111 +1304,104 @@ class _HomeScreenState extends State<HomeScreen> {
                         if (!mounted) return;
                         setState(() {
                           _honorUsedLocal = (st['used'] as bool?) ?? true;
-                          _honorMBalance = (st['m_balance'] as double?) ?? user.mBalance;
-                          user = user.copyWith(mBalance: _honorMBalance ?? user.mBalance);
+                          _honorMBalance =
+                              (st['m_balance'] as double?) ?? user.mBalance;
+                          user = user.copyWith(
+                            mBalance: _honorMBalance ?? user.mBalance,
+                          );
                         });
                       } catch (_) {}
-                    });
-                  },
-                  onInvestInColor: () async {
-                    await showInvestInColorDialog(context, user.id, onCompleted: () async {
+                    },
+                  );
+                },
+                onInvestInColor: () async {
+                  await showInvestInColorDialog(
+                    context: context,
+                    supabase: supabase,
+                    userId: user.id,
+                    onCompleted: () async {
                       try {
                         await _refreshProfile();
                         await _loadJournal();
                       } catch (_) {}
-                    });
-                  },
-                  honorAlreadyUsed: _honorUsedLocal ?? false,
-                ),
-
-                const SizedBox(height: 12),
-
-                // Responsive action buttons arranged using Wrap (flows to next line)
-                LayoutBuilder(builder: (ctx, cons) {
-                  final width = cons.maxWidth;
-                  final isWide = width > 520;
-                  final btnWidth = isWide ? (width - 24) / 2 : width;
-                  return Wrap(
-                    spacing: 12,
-                    runSpacing: 12,
-                    children: [
-                      // Buy turn - available to all
-                      VintageAction(label: 'Купить ход', icon: Icons.shopping_cart, onPressed: _openBuyTurnFlow, fixedWidth: btnWidth),
-                      // Invest - available to all but disabled if no mBalance
-                      VintageAction(label: 'Инвестировать', icon: Icons.palette, onPressed: () => showInvestInColorDialog(context, user.id), disabled: user.mBalance <= 0, fixedWidth: btnWidth),
-                      // Purchase enterprise - only for economists
-                      if (user.role == 'economist')
-                        VintageAction(label: 'Предприятие', icon: Icons.corporate_fare, onPressed: _openPurchaseEnterprise, fixedWidth: btnWidth)
-                      else
-                        // show disabled placeholder to keep layout consistent
-                        VintageAction(label: 'Предприятие', icon: Icons.corporate_fare, onPressed: null, disabled: true, fixedWidth: btnWidth),
-                      // Inventory always visible
-                      VintageAction(label: 'Инвентарь', icon: Icons.inventory_2, onPressed: _openInventoryScreen, fixedWidth: btnWidth),
-                      // Debates - visible only when active
-                      VintageAction(label: 'Дебаты', icon: Icons.forum, onPressed: _openDebates, disabled: !_hasActiveDebate, fixedWidth: btnWidth),
-                      // Resolution - visible when active
-                      VintageAction(label: 'Политрешение', icon: Icons.how_to_vote, onPressed: _onOpenResolutionPressed, disabled: !_hasActiveResolution, fixedWidth: btnWidth),
-                      // Start speech - only for politicians
-                      if (user.role == 'politician')
-                        VintageAction(label: 'Начать Речь жизни', icon: Icons.record_voice_over, onPressed: _onStartSpeechPressed, disabled: !_isSpeechButtonEnabled, fixedWidth: btnWidth)
-                      else
-                        VintageAction(label: 'Начать Речь жизни', icon: Icons.record_voice_over, onPressed: null, disabled: true, fixedWidth: btnWidth),
-                    ],
+                    },
+                    showMessage: _showMessage,
                   );
-                }),
+                },
+                honorAlreadyUsed: _honorUsedLocal ?? false,
+              ),
 
-                if (_rpcLoading)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 12),
-                    child: Row(children: [
-                      const SizedBox(width: 6),
-                      const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
-                      const SizedBox(width: 12),
-                      Text('Ожидание сервера...', style: TextStyle(color: AppTheme.inkMuted)),
-                    ]),
-                  ),
-              ]),
-            ),
+              const SizedBox(height: 20),
 
-            const SizedBox(height: 14),
+              // Watched movie button (однократное использование) — используем с префиксом
+              WatchedMovieBlock(
+                currentUserId: user.id,
+                onChanged: () async {
+                  // after successful change, refresh profile and journal
+                  try {
+                    await _refreshProfile();
+                    await _loadJournal();
+                  } catch (_) {}
+                },
+              ),
 
-            VintageSection(
-              title: 'Кино',
-              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                WatchedMovieBlock(
-                  currentUserId: user.id,
-                  onChanged: () async {
-                    try {
-                      await _refreshProfile();
-                      await _loadJournal();
-                    } catch (_) {}
-                  },
-                ),
-                const SizedBox(height: 10),
-                MovieVoteBlock(
+              const SizedBox(height: 20),
+
+              // Movie voting block
+              MovieVoteBlock(
+                currentUserId: user.id,
+                currentUserRole: user.role,
+                onVoted: () async {
+                  // refresh profile and journal after voting
+                  try {
+                    await _refreshProfile();
+                    await _loadJournal();
+                  } catch (_) {}
+                },
+              ),
+
+              const SizedBox(height: 20),
+
+              // Hollywood buttons (Pay movie + Send minds) appear only for Hollywood users.
+              HollywoodPayBlock(
+                currentUserId: user.id,
+                currentUserRole: user.role,
+                onPaid: () async {
+                  // refresh profile and journal after actions from the Hollywood block
+                  try {
+                    await _refreshProfile();
+                    await _loadJournal();
+                  } catch (_) {}
+                },
+              ),
+
+              if (_isRole('мафия')) ...[
+                const SizedBox(height: 20),
+                mafia_blocks.MafiaBlock(
                   currentUserId: user.id,
                   currentUserRole: user.role,
-                  onVoted: () async {
+                  onProposalUsed: () async {
                     try {
                       await _refreshProfile();
                       await _loadJournal();
                     } catch (_) {}
                   },
+                  onDebtCollected: _onDebtCollected,
+                  onEnterpriseBought: _onMafiaEnterpriseBought,
                 ),
-              ]),
-            ),
+                const SizedBox(height: 20),
+                BloodPokerBlock(
+                  currentUserId: user.id,
+                  onBetPlaced: _onBloodPokerBetPlaced,
+                ),
+              ],
 
-            const SizedBox(height: 16),
+              const SizedBox(height: 20),
 
-            VintageSection(
-              title: 'Журнал',
-              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                JournalWidget(entries: _journalEntries),
-              ]),
-            ),
-
-            const SizedBox(height: 28),
-          ]),
+              // Journal section
+              HomeJournalSection(entries: _journalEntries),
+            ],
+          ),
         ),
       ),
     );

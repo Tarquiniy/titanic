@@ -1,5 +1,5 @@
-// lib/blocks/politician_block.dart
 import 'package:flutter/material.dart';
+import 'package:titanic/widgets/art_deco_button.dart';
 
 class PoliticianBlock extends StatelessWidget {
   final bool isEnabled;
@@ -26,14 +26,35 @@ class PoliticianBlock extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final actorLabel = speechActorId ?? '—';
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      ElevatedButton(
-        onPressed: isEnabled ? onStartSpeech : null,
-        style: ElevatedButton.styleFrom(backgroundColor: isEnabled ? Colors.orange : Colors.grey),
-        child: Text(isEnabled ? 'Речь жизни (старт)' : 'Речь жизни (неактивна)'),
-      ),
-      if (speechActive) Padding(padding: const EdgeInsets.only(top: 6.0), child: Text('Речь активна (инициатор: $actorLabel)', style: const TextStyle(fontSize: 12, color: Colors.grey))),
-      if (speechExpiresAt != null) Padding(padding: const EdgeInsets.only(top: 6.0), child: Text('Кнопка снова будет доступна в ${_formatYe(speechExpiresAt!)} (YEKT)', style: const TextStyle(fontSize: 12, color: Colors.grey))),
-    ]);
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SizedBox(
+          width: double.infinity,
+          child: ArtDecoButton(
+            text: isEnabled ? 'Речь жизни (старт)' : 'Речь жизни (неактивна)',
+            onPressed: isEnabled ? onStartSpeech : null,
+            primary: isEnabled,
+          ),
+        ),
+        if (speechActive) 
+          Padding(
+            padding: const EdgeInsets.only(top: 6.0),
+            child: Text(
+              'Речь активна (инициатор: $actorLabel)',
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ),
+        if (speechExpiresAt != null) 
+          Padding(
+            padding: const EdgeInsets.only(top: 6.0),
+            child: Text(
+              'Кнопка снова будет доступна в ${_formatYe(speechExpiresAt!)} (YEKT)',
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ),
+      ],
+    );
   }
 }

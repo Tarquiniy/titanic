@@ -1,5 +1,5 @@
-// lib/economist_block.dart
 import 'package:flutter/material.dart';
+import 'package:titanic/widgets/art_deco_button.dart';
 
 class EconomistBlock extends StatelessWidget {
   final VoidCallback? onAnalytics;
@@ -9,9 +9,9 @@ class EconomistBlock extends StatelessWidget {
   Widget build(BuildContext context) {
     return SizedBox(
       width: double.infinity,
-      child: ElevatedButton(
+      child: ArtDecoButton(
+        text: 'Аналитика / Ставки',
         onPressed: onAnalytics,
-        child: const Text('Аналитика / Ставки'),
       ),
     );
   }

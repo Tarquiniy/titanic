@@ -8,7 +8,8 @@ class AppUser {
   double vBalance;
   double mBalance;
   final String? color;
-  final String? region; // новый столбец region (text в БД)
+  final String? region;
+  final bool usurer; // НОВОЕ ПОЛЕ
 
   AppUser({
     required this.id,
@@ -20,6 +21,7 @@ class AppUser {
     required this.mBalance,
     this.color,
     this.region,
+    this.usurer = false, // НОВОЕ
   });
 
   AppUser copyWith({
@@ -32,6 +34,7 @@ class AppUser {
     double? mBalance,
     String? color,
     String? region,
+    bool? usurer, // НОВОЕ
   }) =>
       AppUser(
         id: id ?? this.id,
@@ -43,6 +46,7 @@ class AppUser {
         mBalance: mBalance ?? this.mBalance,
         color: color ?? this.color,
         region: region ?? this.region,
+        usurer: usurer ?? this.usurer, // НОВОЕ
       );
 
   factory AppUser.fromMap(Map<String, dynamic> m) {
@@ -56,6 +60,7 @@ class AppUser {
       mBalance: (m['m_balance'] is num) ? (m['m_balance'] as num).toDouble() : 0.0,
       color: m['color'] as String?,
       region: m['region'] is String ? m['region'] as String : (m['region']?.toString()),
+      usurer: (m['usurer'] == true) || (m['usurer']?.toString().toLowerCase() == 'true'), // НОВОЕ
     );
   }
 }

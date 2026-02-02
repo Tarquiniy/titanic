@@ -1,10 +1,7 @@
-// lib/blocks/movie_vote_block.dart
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:titanic/theme.dart';
+import 'package:titanic/widgets/art_deco_button.dart';
 
-/// Кнопка «Я посмотрел фильм и хочу голосовать»
-/// Логика взаимодействия с Supabase оставлена прежней, изменён внешний вид.
 class MovieVoteBlock extends StatefulWidget {
   final String currentUserId;
   final String? currentUserRole;
@@ -23,7 +20,6 @@ class MovieVoteBlock extends StatefulWidget {
 
 class _MovieVoteBlockState extends State<MovieVoteBlock> {
   final supabase = Supabase.instance.client;
-
   bool _loading = true;
   bool _disabled = true;
   Map<String, dynamic>? _activePoll;
@@ -45,6 +41,7 @@ class _MovieVoteBlockState extends State<MovieVoteBlock> {
 
     final roleRaw = widget.currentUserRole ?? '';
     final roleStr = roleRaw.toString().toLowerCase().trim();
+    
     if (roleStr.contains('голливуд') || roleStr.contains('hollywood')) {
       setState(() {
         _disabled = true;
@@ -72,9 +69,16 @@ class _MovieVoteBlockState extends State<MovieVoteBlock> {
 
       if (poll is Map<String, dynamic>) {
         _activePoll = Map<String, dynamic>.from(poll);
-        final pollId = (_activePoll!['id'] is int) ? _activePoll!['id'] as int : int.parse(_activePoll!['id'].toString());
+        final pollId = (_activePoll!['id'] is int) 
+            ? _activePoll!['id'] as int 
+            : int.parse(_activePoll!['id'].toString());
 
-        final opts = await supabase.from('movie_poll_options').select().eq('poll_id', pollId).order('position');
+        final opts = await supabase
+            .from('movie_poll_options')
+            .select()
+            .eq('poll_id', pollId)
+            .order('position');
+        
         if (opts is List) {
           _options = opts.map((e) => Map<String, dynamic>.from(e as Map)).toList();
         }
@@ -124,22 +128,31 @@ class _MovieVoteBlockState extends State<MovieVoteBlock> {
   Future<void> _onPressed() async {
     if (_disabled || _loading || _activePoll == null || _options.isEmpty) return;
 
-    final result = await _showVoteDialogGetData();
+    final result = await _showVoteDialog();
     if (result == null || result.isEmpty) return;
 
-    final int pollId = (_activePoll!['id'] is int) ? _activePoll!['id'] as int : int.parse(_activePoll!['id'].toString());
+    final int pollId = (_activePoll!['id'] is int) 
+        ? _activePoll!['id'] as int 
+        : int.parse(_activePoll!['id'].toString());
 
     final List<Map<String, dynamic>> inserts = [];
     int totalV = 0;
+    
     for (final entry in result.entries) {
       final idx = int.tryParse(entry.key);
       if (idx == null) continue;
+      
       final data = entry.value as Map<String, dynamic>;
       final sel = data['selected'] as bool;
       final votes = data['votes'] as int;
+      
       if (!sel || votes <= 0) continue;
+      
       final opt = _options[idx];
-      final optId = (opt['id'] is int) ? opt['id'] as int : int.parse(opt['id'].toString());
+      final optId = (opt['id'] is int) 
+          ? opt['id'] as int 
+          : int.parse(opt['id'].toString());
+      
       inserts.add({
         'poll_id': pollId,
         'option_id': optId,
@@ -151,7 +164,11 @@ class _MovieVoteBlockState extends State<MovieVoteBlock> {
     }
 
     if (inserts.isEmpty) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Нет выбранных вариантов')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Нет выбранных вариантов'))
+        );
+      }
       return;
     }
 
@@ -160,18 +177,31 @@ class _MovieVoteBlockState extends State<MovieVoteBlock> {
     try {
       double currentV = 0.0;
       try {
-        final row = await supabase.from('user_credentials').select('v_balance').eq('id', widget.currentUserId).maybeSingle();
+        final row = await supabase
+            .from('user_credentials')
+            .select('v_balance')
+            .eq('id', widget.currentUserId)
+            .maybeSingle();
+        
         if (row is Map<String, dynamic> && row.containsKey('v_balance')) {
           final vb = row['v_balance'];
           if (vb is num) currentV = vb.toDouble();
-          else if (vb is String) currentV = double.tryParse(vb.replaceAll(',', '.')) ?? 0.0;
+          else if (vb is String) {
+            currentV = double.tryParse(vb.replaceAll(',', '.')) ?? 0.0;
+          }
         }
       } catch (e) {
         debugPrint('MovieVoteBlock: failed to fetch v_balance: $e');
       }
 
       if (currentV < totalV) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Недостаточно войсов: требуется $totalV, у вас ${currentV.toStringAsFixed(0)}')));
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Недостаточно войсов: требуется $totalV, у вас ${currentV.toStringAsFixed(0)}')
+            )
+          );
+        }
         setState(() => _loading = false);
         return;
       }
@@ -188,7 +218,13 @@ class _MovieVoteBlockState extends State<MovieVoteBlock> {
           .maybeSingle();
 
       if (updateRes == null) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Не удалось списать войсы — возможно, недостаточно средств. Попробуйте снова.')));
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Не удалось списать войсы — возможно, недостаточно средств. Попробуйте снова.')
+            )
+          );
+        }
         setState(() => _loading = false);
         return;
       }
@@ -202,7 +238,11 @@ class _MovieVoteBlockState extends State<MovieVoteBlock> {
             title: const Text('Спасибо'),
             content: Text('Спасибо за участие в голосовании. Списано войсов: $needed'),
             actions: [
-              ElevatedButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('OK')),
+              ArtDecoButton(
+                text: 'OK', 
+                onPressed: () => Navigator.of(ctx).pop(),
+                primary: true,
+              ),
             ],
           ),
         );
@@ -222,17 +262,22 @@ class _MovieVoteBlockState extends State<MovieVoteBlock> {
 
       await _loadState();
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка при отправке голосов: $e')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Ошибка при отправке голосов: $e'))
+        );
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
-  Future<Map<String, Map<String, dynamic>>?> _showVoteDialogGetData() async {
+  Future<Map<String, Map<String, dynamic>>?> _showVoteDialog() async {
     final List<bool> selected = List<bool>.filled(_options.length, false);
-    final List<TextEditingController> countCtrls = List.generate(_options.length, (_) => TextEditingController(text: '1'));
+    final List<TextEditingController> countCtrls = 
+        List.generate(_options.length, (_) => TextEditingController(text: '1'));
 
-    final res = await showDialog<Map<String, Map<String, dynamic>>>(
+    final result = await showDialog<Map<String, Map<String, dynamic>>>(
       context: context,
       barrierDismissible: false,
       builder: (ctx) {
@@ -240,70 +285,85 @@ class _MovieVoteBlockState extends State<MovieVoteBlock> {
           return AlertDialog(
             title: Text(_activePoll?['title']?.toString() ?? 'Голосование за фильм'),
             content: SingleChildScrollView(
-              child: Column(mainAxisSize: MainAxisSize.min, children: [
-                const Text('Выберите варианты и укажите количество голосов рядом с отмеченными вариантами.'),
-                const SizedBox(height: 8),
-                ..._options.asMap().entries.map((e) {
-                  final idx = e.key;
-                  final opt = e.value;
-                  final label = (opt['label'] ?? '').toString();
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 6.0),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: CheckboxListTile(
-                            value: selected[idx],
-                            title: Text(label),
-                            onChanged: (v) => setStateDialog(() => selected[idx] = v ?? false),
-                            controlAffinity: ListTileControlAffinity.leading,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Выберите варианты и укажите количество голосов рядом с отмеченными вариантами.'),
+                  const SizedBox(height: 8),
+                  ..._options.asMap().entries.map((e) {
+                    final idx = e.key;
+                    final opt = e.value;
+                    final label = (opt['label'] ?? '').toString();
+                    
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6.0),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: CheckboxListTile(
+                              value: selected[idx],
+                              title: Text(label),
+                              onChanged: (v) => setStateDialog(() => selected[idx] = v ?? false),
+                              controlAffinity: ListTileControlAffinity.leading,
+                            ),
                           ),
-                        ),
-                        SizedBox(
-                          width: 90,
-                          child: TextField(
-                            controller: countCtrls[idx],
-                            keyboardType: const TextInputType.numberWithOptions(decimal: false, signed: false),
-                            decoration: const InputDecoration(labelText: 'Голоса'),
-                            enabled: selected[idx],
-                            onChanged: (s) {
-                              final ns = s.replaceAll(RegExp(r'[^0-9]'), '');
-                              if (ns != s) {
-                                countCtrls[idx].text = ns;
-                                countCtrls[idx].selection = TextSelection.fromPosition(TextPosition(offset: ns.length));
-                              }
-                            },
+                          SizedBox(
+                            width: 90,
+                            child: TextField(
+                              controller: countCtrls[idx],
+                              keyboardType: const TextInputType.numberWithOptions(decimal: false, signed: false),
+                              decoration: const InputDecoration(labelText: 'Голоса'),
+                              enabled: selected[idx],
+                              onChanged: (s) {
+                                final ns = s.replaceAll(RegExp(r'[^0-9]'), '');
+                                if (ns != s) {
+                                  countCtrls[idx].text = ns;
+                                  countCtrls[idx].selection = 
+                                      TextSelection.fromPosition(TextPosition(offset: ns.length));
+                                }
+                              },
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
-                  );
-                }).toList(),
-              ]),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                ],
+              ),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.of(ctx2).pop(null), child: const Text('Отмена')),
-              ElevatedButton(
-                onPressed: () async {
+              TextButton(
+                onPressed: () => Navigator.of(ctx2).pop(null),
+                child: const Text('Отмена'),
+              ),
+              ArtDecoButton(
+                text: 'Проголосовать',
+                onPressed: () {
                   final any = selected.any((v) => v);
                   if (!any) {
-                    ScaffoldMessenger.of(ctx2).showSnackBar(const SnackBar(content: Text('Отметьте хотя бы один вариант')));
+                    ScaffoldMessenger.of(ctx2).showSnackBar(
+                      const SnackBar(content: Text('Отметьте хотя бы один вариант'))
+                    );
                     return;
                   }
+                  
                   final Map<String, Map<String, dynamic>> out = {};
                   for (var i = 0; i < selected.length; i++) {
                     final sel = selected[i];
                     final txt = countCtrls[i].text.trim();
                     final parsed = int.tryParse(txt) ?? 0;
+                    
                     if (sel && parsed <= 0) {
-                      ScaffoldMessenger.of(ctx2).showSnackBar(const SnackBar(content: Text('Введите корректное количество голосов (целое > 0)')));
+                      ScaffoldMessenger.of(ctx2).showSnackBar(
+                        const SnackBar(content: Text('Введите корректное количество голосов (целое > 0)'))
+                      );
                       return;
                     }
                     out[i.toString()] = {'selected': sel, 'votes': parsed};
                   }
                   Navigator.of(ctx2).pop(out);
                 },
-                child: const Text('Проголосовать'),
+                primary: true,
               ),
             ],
           );
@@ -317,7 +377,7 @@ class _MovieVoteBlockState extends State<MovieVoteBlock> {
       } catch (_) {}
     }
 
-    return res;
+    return result;
   }
 
   @override
@@ -325,12 +385,11 @@ class _MovieVoteBlockState extends State<MovieVoteBlock> {
     final disabled = _loading || _disabled;
     return SizedBox(
       width: double.infinity,
-      child: ElevatedButton(
+      child: ArtDecoButton(
+        text: _loading ? 'Загрузка...' : 'Я посмотрел фильм и хочу голосовать',
         onPressed: disabled ? null : _onPressed,
-        style: AppTheme.vintageButtonStyle(disabled: disabled),
-        child: _loading
-            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-            : const Text('Я посмотрел фильм и хочу голосовать'),
+        loading: _loading,
+        primary: true,
       ),
     );
   }

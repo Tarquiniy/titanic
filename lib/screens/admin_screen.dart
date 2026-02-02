@@ -6,6 +6,8 @@ import 'package:titanic/services/game_service.dart';
 import 'package:titanic/services/persistent_storage.dart';
 import 'login_screen.dart';
 import 'package:titanic/screens/movie_poll_admin_screen.dart';
+import 'package:titanic/screens/admin/blood_poker_tab.dart';
+
 
 class AdminScreen extends StatefulWidget {
   const AdminScreen({Key? key}) : super(key: key);
@@ -37,6 +39,7 @@ class _AdminScreenState extends State<AdminScreen> {
       const ResolutionsTab(),
       const ColorBanksTab(),
       const MoviePollAdminScreen(),
+      const BloodPokerTab(),
     ];
 
     return Scaffold(
@@ -65,6 +68,7 @@ class _AdminScreenState extends State<AdminScreen> {
           BottomNavigationBarItem(icon: Icon(Icons.gavel), label: 'Политрешения'),
           BottomNavigationBarItem(icon: Icon(Icons.account_balance), label: 'Банки цветов'),
           BottomNavigationBarItem(icon: Icon(Icons.movie), label: 'Голосование'),
+          BottomNavigationBarItem(icon: Icon(Icons.casino), label: 'Покер на крови'),
         ],
       ),
     );
@@ -192,6 +196,7 @@ class _UserEditDialogState extends State<_UserEditDialog> {
   late TextEditingController _colorCtrl;
   late TextEditingController _inventoryCtrl;
   late TextEditingController _enterprisesCtrl;
+  bool _usurer = false; // НОВОЕ ПОЛЕ
 
   @override
   void initState() {
@@ -202,6 +207,7 @@ class _UserEditDialogState extends State<_UserEditDialog> {
     _colorCtrl = TextEditingController(text: (widget.user['color'] ?? '').toString());
     _inventoryCtrl = TextEditingController(text: jsonEncode(widget.user['inventory'] ?? {}));
     _enterprisesCtrl = TextEditingController(text: jsonEncode(widget.user['enterprises'] ?? {}));
+    _usurer = (widget.user['usurer'] == true) || (widget.user['usurer']?.toString().toLowerCase() == 'true'); // ИНИЦИАЛИЗАЦИЯ
   }
 
   @override
@@ -215,6 +221,7 @@ class _UserEditDialogState extends State<_UserEditDialog> {
     super.dispose();
   }
 
+
   Map<String, dynamic> _buildPayload() {
     final Map out = {};
     final v = double.tryParse(_vCtrl.text.replaceAll(',', '.'));
@@ -223,6 +230,7 @@ class _UserEditDialogState extends State<_UserEditDialog> {
     if (m != null) out['m_balance'] = m;
     out['role'] = _roleCtrl.text.trim();
     out['color'] = _colorCtrl.text.trim();
+    out['usurer'] = _usurer; // ДОБАВЛЕНО
     try {
       final inv = jsonDecode(_inventoryCtrl.text);
       out['inventory'] = inv;
@@ -244,6 +252,18 @@ class _UserEditDialogState extends State<_UserEditDialog> {
           TextField(controller: _vCtrl, decoration: const InputDecoration(labelText: 'V balance'), keyboardType: TextInputType.numberWithOptions(decimal: true)),
           TextField(controller: _mCtrl, decoration: const InputDecoration(labelText: 'M balance'), keyboardType: TextInputType.numberWithOptions(decimal: true)),
           TextField(controller: _colorCtrl, decoration: const InputDecoration(labelText: 'color (hex)')),
+          
+          // НОВОЕ: Чекбокс для флага ростовщика
+          CheckboxListTile(
+            title: const Text('Ростовщик (только для мафии)'),
+            value: _usurer,
+            onChanged: (value) {
+              setState(() {
+                _usurer = value ?? false;
+              });
+            },
+          ),
+          
           const SizedBox(height: 8),
           TextField(controller: _inventoryCtrl, minLines: 2, maxLines: 6, decoration: const InputDecoration(labelText: 'inventory (JSON)')),
           const SizedBox(height: 8),

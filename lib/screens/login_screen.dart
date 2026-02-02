@@ -1,9 +1,13 @@
+// lib/screens/login_screen.dart
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../models/app_user.dart';
-import '../services/persistent_storage.dart';
+import '../theme/app_theme.dart';
+import '../widgets/decorative_elements.dart';
+import '../widgets/art_deco_button.dart';
 import 'home_screen.dart';
 import 'admin_screen.dart';
+import 'package:titanic/services/persistent_storage.dart';
+import 'package:titanic/models/app_user.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({Key? key}) : super(key: key);
@@ -12,101 +16,75 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _formKey = GlobalKey<FormState>();
-  final _usernameCtrl = TextEditingController();
-  final _passwordCtrl = TextEditingController();
+  final _emailCtrl = TextEditingController();
+  final _passCtrl = TextEditingController();
   bool _loading = false;
   String? _error;
-
-  final _supabase = Supabase.instance.client;
+  final SupabaseClient supabase = Supabase.instance.client;
 
   @override
   void initState() {
     super.initState();
-    _checkSavedLogin();
+    _trySavedLogin();
   }
 
-  Future<void> _checkSavedLogin() async {
+  Future<void> _trySavedLogin() async {
     try {
-      final savedId = await getSavedUserId();
-      if (savedId == null || savedId.isEmpty) return;
-
-      // try to fetch profile by id
-      final data = await _supabase
+      final id = await getSavedUserId();
+      if (id == null || id.isEmpty) return;
+      final row = await supabase
           .from('user_credentials')
           .select('id, telegram_username, role, first_name, last_name, v_balance, m_balance, color, region')
-          .eq('id', savedId)
+          .eq('id', id)
           .maybeSingle();
-
-      if (data == null) {
-        try {
-          await removeSavedUserId();
-        } catch (_) {}
-        return;
+      if (row is Map<String, dynamic>) {
+        final user = AppUser(
+          id: row['id']?.toString() ?? '',
+          username: row['telegram_username']?.toString() ?? '',
+          role: row['role']?.toString() ?? 'public_figure',
+          firstName: row['first_name']?.toString() ?? '',
+          lastName: row['last_name']?.toString() ?? '',
+          vBalance: (row['v_balance'] is num) ? (row['v_balance'] as num).toDouble() : 0.0,
+          mBalance: (row['m_balance'] is num) ? (row['m_balance'] as num).toDouble() : 0.0,
+          color: row['color']?.toString(),
+          region: row['region']?.toString(),
+        );
+        if ((row['role'] ?? '').toString().toLowerCase() == 'admin') {
+          Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const AdminScreen()));
+        } else {
+          Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => HomeScreen(currentUser: user)));
+        }
       }
-
-      final row = Map<String, dynamic>.from(data as Map);
-      final user = AppUser(
-        id: row['id']?.toString() ?? '',
-        username: row['telegram_username']?.toString() ?? '',
-        role: row['role']?.toString() ?? 'public_figure',
-        firstName: row['first_name']?.toString() ?? '',
-        lastName: row['last_name']?.toString() ?? '',
-        vBalance: (row['v_balance'] is num) ? (row['v_balance'] as num).toDouble() : 0.0,
-        mBalance: (row['m_balance'] is num) ? (row['m_balance'] as num).toDouble() : 0.0,
-        color: row['color']?.toString(),
-        region: row['region'] is String ? row['region'] as String : (row['region']?.toString()),
-      );
-
-      if (!mounted) return;
-      final role = (row['role'] ?? '').toString().toLowerCase();
-      if (role == 'admin') {
-        Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const AdminScreen()));
-      } else {
-        Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => HomeScreen(currentUser: user)));
-      }
-    } catch (_) {
-      // ignore — remain on login screen
-    }
-  }
-
-  @override
-  void dispose() {
-    _usernameCtrl.dispose();
-    _passwordCtrl.dispose();
-    super.dispose();
+    } catch (_) {}
   }
 
   Future<void> _signIn() async {
     setState(() {
       _error = null;
     });
-
-    if (!_formKey.currentState!.validate()) return;
-    final username = _usernameCtrl.text.trim();
-    final password = _passwordCtrl.text;
-
+    final username = _emailCtrl.text.trim();
+    final password = _passCtrl.text;
+    if (username.isEmpty || password.isEmpty) {
+      setState(() => _error = 'Введите username и пароль');
+      return;
+    }
     setState(() => _loading = true);
     try {
-      final data = await _supabase
+      final data = await supabase
           .from('user_credentials')
           .select('id, telegram_username, role, first_name, last_name, v_balance, m_balance, password, color, region')
           .eq('telegram_username', username)
           .maybeSingle();
-
       if (data == null) {
         setState(() => _error = 'Неверный username или пароль');
         return;
       }
-
       final row = Map<String, dynamic>.from(data as Map);
-
-      final storedPassword = (row['password'] ?? '').toString();
-      if (storedPassword.isEmpty || storedPassword != password) {
+      final stored = (row['password'] ?? '').toString();
+      if (stored.isEmpty || stored != password) {
         setState(() => _error = 'Неверный username или пароль');
         return;
       }
-
       final user = AppUser(
         id: row['id']?.toString() ?? '',
         username: row['telegram_username']?.toString() ?? username,
@@ -116,26 +94,16 @@ class _LoginScreenState extends State<LoginScreen> {
         vBalance: (row['v_balance'] is num) ? (row['v_balance'] as num).toDouble() : 0.0,
         mBalance: (row['m_balance'] is num) ? (row['m_balance'] as num).toDouble() : 0.0,
         color: row['color']?.toString(),
-        region: row['region'] is String ? row['region'] as String : (row['region']?.toString()),
+        region: row['region']?.toString(),
       );
-
-      if (!mounted) return;
-
-      // Persist logged-in user id (web -> localStorage, else -> shared_preferences)
       try {
         await saveUserId(user.id);
-      } catch (_) {
-        // ignore preferences errors
-      }
-
-      final role = (row['role'] ?? '').toString().toLowerCase();
-      if (role == 'admin') {
+      } catch (_) {}
+      if ((row['role'] ?? '').toString().toLowerCase() == 'admin') {
         Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const AdminScreen()));
       } else {
         Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => HomeScreen(currentUser: user)));
       }
-    } on PostgrestException catch (e) {
-      setState(() => _error = 'Ошибка сервера: ${e.message}');
     } catch (e) {
       setState(() => _error = 'Ошибка: ${e.toString()}');
     } finally {
@@ -143,61 +111,146 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  String? _validateUsername(String? v) {
-    if (v == null || v.trim().isEmpty) return 'Введите telegram username без @';
-    if (v.contains('@')) return 'Не указывайте @';
-    if (v.contains(' ')) return 'Username не должен содержать пробелов';
-    return null;
+  @override
+  void dispose() {
+    _emailCtrl.dispose();
+    _passCtrl.dispose();
+    super.dispose();
   }
 
-  String? _validatePassword(String? v) {
-    if (v == null || v.isEmpty) return 'Введите пароль';
-    return null;
+  InputDecoration _fieldDecoration({required String label, required Icon prefix}) {
+    // enhance base decoration with white label + subtle translucent fill
+    return TitanicTheme.inputDecoration.copyWith(
+      labelText: label,
+      labelStyle: TextStyle(color: Colors.white.withOpacity(0.92), fontWeight: FontWeight.w600),
+      hintStyle: TextStyle(color: Colors.white.withOpacity(0.55)),
+      prefixIcon: prefix,
+      // ensure border contrasts nicely on the glass panel
+      enabledBorder: TitanicTheme.inputDecoration.enabledBorder,
+      focusedBorder: TitanicTheme.inputDecoration.focusedBorder,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: Card(
-            margin: const EdgeInsets.all(24),
-            child: Padding(
-              padding: const EdgeInsets.all(20.0),
-              child: Form(
-                key: _formKey,
-                child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  Text('Вход', style: Theme.of(context).textTheme.headlineSmall),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: _usernameCtrl,
-                    decoration: const InputDecoration(labelText: 'Telegram username (без @)'),
-                    textInputAction: TextInputAction.next,
-                    validator: _validateUsername,
-                  ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: _passwordCtrl,
-                    decoration: const InputDecoration(labelText: 'Пароль'),
-                    obscureText: true,
-                    onFieldSubmitted: (_) => _signIn(),
-                    validator: _validatePassword,
-                  ),
-                  const SizedBox(height: 16),
-                  if (_error != null)
-                    Padding(padding: const EdgeInsets.only(bottom: 8.0), child: Text(_error!, style: const TextStyle(color: Colors.red))),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: _loading ? null : _signIn,
-                      child: _loading
-                          ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                          : const Text('Войти'),
+      backgroundColor: Colors.transparent,
+      body: DecorativeBackground(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 20),
+        showEmblem: true,
+        patternIntensity: 0.28, // a bit stronger pattern
+        child: Center(
+          child: SingleChildScrollView(
+            physics: const BouncingScrollPhysics(),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 560),
+              child: GlassPanel(
+                padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 28),
+                radius: 18,
+                elevated: true,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // header emblem
+                    Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: TitanicTheme.goldGradient,
+                        boxShadow: [
+                          BoxShadow(color: Colors.black.withOpacity(0.38), blurRadius: 12, offset: const Offset(0, 6)),
+                        ],
+                      ),
+                      child: CircleAvatar(
+                        radius: 36,
+                        backgroundColor: TitanicTheme.nearBlack,
+                        child: Icon(Icons.directions_boat, size: 44, color: TitanicTheme.gold),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                ]),
+                    const SizedBox(height: 14),
+                    Text('TITANIC', style: TitanicTheme.heading.copyWith(fontSize: 38, letterSpacing: 6)),
+                    const SizedBox(height: 6),
+                    Text('Добро пожаловать',
+                        style: TitanicTheme.body.copyWith(fontSize: 14, color: TitanicTheme.body.color?.withOpacity(0.88))),
+                    const SizedBox(height: 18),
+
+                    // form fields: TEXT STYLE WHITE & cursor gold
+                    TextField(
+                      controller: _emailCtrl,
+                      keyboardType: TextInputType.text,
+                      textInputAction: TextInputAction.next,
+                      style: const TextStyle(color: Colors.white),
+                      cursorColor: TitanicTheme.gold,
+                      decoration: _fieldDecoration(
+                        label: 'Telegram Username',
+                        prefix: Icon(Icons.person, color: TitanicTheme.gold),
+                      ),
+                      onSubmitted: (_) => FocusScope.of(context).nextFocus(),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _passCtrl,
+                      obscureText: true,
+                      textInputAction: TextInputAction.done,
+                      style: const TextStyle(color: Colors.white),
+                      cursorColor: TitanicTheme.gold,
+                      decoration: _fieldDecoration(
+                        label: 'Пароль',
+                        prefix: Icon(Icons.lock, color: TitanicTheme.gold),
+                      ),
+                      onSubmitted: (_) {
+                        if (!_loading) _signIn();
+                      },
+                    ),
+                    const SizedBox(height: 16),
+
+                    // decorative thin divider with gold accent
+                    Container(
+                      height: 1,
+                      margin: const EdgeInsets.symmetric(vertical: 10),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(colors: [TitanicTheme.gold.withOpacity(0.0), TitanicTheme.gold.withOpacity(0.45), TitanicTheme.gold.withOpacity(0.0)]),
+                      ),
+                    ),
+
+                    // error message (stylized)
+                    if (_error != null) ...[
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: Colors.redAccent.withOpacity(0.06),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: Colors.redAccent.withOpacity(0.08)),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Icon(Icons.error_outline, color: Colors.redAccent),
+                            const SizedBox(width: 10),
+                            Expanded(child: Text(_error!, style: TitanicTheme.body.copyWith(color: Colors.redAccent))),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                    ],
+
+                    // action buttons
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ArtDecoButton(
+                            text: 'ВОЙТИ',
+                            icon: Icons.login,
+                            primary: true,
+                            loading: _loading,
+                            onPressed: _loading ? null : _signIn,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
