@@ -129,7 +129,7 @@ class _JournalWidgetState extends State<JournalWidget> {
         const SizedBox(height: 8),
         Expanded(
           child: filtered.isEmpty
-              ? Center(child: Text('Записей нет', style: TitanicTheme.body.copyWith(color: TitanicTheme.softIvory.withOpacity(0.7))))
+              ? Center(child: Text('Записей нет', style: TitanicTheme.body.copyWith(color: TitanicTheme.ivoryCream.withOpacity(0.7))))
               : ListView.builder(
                   itemCount: filtered.length,
                   itemBuilder: (context, i) {
@@ -144,7 +144,7 @@ class _JournalWidgetState extends State<JournalWidget> {
                       subtitle: created,
                       leading: CircleAvatar(backgroundColor: TitanicTheme.deepTeal.withOpacity(0.4), child: Text(title.isNotEmpty ? title[0].toUpperCase() : '?')),
                       trailing: IconButton(
-                        icon: Icon(isExp ? Icons.expand_less : Icons.expand_more, color: TitanicTheme.warmGold),
+                        icon: Icon(isExp ? Icons.expand_less : Icons.expand_more, color: TitanicTheme.raptureGold),
                         onPressed: () {
                           setState(() {
                             _expanded[id] = !isExp;

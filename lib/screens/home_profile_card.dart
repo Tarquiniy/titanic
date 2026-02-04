@@ -39,7 +39,7 @@ class HomeProfileCard extends StatelessWidget {
           style: TextStyle(
             fontSize: 12,
             fontWeight: FontWeight.w600,
-            color: TitanicTheme.softIvory.withOpacity(0.8),
+            color: TitanicTheme.ivoryCream.withOpacity(0.8),
             letterSpacing: 1.1,
           ),
         ),
@@ -71,7 +71,7 @@ class HomeProfileCard extends StatelessWidget {
         ),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: TitanicTheme.gold.withOpacity(0.3),
+          color: TitanicTheme.raptureGold.withOpacity(0.3),
           width: 1.5,
         ),
         boxShadow: [
@@ -93,14 +93,14 @@ class HomeProfileCard extends StatelessWidget {
                   shape: BoxShape.circle,
                   gradient: TitanicTheme.goldGradient,
                   border: Border.all(
-                    color: TitanicTheme.gold,
+                    color: TitanicTheme.raptureGold,
                     width: 2,
                   ),
                 ),
                 child: Icon(
                   Icons.account_circle,
                   size: 40,
-                  color: TitanicTheme.softIvory,
+                  color: TitanicTheme.ivoryCream,
                 ),
               ),
               const SizedBox(width: 16),
@@ -113,7 +113,7 @@ class HomeProfileCard extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 22,
                         fontWeight: FontWeight.w700,
-                        color: TitanicTheme.softIvory,
+                        color: TitanicTheme.ivoryCream,
                         fontFamily: 'PlayfairDisplay',
                       ),
                     ),
@@ -122,7 +122,7 @@ class HomeProfileCard extends StatelessWidget {
                       '@${user.username}',
                       style: TextStyle(
                         fontSize: 14,
-                        color: TitanicTheme.gold,
+                        color: TitanicTheme.raptureGold,
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -144,7 +144,7 @@ class HomeProfileCard extends StatelessWidget {
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
-                          color: TitanicTheme.softIvory,
+                          color: TitanicTheme.ivoryCream,
                           letterSpacing: 1.1,
                         ),
                       ),
@@ -154,7 +154,7 @@ class HomeProfileCard extends StatelessWidget {
               ),
               IconButton(
                 tooltip: 'Инвентарь',
-                icon: Icon(Icons.inventory_2, color: TitanicTheme.gold),
+                icon: Icon(Icons.inventory_2, color: TitanicTheme.raptureGold),
                 onPressed: onOpenInventory,
               )
             ],
@@ -172,13 +172,13 @@ class HomeProfileCard extends StatelessWidget {
               Container(
                 width: 1,
                 height: 50,
-                color: TitanicTheme.gold.withOpacity(0.3),
+                color: TitanicTheme.raptureGold.withOpacity(0.3),
               ),
               _buildBalanceItem(
                 icon: Icons.memory,
                 label: 'МАЙНДЫ (M)',
                 value: user.mBalance.toStringAsFixed(0),
-                color: TitanicTheme.richCopper,
+                color: TitanicTheme.copperDetail,
               ),
             ],
           ),
@@ -188,7 +188,6 @@ class HomeProfileCard extends StatelessWidget {
             onPressed: onTransfer,
             icon: Icons.swap_horiz,
             width: double.infinity,
-            height: 50,
           ),
         ],
       ),

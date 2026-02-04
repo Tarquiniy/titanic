@@ -63,7 +63,9 @@ flutter:
 
   # To add assets to your application, add an assets section, like this:
   assets:
-      - assets/wave_pattern.png
+      - assets/images/
+      - assets/images/ui/
+      - assets/art_deco_login.png
   #   - images/a_dot_burr.jpeg
   #   - images/a_dot_ham.jpeg
 
@@ -79,15 +81,15 @@ flutter:
   # list giving the asset and other descriptors for the font. For
   # example:
   fonts:
-   - family: PlayfairDisplay
+   - family: DecoHeadline
      fonts:
-       - asset: assets/fonts/PlayfairDisplay-Regular.ttf
-       - asset: assets/fonts/PlayfairDisplay-Bold.ttf
+       - asset: assets/fonts/Metropolis1920.otf
+
+   - family: DecoBody 
+     fonts:
+       - asset: assets/fonts/CormorantGaramond-Regular.ttf
+       - asset: assets/fonts/CormorantGaramond-Bold.ttf
          weight: 700
-   - family: LibreBaskerville
-     fonts:
-       - asset: assets/fonts/LibreBaskerville-Regular.ttf
-       - asset: assets/fonts/LibreBaskerville-Italic.ttf
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package

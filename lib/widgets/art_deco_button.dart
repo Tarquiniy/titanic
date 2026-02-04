@@ -8,7 +8,6 @@ class ArtDecoButton extends StatelessWidget {
   final bool primary;
   final bool loading;
   final IconData? icon;
-  final double height;
   final double? width;
 
   const ArtDecoButton({
@@ -18,50 +17,62 @@ class ArtDecoButton extends StatelessWidget {
     this.primary = false,
     this.loading = false,
     this.icon,
-    this.height = 48,
     this.width,
   }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    final enabled = onPressed != null && !loading;
-    final decoration = primary
-        ? TitanicTheme.primaryAccentButtonDecoration
-        : BoxDecoration(
-            color: TitanicTheme.nearBlack.withOpacity(0.6),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: TitanicTheme.warmGold.withOpacity(0.12)),
-          );
-
-    return Opacity(
-      opacity: enabled ? 1.0 : 0.55,
-      child: Container(
-        width: width,
-        height: height,
-        decoration: decoration,
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: enabled ? onPressed : null,
-            borderRadius: BorderRadius.circular(12),
-            child: Center(
-              child: loading
-                  ? SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2.2,
-                        valueColor: AlwaysStoppedAnimation(TitanicTheme.gold),
-                      ),
-                    )
-                  : Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (icon != null) Icon(icon, color: primary ? TitanicTheme.nearBlack : TitanicTheme.warmGold, size: 18),
-                        if (icon != null) const SizedBox(width: 8),
-                        Text(text, style: primary ? TitanicTheme.buttonText : TitanicTheme.body.copyWith(color: TitanicTheme.warmGold)),
-                      ],
+    return Container(
+      width: width ?? double.infinity,
+      decoration: primary
+          ? TitanicTheme.primaryAccentButtonDecoration
+          : TitanicTheme.outlineGildedButton(highlighted: onPressed != null),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: loading ? null : onPressed,
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (icon != null && !loading) ...[
+                  Icon(
+                    icon,
+                    color: primary
+                        ? const Color(0xFF0A0A0A)
+                        : TitanicTheme.raptureGold,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 10),
+                ],
+                if (loading)
+                  SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: primary
+                          ? const Color(0xFF0A0A0A)
+                          : TitanicTheme.raptureGold,
                     ),
+                  )
+                else
+                  Text(
+                    text,
+                    style: TextStyle(
+                      fontFamily: 'Cinzel',
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: primary
+                          ? const Color(0xFF0A0A0A)
+                          : TitanicTheme.ivoryCream,
+                      letterSpacing: 0.8,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+              ],
             ),
           ),
         ),

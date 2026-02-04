@@ -29,13 +29,13 @@ class HomeJournalSection extends StatelessWidget {
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  border: Border.all(color: TitanicTheme.gold, width: 1.5),
+                  border: Border.all(color: TitanicTheme.raptureGold, width: 1.5),
                   gradient: TitanicTheme.goldGradient,
                 ),
                 child: Icon(
                   Icons.history,
                   size: 20,
-                  color: TitanicTheme.softIvory,
+                  color: TitanicTheme.ivoryCream,
                 ),
               ),
               const SizedBox(width: 12),
@@ -44,7 +44,7 @@ class HomeJournalSection extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w700,
-                  color: TitanicTheme.softIvory,
+                  color: TitanicTheme.ivoryCream,
                   fontFamily: 'PlayfairDisplay',
                   letterSpacing: 1.2,
                 ),
