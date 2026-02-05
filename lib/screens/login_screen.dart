@@ -21,6 +21,10 @@ class _LoginScreenState extends State<LoginScreen> {
   String? _error;
   final SupabaseClient supabase = Supabase.instance.client;
 
+  // Оверлеи (рамка + орнамент) — поверх фоновой картинки
+  static const String _frameOverlayAsset = 'assets/art_deco_frame_overlay.png';
+  static const String _ornamentAsset = 'assets/art_deco_ornament.png';
+
   @override
   void initState() {
     super.initState();
@@ -143,23 +147,124 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
+  Widget _buildOverlayFrameAndOrnament() {
+    // Рамка: ярче + на весь экран + золотое тонирование
+    return IgnorePointer(
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Positioned.fill(
+            child: Opacity(
+              opacity: 0.62, // ярче
+              child: ColorFiltered(
+                colorFilter: ColorFilter.mode(
+                  TitanicTheme.raptureGold.withOpacity(0.95),
+                  BlendMode.srcATop,
+                ),
+                child: Image.asset(
+                  _frameOverlayAsset,
+                  fit: BoxFit.cover, // на весь экран
+                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                ),
+              ),
+            ),
+          ),
+
+          // Орнамент сверху/снизу — как на референсе
+          Align(
+            alignment: Alignment.topCenter,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 14),
+              child: Opacity(
+                opacity: 0.9,
+                child: ColorFiltered(
+                  colorFilter: ColorFilter.mode(
+                    TitanicTheme.raptureGold.withOpacity(0.95),
+                    BlendMode.srcATop,
+                  ),
+                  child: Image.asset(
+                    _ornamentAsset,
+                    fit: BoxFit.contain,
+                    height: 42,
+                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 14),
+              child: Opacity(
+                opacity: 0.9,
+                child: ColorFiltered(
+                  colorFilter: ColorFilter.mode(
+                    TitanicTheme.raptureGold.withOpacity(0.95),
+                    BlendMode.srcATop,
+                  ),
+                  child: Image.asset(
+                    _ornamentAsset,
+                    fit: BoxFit.contain,
+                    height: 42,
+                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          // Виньетка (чтобы золото “светилось” сильнее)
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  center: const Alignment(0, -0.1),
+                  radius: 1.05,
+                  colors: [
+                    Colors.transparent,
+                    Colors.black.withOpacity(0.55),
+                  ],
+                  stops: const [0.55, 1.0],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final isSmallScreen = screenWidth < 380;
-    
+
     return Scaffold(
       backgroundColor: Colors.transparent,
-      body: Container(
-        decoration: const BoxDecoration(
-          image: DecorationImage(
-            image: AssetImage('assets/art_deco_login.png'),
-            fit: BoxFit.cover,
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          // БАЗОВЫЙ ФОН (НЕ УБИРАЕМ)
+          Positioned.fill(
+            child: Image.asset(
+              'assets/art_deco_login.png',
+              fit: BoxFit.cover,
+            ),
           ),
-        ),
-        child: Container(
-          color: TitanicTheme.abyssalBlue.withOpacity(0.85),
-          child: SafeArea(
+
+          // Тёмная подложка
+          Positioned.fill(
+            child: Container(
+              color: TitanicTheme.abyssalBlue.withOpacity(0.86),
+            ),
+          ),
+
+          // РАМКА + ОРНАМЕНТ ПОВЕРХ
+          _buildOverlayFrameAndOrnament(),
+
+          // КОНТЕНТ
+          SafeArea(
             child: SingleChildScrollView(
               physics: const BouncingScrollPhysics(),
               child: Container(
@@ -171,7 +276,6 @@ class _LoginScreenState extends State<LoginScreen> {
                     // ЗАГОЛОВОЧНАЯ СЕКЦИЯ
                     Column(
                       children: [
-                        // Декоративный элемент
                         Container(
                           width: 80,
                           height: 80,
@@ -195,8 +299,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                         ),
                         const SizedBox(height: 20),
-                        
-                        // Заголовок
+
                         Text(
                           'TITANIC',
                           style: TextStyle(
@@ -216,8 +319,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                         ),
                         const SizedBox(height: 8),
-                        
-                        // Подзаголовок
+
                         Text(
                           'ВХОД В СИСТЕМУ',
                           style: TextStyle(
@@ -229,16 +331,15 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                         ),
                         const SizedBox(height: 4),
-                        
-                        // Декоративная линия
+
                         Container(
                           height: 2,
                           width: 120,
                           decoration: BoxDecoration(
                             gradient: LinearGradient(
                               colors: [
-                                TitanicTheme.raptureGold.withOpacity(0.6),
-                                TitanicTheme.seaFoamGreen.withOpacity(0.6),
+                                TitanicTheme.raptureGold.withOpacity(0.8),
+                                TitanicTheme.seaFoamGreen.withOpacity(0.7),
                               ],
                             ),
                             borderRadius: BorderRadius.circular(1),
@@ -246,31 +347,35 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       ],
                     ),
-                    
+
                     const SizedBox(height: 40),
-                    
-                    // ФОРМА ВХОДА
+
+                    // ФОРМА ВХОДА (оставляем читабельной)
                     Container(
                       decoration: BoxDecoration(
-                        color: TitanicTheme.panelDark.withOpacity(0.9),
+                        color: TitanicTheme.panelDark, // без полупрозрачности
                         borderRadius: BorderRadius.circular(20),
                         border: Border.all(
-                          color: TitanicTheme.raptureGold.withOpacity(0.3),
-                          width: 1.5,
+                          color: TitanicTheme.raptureGold.withOpacity(0.45),
+                          width: 1.6,
                         ),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withOpacity(0.5),
+                            color: Colors.black.withOpacity(0.55),
                             blurRadius: 25,
                             offset: const Offset(0, 12),
                             spreadRadius: 1,
+                          ),
+                          BoxShadow(
+                            color: TitanicTheme.raptureGold.withOpacity(0.10),
+                            blurRadius: 26,
+                            offset: const Offset(0, 0),
                           ),
                         ],
                       ),
                       padding: const EdgeInsets.all(24),
                       child: Column(
                         children: [
-                          // Поле username
                           TextField(
                             controller: _emailCtrl,
                             keyboardType: TextInputType.text,
@@ -290,8 +395,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             onSubmitted: (_) => FocusScope.of(context).nextFocus(),
                           ),
                           const SizedBox(height: 16),
-                          
-                          // Поле пароля
+
                           TextField(
                             controller: _passCtrl,
                             obscureText: true,
@@ -312,18 +416,17 @@ class _LoginScreenState extends State<LoginScreen> {
                               if (!_loading) _signIn();
                             },
                           ),
-                          
-                          // Сообщение об ошибке
+
                           if (_error != null) ...[
                             const SizedBox(height: 20),
                             Container(
                               width: double.infinity,
                               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                               decoration: BoxDecoration(
-                                color: Colors.redAccent.withOpacity(0.1),
+                                color: Colors.redAccent.withOpacity(0.12),
                                 borderRadius: BorderRadius.circular(12),
                                 border: Border.all(
-                                  color: Colors.redAccent.withOpacity(0.25),
+                                  color: Colors.redAccent.withOpacity(0.30),
                                   width: 1.5,
                                 ),
                               ),
@@ -331,7 +434,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                 children: [
                                   Icon(
                                     Icons.warning_amber_rounded,
-                                    color: Colors.redAccent.withOpacity(0.9),
+                                    color: Colors.redAccent.withOpacity(0.92),
                                     size: 20,
                                   ),
                                   const SizedBox(width: 12),
@@ -339,7 +442,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                     child: Text(
                                       _error!,
                                       style: TextStyle(
-                                        color: Colors.redAccent.withOpacity(0.9),
+                                        color: Colors.redAccent.withOpacity(0.92),
                                         fontSize: 14,
                                         fontFamily: 'Cinzel',
                                       ),
@@ -349,15 +452,14 @@ class _LoginScreenState extends State<LoginScreen> {
                               ),
                             ),
                           ],
-                          
+
                           const SizedBox(height: 24),
-                          
-                          // Декоративный разделитель
+
                           Row(
                             children: [
                               Expanded(
                                 child: Divider(
-                                  color: TitanicTheme.raptureGold.withOpacity(0.3),
+                                  color: TitanicTheme.raptureGold.withOpacity(0.35),
                                   thickness: 1,
                                   height: 20,
                                 ),
@@ -366,13 +468,13 @@ class _LoginScreenState extends State<LoginScreen> {
                                 padding: const EdgeInsets.symmetric(horizontal: 16),
                                 child: Icon(
                                   Icons.diamond,
-                                  color: TitanicTheme.raptureGold,
+                                  color: TitanicTheme.raptureGold.withOpacity(0.9),
                                   size: 16,
                                 ),
                               ),
                               Expanded(
                                 child: Divider(
-                                  color: TitanicTheme.raptureGold.withOpacity(0.3),
+                                  color: TitanicTheme.raptureGold.withOpacity(0.35),
                                   thickness: 1,
                                   height: 20,
                                 ),
@@ -380,8 +482,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             ],
                           ),
                           const SizedBox(height: 24),
-                          
-                          // Кнопка входа
+
                           ArtDecoButton(
                             text: 'ВОЙТИ В СИСТЕМУ',
                             icon: Icons.login_rounded,
@@ -392,10 +493,9 @@ class _LoginScreenState extends State<LoginScreen> {
                         ],
                       ),
                     ),
-                    
+
                     const SizedBox(height: 30),
-                    
-                    // ДЕКОРАТИВНЫЙ ЭЛЕМЕНТ ВНИЗУ
+
                     Column(
                       children: [
                         Container(
@@ -405,9 +505,9 @@ class _LoginScreenState extends State<LoginScreen> {
                             gradient: LinearGradient(
                               colors: [
                                 TitanicTheme.raptureGold.withOpacity(0.0),
-                                TitanicTheme.raptureGold.withOpacity(0.7),
-                                TitanicTheme.seaFoamGreen.withOpacity(0.5),
-                                TitanicTheme.raptureGold.withOpacity(0.7),
+                                TitanicTheme.raptureGold.withOpacity(0.85),
+                                TitanicTheme.seaFoamGreen.withOpacity(0.55),
+                                TitanicTheme.raptureGold.withOpacity(0.85),
                                 TitanicTheme.raptureGold.withOpacity(0.0),
                               ],
                               stops: const [0.0, 0.3, 0.5, 0.7, 1.0],
@@ -423,7 +523,7 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
             ),
           ),
-        ),
+        ],
       ),
     );
   }

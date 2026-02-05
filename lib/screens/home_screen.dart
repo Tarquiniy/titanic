@@ -39,6 +39,12 @@ class _HomeScreenState extends State<HomeScreen> {
   final SupabaseClient supabase = Supabase.instance.client;
   final GameService svc = GameService();
 
+  // Background overlay assets (optional). If missing in pubspec.yaml,
+  // the UI will skip drawing them (see errorBuilder).
+  static const String _bgAsset = 'assets/art_deco_login.png';
+  static const String _frameOverlayAsset = 'assets/art_deco_frame_overlay.png';
+  static const String _ornamentAsset = 'assets/art_deco_ornament.png';
+
   // Track speech button availability transitions
   bool _speechButtonPreviouslyEnabled = true;
 
@@ -1107,7 +1113,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String _formatYe(DateTime? utc) {
     if (utc == null) return '—';
     final ye = utc.toUtc().add(const Duration(hours: 5));
-    String z(int n) => n.toString().padLeft(2, '0');
+    String z(int n) => n.toString().padLeft(2, "0");
     return '${z(ye.day)}.${z(ye.month)} ${z(ye.hour)}:${z(ye.minute)}';
   }
 
@@ -1144,6 +1150,102 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Widget _buildArtDecoBackground({required Widget child}) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        // Base background image
+        const Positioned.fill(
+          child: Image(
+            image: AssetImage(_bgAsset),
+            fit: BoxFit.cover,
+          ),
+        ),
+
+        // Darken layer
+        Positioned.fill(
+          child: Container(
+            color: TitanicTheme.abyssalBlue.withOpacity(0.82),
+          ),
+        ),
+
+        // Vignette
+        Positioned.fill(
+          child: IgnorePointer(
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  center: const Alignment(0.0, -0.2),
+                  radius: 1.05,
+                  colors: [
+                    Colors.transparent,
+                    Colors.black.withOpacity(0.35),
+                  ],
+                  stops: const [0.55, 1.0],
+                ),
+              ),
+            ),
+          ),
+        ),
+
+        // Frame overlay (optional)
+        Positioned.fill(
+          child: IgnorePointer(
+            child: Opacity(
+              opacity: 0.20,
+              child: Image.asset(
+                _frameOverlayAsset,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+              ),
+            ),
+          ),
+        ),
+
+        // Top ornament (optional)
+        Positioned(
+          top: 8,
+          left: 0,
+          right: 0,
+          child: IgnorePointer(
+            child: Opacity(
+              opacity: 0.20,
+              child: Image.asset(
+                _ornamentAsset,
+                height: 38,
+                fit: BoxFit.contain,
+                errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+              ),
+            ),
+          ),
+        ),
+
+        // Bottom ornament (optional)
+        Positioned(
+          bottom: 8,
+          left: 0,
+          right: 0,
+          child: IgnorePointer(
+            child: Opacity(
+              opacity: 0.16,
+              child: RotatedBox(
+                quarterTurns: 2,
+                child: Image.asset(
+                  _ornamentAsset,
+                  height: 38,
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                ),
+              ),
+            ),
+          ),
+        ),
+
+        child,
+      ],
+    );
+  }
+
   // -----------------------
   // BUILD
   // -----------------------
@@ -1151,556 +1253,658 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final isSmallScreen = screenWidth < 380;
-    
+
     return Scaffold(
       backgroundColor: Colors.transparent,
-      body: Container(
-        decoration: const BoxDecoration(
-          image: DecorationImage(
-            image: AssetImage('assets/art_deco_login.png'),
-            fit: BoxFit.cover,
-          ),
-        ),
-        child: Container(
-          color: TitanicTheme.abyssalBlue.withOpacity(0.85),
-          child: SafeArea(
-            child: Column(
-              children: [
-                // ВЕРХНЯЯ ПАНЕЛЬ С КНОПКАМИ
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        TitanicTheme.abyssalBlue.withOpacity(0.95),
-                        TitanicTheme.abyssalBlue.withOpacity(0.7),
-                      ],
-                    ),
-                    border: Border(
-                      bottom: BorderSide(
-                        color: TitanicTheme.raptureGold.withOpacity(0.2),
-                        width: 1.5,
-                      ),
+      body: _buildArtDecoBackground(
+        child: SafeArea(
+          child: Column(
+            children: [
+              // ВЕРХНЯЯ ПАНЕЛЬ С КНОПКАМИ
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      TitanicTheme.abyssalBlue.withOpacity(0.95),
+                      TitanicTheme.abyssalBlue.withOpacity(0.7),
+                    ],
+                  ),
+                  border: Border(
+                    bottom: BorderSide(
+                      color: TitanicTheme.raptureGold.withOpacity(0.2),
+                      width: 1.5,
                     ),
                   ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      // ЛОГОТИП И ЗАГОЛОВОК
-                      Row(
-                        children: [
-                          Container(
-                            width: 40,
-                            height: 40,
-                            decoration: BoxDecoration(
-                              gradient: TitanicTheme.goldGradient,
-                              shape: BoxShape.circle,
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(0.4),
-                                  blurRadius: 8,
-                                  offset: const Offset(0, 3),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    // ЛОГОТИП И ЗАГОЛОВОК
+                    Row(
+                      children: [
+                        Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            gradient: TitanicTheme.goldGradient,
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.4),
+                                blurRadius: 8,
+                                offset: const Offset(0, 3),
+                              ),
+                            ],
+                          ),
+                          child: Icon(
+                            Icons.directions_boat,
+                            color: TitanicTheme.abyssalBlue,
+                            size: 24,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'ГЛАВНАЯ ПАЛУБА',
+                              style: TextStyle(
+                                fontFamily: 'Cinzel',
+                                fontSize: isSmallScreen ? 14 : 16,
+                                fontWeight: FontWeight.w700,
+                                color: TitanicTheme.ivoryCream,
+                                letterSpacing: 1.5,
+                              ),
+                            ),
+                            Container(
+                              height: 2,
+                              width: 80,
+                              margin: const EdgeInsets.only(top: 2),
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  colors: [
+                                    TitanicTheme.raptureGold,
+                                    TitanicTheme.seaFoamGreen,
+                                  ],
                                 ),
+                                borderRadius: BorderRadius.circular(1),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+
+                    // КНОПКИ ДЕЙСТВИЙ
+                    Row(
+                      children: [
+                        Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            gradient: TitanicTheme.goldGradient,
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.3),
+                                blurRadius: 6,
+                                offset: const Offset(0, 3),
+                              ),
+                            ],
+                          ),
+                          child: IconButton(
+                            padding: EdgeInsets.zero,
+                            icon: Icon(
+                              Icons.inventory_2,
+                              size: 20,
+                              color: TitanicTheme.abyssalBlue,
+                            ),
+                            onPressed: _openInventoryScreen,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            gradient: LinearGradient(
+                              colors: [
+                                TitanicTheme.copperDetail.withOpacity(0.9),
+                                TitanicTheme.brassAccent.withOpacity(0.8),
                               ],
                             ),
-                            child: Icon(
-                              Icons.directions_boat,
-                              color: TitanicTheme.abyssalBlue,
-                              size: 24,
-                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.3),
+                                blurRadius: 6,
+                                offset: const Offset(0, 3),
+                              ),
+                            ],
                           ),
-                          const SizedBox(width: 12),
-                          Column(
+                          child: IconButton(
+                            padding: EdgeInsets.zero,
+                            icon: Icon(
+                              Icons.exit_to_app,
+                              size: 20,
+                              color: TitanicTheme.abyssalBlue,
+                            ),
+                            onPressed: _logout,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+
+              // ОСНОВНОЙ КОНТЕНТ
+              Expanded(
+                child: SingleChildScrollView(
+                  physics: const BouncingScrollPhysics(),
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // КАРТОЧКА ПРОФИЛЯ
+                      Container(
+                        decoration: BoxDecoration(
+                          color: TitanicTheme.panelDark.withOpacity(0.9),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: TitanicTheme.raptureGold.withOpacity(0.3),
+                            width: 1.5,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.4),
+                              blurRadius: 20,
+                              offset: const Offset(0, 8),
+                            ),
+                          ],
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(20),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // ИНФОРМАЦИЯ О ПОЛЬЗОВАТЕЛЕ
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Container(
+                                    width: 60,
+                                    height: 60,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      gradient: TitanicTheme.goldGradient,
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withOpacity(0.4),
+                                          blurRadius: 10,
+                                          offset: const Offset(0, 6),
+                                        ),
+                                      ],
+                                    ),
+                                    child: Center(
+                                      child: Icon(
+                                        Icons.person,
+                                        size: 32,
+                                        color: TitanicTheme.abyssalBlue,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 16),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          '${user.firstName} ${user.lastName}',
+                                          style: TextStyle(
+                                            fontFamily: 'CormorantGaramond',
+                                            fontSize: isSmallScreen ? 20 : 24,
+                                            fontWeight: FontWeight.w700,
+                                            color: TitanicTheme.ivoryCream,
+                                            letterSpacing: 0.5,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          '@${user.username}',
+                                          style: TextStyle(
+                                            fontFamily: 'Cinzel',
+                                            fontSize: 14,
+                                            color: TitanicTheme.ivoryCream
+                                                .withOpacity(0.7),
+                                            letterSpacing: 0.3,
+                                          ),
+                                        ),
+                                        if (_userColor != null) ...[
+                                          const SizedBox(height: 8),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 10, vertical: 4),
+                                            decoration: BoxDecoration(
+                                              color: _getColorFromString(
+                                                      _userColor!)
+                                                  .withOpacity(0.2),
+                                              borderRadius:
+                                                  BorderRadius.circular(12),
+                                              border: Border.all(
+                                                color: _getColorFromString(
+                                                        _userColor!)
+                                                    .withOpacity(0.4),
+                                                width: 1,
+                                              ),
+                                            ),
+                                            child: Text(
+                                              _userColor!,
+                                              style: TextStyle(
+                                                fontFamily: 'Cinzel',
+                                                fontSize: 12,
+                                                color: TitanicTheme.ivoryCream,
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 20),
+
+                              // БАЛАНСЫ
+                              Container(
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  color: TitanicTheme.surfaceNavy
+                                      .withOpacity(0.3),
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(
+                                    color: TitanicTheme.raptureGold
+                                        .withOpacity(0.2),
+                                    width: 1,
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceAround,
+                                  children: [
+                                    Column(
+                                      children: [
+                                        Text(
+                                          'Войсы',
+                                          style: TextStyle(
+                                            fontFamily: 'Cinzel',
+                                            fontSize: 12,
+                                            color: TitanicTheme.ivoryCream
+                                                .withOpacity(0.7),
+                                            letterSpacing: 1.0,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          user.vBalance.toStringAsFixed(2),
+                                          style: TextStyle(
+                                            fontFamily: 'CormorantGaramond',
+                                            fontSize: isSmallScreen ? 22 : 26,
+                                            fontWeight: FontWeight.w700,
+                                            color: TitanicTheme.raptureGold,
+                                            letterSpacing: 1.0,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    Container(
+                                      width: 1,
+                                      height: 40,
+                                      color: TitanicTheme.raptureGold
+                                          .withOpacity(0.2),
+                                    ),
+                                    Column(
+                                      children: [
+                                        Text(
+                                          'Майнды',
+                                          style: TextStyle(
+                                            fontFamily: 'Cinzel',
+                                            fontSize: 12,
+                                            color: TitanicTheme.ivoryCream
+                                                .withOpacity(0.7),
+                                            letterSpacing: 1.0,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          user.mBalance.toStringAsFixed(2),
+                                          style: TextStyle(
+                                            fontFamily: 'CormorantGaramond',
+                                            fontSize: isSmallScreen ? 22 : 26,
+                                            fontWeight: FontWeight.w700,
+                                            color: TitanicTheme.seaFoamGreen,
+                                            letterSpacing: 1.0,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 20),
+
+                              // КНОПКИ ДЕЙСТВИЙ
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: ArtDecoButton(
+                                      text: 'Перевод V',
+                                      icon: Icons.swap_horiz,
+                                      onPressed: _openTransferScreen,
+                                      primary: false,
+                                      expanded: true,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: ArtDecoButton(
+                                      text: 'Инвентарь',
+                                      icon: Icons.inventory_2,
+                                      onPressed: _openInventoryScreen,
+                                      primary: true,
+                                      expanded: true,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+
+                      // СЕКЦИЯ ВОЗМОЖНОСТЕЙ РОЛИ
+                      Container(
+                        decoration: BoxDecoration(
+                          color: TitanicTheme.panelDark.withOpacity(0.9),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: TitanicTheme.seaFoamGreen.withOpacity(0.3),
+                            width: 1.5,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.4),
+                              blurRadius: 20,
+                              offset: const Offset(0, 8),
+                            ),
+                          ],
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(20),
+                          child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'ГЛАВНАЯ ПАЛУБА',
+                                'Возможности вашей роли',
                                 style: TextStyle(
-                                  fontFamily: 'Cinzel',
-                                  fontSize: isSmallScreen ? 14 : 16,
+                                  fontFamily: 'CormorantGaramond',
+                                  fontSize: isSmallScreen ? 20 : 22,
                                   fontWeight: FontWeight.w700,
                                   color: TitanicTheme.ivoryCream,
-                                  letterSpacing: 1.5,
+                                  letterSpacing: 0.5,
                                 ),
                               ),
+                              const SizedBox(height: 8),
                               Container(
-                                height: 2,
-                                width: 80,
-                                margin: const EdgeInsets.only(top: 2),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 6),
                                 decoration: BoxDecoration(
-                                  gradient: LinearGradient(
-                                    colors: [
-                                      TitanicTheme.raptureGold,
-                                      TitanicTheme.seaFoamGreen,
-                                    ],
-                                  ),
-                                  borderRadius: BorderRadius.circular(1),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                      
-                      // КНОПКИ ДЕЙСТВИЙ
-                      Row(
-                        children: [
-                          Container(
-                            width: 40,
-                            height: 40,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              gradient: TitanicTheme.goldGradient,
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(0.3),
-                                  blurRadius: 6,
-                                  offset: const Offset(0, 3),
-                                ),
-                              ],
-                            ),
-                            child: IconButton(
-                              padding: EdgeInsets.zero,
-                              icon: Icon(
-                                Icons.inventory_2,
-                                size: 20,
-                                color: TitanicTheme.abyssalBlue,
-                              ),
-                              onPressed: _openInventoryScreen,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Container(
-                            width: 40,
-                            height: 40,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              gradient: LinearGradient(
-                                colors: [
-                                  TitanicTheme.copperDetail.withOpacity(0.9),
-                                  TitanicTheme.brassAccent.withOpacity(0.8),
-                                ],
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(0.3),
-                                  blurRadius: 6,
-                                  offset: const Offset(0, 3),
-                                ),
-                              ],
-                            ),
-                            child: IconButton(
-                              padding: EdgeInsets.zero,
-                              icon: Icon(
-                                Icons.exit_to_app,
-                                size: 20,
-                                color: TitanicTheme.abyssalBlue,
-                              ),
-                              onPressed: _logout,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                
-                // ОСНОВНОЙ КОНТЕНТ
-                Expanded(
-                  child: SingleChildScrollView(
-                    physics: const BouncingScrollPhysics(),
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        // КАРТОЧКА ПРОФИЛЯ
-                        Container(
-                          decoration: BoxDecoration(
-                            color: TitanicTheme.panelDark.withOpacity(0.9),
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(
-                              color: TitanicTheme.raptureGold.withOpacity(0.3),
-                              width: 1.5,
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.4),
-                                blurRadius: 20,
-                                offset: const Offset(0, 8),
-                              ),
-                            ],
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.all(20),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                // ИНФОРМАЦИЯ О ПОЛЬЗОВАТЕЛЕ
-                                Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Container(
-                                      width: 60,
-                                      height: 60,
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        gradient: TitanicTheme.goldGradient,
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color: Colors.black.withOpacity(0.4),
-                                            blurRadius: 10,
-                                            offset: const Offset(0, 6),
-                                          ),
-                                        ],
-                                      ),
-                                      child: Center(
-                                        child: Icon(
-                                          Icons.person,
-                                          size: 32,
-                                          color: TitanicTheme.abyssalBlue,
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 16),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            '${user.firstName} ${user.lastName}',
-                                            style: TextStyle(
-                                              fontFamily: 'CormorantGaramond',
-                                              fontSize: isSmallScreen ? 20 : 24,
-                                              fontWeight: FontWeight.w700,
-                                              color: TitanicTheme.ivoryCream,
-                                              letterSpacing: 0.5,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 2),
-                                          Text(
-                                            '@${user.username}',
-                                            style: TextStyle(
-                                              fontFamily: 'Cinzel',
-                                              fontSize: 14,
-                                              color: TitanicTheme.ivoryCream.withOpacity(0.7),
-                                              letterSpacing: 0.3,
-                                            ),
-                                          ),
-                                          if (_userColor != null) ...[
-                                            const SizedBox(height: 8),
-                                            Container(
-                                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                              decoration: BoxDecoration(
-                                                color: _getColorFromString(_userColor!).withOpacity(0.2),
-                                                borderRadius: BorderRadius.circular(12),
-                                                border: Border.all(
-                                                  color: _getColorFromString(_userColor!).withOpacity(0.4),
-                                                  width: 1,
-                                                ),
-                                              ),
-                                              child: Text(
-                                                _userColor!,
-                                                style: TextStyle(
-                                                  fontFamily: 'Cinzel',
-                                                  fontSize: 12,
-                                                  color: TitanicTheme.ivoryCream,
-                                                  fontWeight: FontWeight.w500,
-                                                ),
-                                              ),
-                                            ),
-                                          ],
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 20),
-                                
-                                // БАЛАНСЫ
-                                Container(
-                                  padding: const EdgeInsets.all(16),
-                                  decoration: BoxDecoration(
-                                    color: TitanicTheme.surfaceNavy.withOpacity(0.3),
-                                    borderRadius: BorderRadius.circular(16),
-                                    border: Border.all(
-                                      color: TitanicTheme.raptureGold.withOpacity(0.2),
-                                      width: 1,
-                                    ),
-                                  ),
-                                  child: Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceAround,
-                                    children: [
-                                      Column(
-                                        children: [
-                                          Text(
-                                            'Войсы',
-                                            style: TextStyle(
-                                              fontFamily: 'Cinzel',
-                                              fontSize: 12,
-                                              color: TitanicTheme.ivoryCream.withOpacity(0.7),
-                                              letterSpacing: 1.0,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 4),
-                                          Text(
-                                            user.vBalance.toStringAsFixed(2),
-                                            style: TextStyle(
-                                              fontFamily: 'CormorantGaramond',
-                                              fontSize: isSmallScreen ? 22 : 26,
-                                              fontWeight: FontWeight.w700,
-                                              color: TitanicTheme.raptureGold,
-                                              letterSpacing: 1.0,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      Container(
-                                        width: 1,
-                                        height: 40,
-                                        color: TitanicTheme.raptureGold.withOpacity(0.2),
-                                      ),
-                                      Column(
-                                        children: [
-                                          Text(
-                                            'Майнды',
-                                            style: TextStyle(
-                                              fontFamily: 'Cinzel',
-                                              fontSize: 12,
-                                              color: TitanicTheme.ivoryCream.withOpacity(0.7),
-                                              letterSpacing: 1.0,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 4),
-                                          Text(
-                                            user.mBalance.toStringAsFixed(2),
-                                            style: TextStyle(
-                                              fontFamily: 'CormorantGaramond',
-                                              fontSize: isSmallScreen ? 22 : 26,
-                                              fontWeight: FontWeight.w700,
-                                              color: TitanicTheme.seaFoamGreen,
-                                              letterSpacing: 1.0,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ],
+                                  color: TitanicTheme.raptureGold
+                                      .withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(
+                                    color: TitanicTheme.raptureGold
+                                        .withOpacity(0.3),
                                   ),
                                 ),
-                                const SizedBox(height: 20),
-                                
-                                // КНОПКИ ДЕЙСТВИЙ
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: ArtDecoButton(
-                                        text: 'Перевод V',
-                                        icon: Icons.swap_horiz,
-                                        onPressed: _openTransferScreen,
-                                        primary: false,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      child: ArtDecoButton(
-                                        text: 'Инвентарь',
-                                        icon: Icons.inventory_2,
-                                        onPressed: _openInventoryScreen,
-                                        primary: true,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-
-                        // СЕКЦИЯ ВОЗМОЖНОСТЕЙ РОЛИ
-                        Container(
-                          decoration: BoxDecoration(
-                            color: TitanicTheme.panelDark.withOpacity(0.9),
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(
-                              color: TitanicTheme.seaFoamGreen.withOpacity(0.3),
-                              width: 1.5,
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.4),
-                                blurRadius: 20,
-                                offset: const Offset(0, 8),
-                              ),
-                            ],
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.all(20),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Возможности вашей роли',
+                                child: Text(
+                                  user.role,
                                   style: TextStyle(
-                                    fontFamily: 'CormorantGaramond',
-                                    fontSize: isSmallScreen ? 20 : 22,
-                                    fontWeight: FontWeight.w700,
-                                    color: TitanicTheme.ivoryCream,
+                                    fontFamily: 'Cinzel',
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: TitanicTheme.raptureGold,
                                     letterSpacing: 0.5,
                                   ),
                                 ),
-                                const SizedBox(height: 8),
+                              ),
+                              const SizedBox(height: 20),
+
+                              // КНОПКИ ДЛЯ РОЛЕЙ
+                              if (_isRole('economist')) ...[
+                                ArtDecoButton(
+                                  text: 'Купить ход',
+                                  icon: Icons.shopping_cart,
+                                  onPressed: _openBuyTurnFlow,
+                                  primary: true,
+                                  expanded: true,
+                                ),
+                                const SizedBox(height: 12),
+                              ],
+
+                              if (_hasActiveDebate &&
+                                  !_alreadyVotedInActiveDebate) ...[
+                                ArtDecoButton(
+                                  text: 'Участвовать в дебатах',
+                                  icon: Icons.forum,
+                                  onPressed: _openDebates,
+                                  primary: false,
+                                  expanded: true,
+                                ),
+                                const SizedBox(height: 12),
+                              ],
+
+                              if (_hasActiveResolution &&
+                                  !_alreadyBetInActiveResolution) ...[
                                 Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                  decoration: BoxDecoration(
-                                    color: TitanicTheme.raptureGold.withOpacity(0.1),
-                                    borderRadius: BorderRadius.circular(10),
-                                    border: Border.all(
-                                      color: TitanicTheme.raptureGold.withOpacity(0.3),
-                                    ),
-                                  ),
-                                  child: Text(
-                                    user.role,
-                                    style: TextStyle(
-                                      fontFamily: 'Cinzel',
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w600,
-                                      color: TitanicTheme.raptureGold,
-                                      letterSpacing: 0.5,
+                                  decoration: TitanicTheme.outlineGildedButton(
+                                      highlighted: true),
+                                  child: Material(
+                                    color: Colors.transparent,
+                                    child: InkWell(
+                                      onTap: _onOpenResolutionPressed,
+                                      borderRadius: BorderRadius.circular(12),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            vertical: 14, horizontal: 16),
+                                        child: Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.center,
+                                          children: [
+                                            Icon(Icons.gavel,
+                                                color: TitanicTheme.seaFoamGreen,
+                                                size: 20),
+                                            const SizedBox(width: 10),
+                                            Text(
+                                              'Политрешение',
+                                              style: TextStyle(
+                                                fontFamily: 'Cinzel',
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.w600,
+                                                color: TitanicTheme.ivoryCream,
+                                                letterSpacing: 0.8,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
                                     ),
                                   ),
                                 ),
-                                const SizedBox(height: 20),
-                                
-                                // КНОПКИ ДЛЯ РОЛЕЙ
-                                if (_isRole('economist')) ...[
-                                  ArtDecoButton(
-                                    text: 'Купить ход',
-                                    icon: Icons.shopping_cart,
-                                    onPressed: _openBuyTurnFlow,
-                                    primary: true,
-                                  ),
-                                  const SizedBox(height: 12),
-                                ],
+                                const SizedBox(height: 12),
+                              ],
 
-                                if (_hasActiveDebate && !_alreadyVotedInActiveDebate) ...[
-                                  ArtDecoButton(
-                                    text: 'Участвовать в дебатах',
-                                    icon: Icons.forum,
-                                    onPressed: _openDebates,
-                                    primary: false,
-                                  ),
-                                  const SizedBox(height: 12),
-                                ],
-
-                                if (_hasActiveResolution && !_alreadyBetInActiveResolution) ...[
-                                  Container(
-                                    decoration: TitanicTheme.outlineGildedButton(highlighted: true),
-                                    child: Material(
-                                      color: Colors.transparent,
-                                      child: InkWell(
-                                        onTap: _onOpenResolutionPressed,
-                                        borderRadius: BorderRadius.circular(12),
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
-                                          child: Row(
-                                            mainAxisAlignment: MainAxisAlignment.center,
-                                            children: [
-                                              Icon(Icons.gavel, color: TitanicTheme.seaFoamGreen, size: 20),
-                                              const SizedBox(width: 10),
-                                              Text(
-                                                'Политрешение',
+                              if (user.role == 'politician') ...[
+                                Container(
+                                  decoration: _isSpeechButtonEnabled
+                                      ? TitanicTheme
+                                          .primaryAccentButtonDecoration
+                                      : TitanicTheme.outlineGildedButton(),
+                                  child: Material(
+                                    color: Colors.transparent,
+                                    child: InkWell(
+                                      onTap: _isSpeechButtonEnabled
+                                          ? _onStartSpeechPressed
+                                          : null,
+                                      borderRadius: BorderRadius.circular(12),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            vertical: 14, horizontal: 16),
+                                        child: Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.center,
+                                          children: [
+                                            if (_rpcLoading)
+                                              SizedBox(
+                                                width: 20,
+                                                height: 20,
+                                                child:
+                                                    CircularProgressIndicator(
+                                                  strokeWidth: 2,
+                                                  color: _isSpeechButtonEnabled
+                                                      ? Colors.black
+                                                      : TitanicTheme.raptureGold,
+                                                ),
+                                              )
+                                            else
+                                              Icon(
+                                                Icons.campaign,
+                                                color: _isSpeechButtonEnabled
+                                                    ? Colors.black
+                                                    : TitanicTheme.raptureGold,
+                                                size: 20,
+                                              ),
+                                            const SizedBox(width: 10),
+                                            Expanded(
+                                              child: Text(
+                                                _isSpeechButtonEnabled
+                                                    ? 'Речь жизни (старт)'
+                                                    : 'Речь жизни (неактивна)',
                                                 style: TextStyle(
                                                   fontFamily: 'Cinzel',
                                                   fontSize: 16,
                                                   fontWeight: FontWeight.w600,
-                                                  color: TitanicTheme.ivoryCream,
-                                                  letterSpacing: 0.8,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(height: 12),
-                                ],
-
-                                if (user.role == 'politician') ...[
-                                  Container(
-                                    decoration: _isSpeechButtonEnabled
-                                        ? TitanicTheme.primaryAccentButtonDecoration
-                                        : TitanicTheme.outlineGildedButton(),
-                                    child: Material(
-                                      color: Colors.transparent,
-                                      child: InkWell(
-                                        onTap: _isSpeechButtonEnabled ? _onStartSpeechPressed : null,
-                                        borderRadius: BorderRadius.circular(12),
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
-                                          child: Row(
-                                            mainAxisAlignment: MainAxisAlignment.center,
-                                            children: [
-                                              if (_rpcLoading)
-                                                SizedBox(
-                                                  width: 20,
-                                                  height: 20,
-                                                  child: CircularProgressIndicator(
-                                                    strokeWidth: 2,
-                                                    color: _isSpeechButtonEnabled
-                                                        ? Colors.black
-                                                        : TitanicTheme.raptureGold,
-                                                  ),
-                                                )
-                                              else
-                                                Icon(
-                                                  Icons.campaign,
                                                   color: _isSpeechButtonEnabled
                                                       ? Colors.black
-                                                      : TitanicTheme.raptureGold,
-                                                  size: 20,
+                                                      : TitanicTheme.ivoryCream,
+                                                  letterSpacing: 0.8,
                                                 ),
-                                              const SizedBox(width: 10),
-                                              Expanded(
-                                                child: Text(
-                                                  _isSpeechButtonEnabled
-                                                      ? 'Речь жизни (старт)'
-                                                      : 'Речь жизни (неактивна)',
-                                                  style: TextStyle(
-                                                    fontFamily: 'Cinzel',
-                                                    fontSize: 16,
-                                                    fontWeight: FontWeight.w600,
-                                                    color: _isSpeechButtonEnabled
-                                                        ? Colors.black
-                                                        : TitanicTheme.ivoryCream,
-                                                    letterSpacing: 0.8,
-                                                  ),
-                                                  textAlign: TextAlign.center,
-                                                ),
+                                                textAlign: TextAlign.center,
                                               ),
-                                            ],
-                                          ),
+                                            ),
+                                          ],
                                         ),
                                       ),
                                     ),
                                   ),
-                                  const SizedBox(height: 12),
-                                ],
+                                ),
+                                const SizedBox(height: 12),
                               ],
-                            ),
+                            ],
                           ),
                         ),
-                        const SizedBox(height: 20),
+                      ),
+                      const SizedBox(height: 20),
 
-                        // БЛОК ФИЛЬМОВ
+                      // БЛОК ФИЛЬМОВ
+                      Container(
+                        decoration: BoxDecoration(
+                          color: TitanicTheme.panelDark.withOpacity(0.9),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: TitanicTheme.copperDetail.withOpacity(0.3),
+                            width: 1.5,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.4),
+                              blurRadius: 20,
+                              offset: const Offset(0, 8),
+                            ),
+                          ],
+                        ),
+                        padding: const EdgeInsets.all(20),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Кинематограф',
+                              style: TextStyle(
+                                fontFamily: 'CormorantGaramond',
+                                fontSize: isSmallScreen ? 20 : 22,
+                                fontWeight: FontWeight.w700,
+                                color: TitanicTheme.ivoryCream,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+
+                            // Кнопка "Я посмотрел фильм"
+                            WatchedMovieBlock(
+                              currentUserId: user.id,
+                              onChanged: () async {
+                                try {
+                                  await _refreshProfile();
+                                  await _loadJournal();
+                                } catch (_) {}
+                              },
+                            ),
+                            const SizedBox(height: 12),
+
+                            // Голосование за фильм
+                            MovieVoteBlock(
+                              currentUserId: user.id,
+                              currentUserRole: user.role,
+                              onVoted: () async {
+                                try {
+                                  await _refreshProfile();
+                                  await _loadJournal();
+                                } catch (_) {}
+                              },
+                            ),
+                            const SizedBox(height: 12),
+
+                            // Hollywood кнопки
+                            HollywoodPayBlock(
+                              currentUserId: user.id,
+                              currentUserRole: user.role,
+                              onPaid: () async {
+                                try {
+                                  await _refreshProfile();
+                                  await _loadJournal();
+                                } catch (_) {}
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      // БЛОКИ ДЛЯ МАФИИ
+                      if (_isRole('мафия')) ...[
+                        const SizedBox(height: 20),
                         Container(
                           decoration: BoxDecoration(
                             color: TitanicTheme.panelDark.withOpacity(0.9),
                             borderRadius: BorderRadius.circular(20),
                             border: Border.all(
-                              color: TitanicTheme.copperDetail.withOpacity(0.3),
+                              color: Colors.redAccent.withOpacity(0.3),
                               width: 1.5,
                             ),
                             boxShadow: [
@@ -1716,7 +1920,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'Кинематограф',
+                                'Особые возможности',
                                 style: TextStyle(
                                   fontFamily: 'CormorantGaramond',
                                   fontSize: isSmallScreen ? 20 : 22,
@@ -1726,242 +1930,179 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ),
                               ),
                               const SizedBox(height: 16),
-                              
-                              // Кнопка "Я посмотрел фильм"
-                              WatchedMovieBlock(
-                                currentUserId: user.id,
-                                onChanged: () async {
-                                  try {
-                                    await _refreshProfile();
-                                    await _loadJournal();
-                                  } catch (_) {}
-                                },
-                              ),
-                              const SizedBox(height: 12),
-                              
-                              // Голосование за фильм
-                              MovieVoteBlock(
+
+                              mafia_blocks.MafiaBlock(
                                 currentUserId: user.id,
                                 currentUserRole: user.role,
-                                onVoted: () async {
+                                onProposalUsed: () async {
                                   try {
                                     await _refreshProfile();
                                     await _loadJournal();
                                   } catch (_) {}
                                 },
+                                onDebtCollected: _onDebtCollected,
+                                onEnterpriseBought: _onMafiaEnterpriseBought,
                               ),
-                              const SizedBox(height: 12),
-                              
-                              // Hollywood кнопки
-                              HollywoodPayBlock(
+                              const SizedBox(height: 16),
+
+                              BloodPokerBlock(
                                 currentUserId: user.id,
-                                currentUserRole: user.role,
-                                onPaid: () async {
-                                  try {
-                                    await _refreshProfile();
-                                    await _loadJournal();
-                                  } catch (_) {}
-                                },
+                                onBetPlaced: _onBloodPokerBetPlaced,
                               ),
                             ],
                           ),
                         ),
-
-                        // БЛОКИ ДЛЯ МАФИИ
-                        if (_isRole('мафия')) ...[
-                          const SizedBox(height: 20),
-                          Container(
-                            decoration: BoxDecoration(
-                              color: TitanicTheme.panelDark.withOpacity(0.9),
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                color: Colors.redAccent.withOpacity(0.3),
-                                width: 1.5,
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(0.4),
-                                  blurRadius: 20,
-                                  offset: const Offset(0, 8),
-                                ),
-                              ],
-                            ),
-                            padding: const EdgeInsets.all(20),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Особые возможности',
-                                  style: TextStyle(
-                                    fontFamily: 'CormorantGaramond',
-                                    fontSize: isSmallScreen ? 20 : 22,
-                                    fontWeight: FontWeight.w700,
-                                    color: TitanicTheme.ivoryCream,
-                                    letterSpacing: 0.5,
-                                  ),
-                                ),
-                                const SizedBox(height: 16),
-                                
-                                mafia_blocks.MafiaBlock(
-                                  currentUserId: user.id,
-                                  currentUserRole: user.role,
-                                  onProposalUsed: () async {
-                                    try {
-                                      await _refreshProfile();
-                                      await _loadJournal();
-                                    } catch (_) {}
-                                  },
-                                  onDebtCollected: _onDebtCollected,
-                                  onEnterpriseBought: _onMafiaEnterpriseBought,
-                                ),
-                                const SizedBox(height: 16),
-                                
-                                BloodPokerBlock(
-                                  currentUserId: user.id,
-                                  onBetPlaced: _onBloodPokerBetPlaced,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-
-                        // ЖУРНАЛ СОБЫТИЙ
-                        const SizedBox(height: 20),
-                        Container(
-                          decoration: BoxDecoration(
-                            color: TitanicTheme.panelDark.withOpacity(0.9),
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(
-                              color: TitanicTheme.raptureGold.withOpacity(0.3),
-                              width: 1.5,
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.4),
-                                blurRadius: 20,
-                                offset: const Offset(0, 8),
-                              ),
-                            ],
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.all(20),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Журнал событий',
-                                  style: TextStyle(
-                                    fontFamily: 'CormorantGaramond',
-                                    fontSize: isSmallScreen ? 20 : 22,
-                                    fontWeight: FontWeight.w700,
-                                    color: TitanicTheme.ivoryCream,
-                                    letterSpacing: 0.5,
-                                  ),
-                                ),
-                                const SizedBox(height: 16),
-                                
-                                if (_journalEntries.isEmpty)
-                                  Padding(
-                                    padding: const EdgeInsets.symmetric(vertical: 30),
-                                    child: Column(
-                                      children: [
-                                        Icon(
-                                          Icons.history_toggle_off,
-                                          size: 50,
-                                          color: TitanicTheme.ivoryCream.withOpacity(0.2),
-                                        ),
-                                        const SizedBox(height: 12),
-                                        Text(
-                                          'История событий пуста',
-                                          style: TextStyle(
-                                            fontFamily: 'Cinzel',
-                                            fontSize: 14,
-                                            color: TitanicTheme.ivoryCream.withOpacity(0.5),
-                                            letterSpacing: 0.5,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  )
-                                else
-                                  ..._journalEntries.take(5).map((entry) {
-                                    return Container(
-                                      margin: const EdgeInsets.only(bottom: 12),
-                                      decoration: BoxDecoration(
-                                        color: TitanicTheme.surfaceNavy.withOpacity(0.3),
-                                        borderRadius: BorderRadius.circular(12),
-                                        border: Border.all(
-                                          color: TitanicTheme.raptureGold.withOpacity(0.1),
-                                          width: 1,
-                                        ),
-                                      ),
-                                      child: Padding(
-                                        padding: const EdgeInsets.all(12),
-                                        child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              entry['title']?.toString() ?? 'Событие',
-                                              style: TextStyle(
-                                                fontFamily: 'Cinzel',
-                                                fontSize: 14,
-                                                fontWeight: FontWeight.w600,
-                                                color: TitanicTheme.ivoryCream,
-                                                letterSpacing: 0.3,
-                                              ),
-                                              maxLines: 2,
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                            const SizedBox(height: 8),
-                                            Text(
-                                              entry['message']?.toString() ?? '',
-                                              style: TextStyle(
-                                                fontFamily: 'Cinzel',
-                                                fontSize: 13,
-                                                color: TitanicTheme.ivoryCream.withOpacity(0.85),
-                                                letterSpacing: 0.3,
-                                                height: 1.4,
-                                              ),
-                                              maxLines: 3,
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                            const SizedBox(height: 8),
-                                            Row(
-                                              mainAxisAlignment: MainAxisAlignment.end,
-                                              children: [
-                                                Icon(
-                                                  Icons.access_time,
-                                                  size: 12,
-                                                  color: TitanicTheme.ivoryCream.withOpacity(0.5),
-                                                ),
-                                                const SizedBox(width: 6),
-                                                Text(
-                                                  _formatJournalDate(entry['created_at']?.toString()),
-                                                  style: TextStyle(
-                                                    fontFamily: 'Cinzel',
-                                                    fontSize: 11,
-                                                    color: TitanicTheme.ivoryCream.withOpacity(0.5),
-                                                    letterSpacing: 0.3,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    );
-                                  }).toList(),
-                              ],
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 40),
                       ],
-                    ),
+
+                      // ЖУРНАЛ СОБЫТИЙ
+                      const SizedBox(height: 20),
+                      Container(
+                        decoration: BoxDecoration(
+                          color: TitanicTheme.panelDark.withOpacity(0.9),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: TitanicTheme.raptureGold.withOpacity(0.3),
+                            width: 1.5,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.4),
+                              blurRadius: 20,
+                              offset: const Offset(0, 8),
+                            ),
+                          ],
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(20),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Журнал событий',
+                                style: TextStyle(
+                                  fontFamily: 'CormorantGaramond',
+                                  fontSize: isSmallScreen ? 20 : 22,
+                                  fontWeight: FontWeight.w700,
+                                  color: TitanicTheme.ivoryCream,
+                                  letterSpacing: 0.5,
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+
+                              if (_journalEntries.isEmpty)
+                                Padding(
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 30),
+                                  child: Column(
+                                    children: [
+                                      Icon(
+                                        Icons.history_toggle_off,
+                                        size: 50,
+                                        color: TitanicTheme.ivoryCream
+                                            .withOpacity(0.2),
+                                      ),
+                                      const SizedBox(height: 12),
+                                      Text(
+                                        'История событий пуста',
+                                        style: TextStyle(
+                                          fontFamily: 'Cinzel',
+                                          fontSize: 14,
+                                          color: TitanicTheme.ivoryCream
+                                              .withOpacity(0.5),
+                                          letterSpacing: 0.5,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                )
+                              else
+                                ..._journalEntries.take(5).map((entry) {
+                                  return Container(
+                                    margin: const EdgeInsets.only(bottom: 12),
+                                    decoration: BoxDecoration(
+                                      color: TitanicTheme.surfaceNavy
+                                          .withOpacity(0.3),
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: TitanicTheme.raptureGold
+                                            .withOpacity(0.1),
+                                        width: 1,
+                                      ),
+                                    ),
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(12),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            entry['title']?.toString() ??
+                                                'Событие',
+                                            style: TextStyle(
+                                              fontFamily: 'Cinzel',
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w600,
+                                              color: TitanicTheme.ivoryCream,
+                                              letterSpacing: 0.3,
+                                            ),
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                          const SizedBox(height: 8),
+                                          Text(
+                                            entry['message']?.toString() ?? '',
+                                            style: TextStyle(
+                                              fontFamily: 'Cinzel',
+                                              fontSize: 13,
+                                              color: TitanicTheme.ivoryCream
+                                                  .withOpacity(0.85),
+                                              letterSpacing: 0.3,
+                                              height: 1.4,
+                                            ),
+                                            maxLines: 3,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                          const SizedBox(height: 8),
+                                          Row(
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.end,
+                                            children: [
+                                              Icon(
+                                                Icons.access_time,
+                                                size: 12,
+                                                color: TitanicTheme.ivoryCream
+                                                    .withOpacity(0.5),
+                                              ),
+                                              const SizedBox(width: 6),
+                                              Text(
+                                                _formatJournalDate(entry[
+                                                        'created_at']
+                                                    ?.toString()),
+                                                style: TextStyle(
+                                                  fontFamily: 'Cinzel',
+                                                  fontSize: 11,
+                                                  color: TitanicTheme.ivoryCream
+                                                      .withOpacity(0.5),
+                                                  letterSpacing: 0.3,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                }).toList(),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 40),
+                    ],
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
@@ -1994,7 +2135,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final date = DateTime.parse(dateString).toLocal();
       final now = DateTime.now();
       final difference = now.difference(date);
-      
+
       if (difference.inMinutes < 1) {
         return 'Только что';
       } else if (difference.inHours < 1) {
@@ -2004,7 +2145,7 @@ class _HomeScreenState extends State<HomeScreen> {
       } else if (difference.inDays < 7) {
         return '${difference.inDays} дн. назад';
       } else {
-        return '${date.day.toString().padLeft(2, '0')}.${date.month.toString().padLeft(2, '0')}';
+        return '${date.day.toString().padLeft(2, "0")}.${date.month.toString().padLeft(2, "0")}';
       }
     } catch (e) {
       return dateString;

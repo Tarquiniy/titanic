@@ -394,6 +394,17 @@ class TitanicTheme {
         ],
       );
 
+  // ✅ NEW: Disabled primary button decoration (без переименований существующего)
+  static BoxDecoration get primaryAccentButtonDecorationDisabled => BoxDecoration(
+        color: panelDark.withOpacity(0.40),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: raptureGold.withOpacity(0.18),
+          width: 1.3,
+        ),
+        boxShadow: const [],
+      );
+
   // Copper button for secondary actions
   static BoxDecoration get copperAccentButtonDecoration => BoxDecoration(
         gradient: copperGradient,
@@ -412,23 +423,28 @@ class TitanicTheme {
       );
 
   // Outline button with Art Deco flair
-  static BoxDecoration outlineGildedButton({bool highlighted = false}) =>
+  // ✅ UPDATED safely: добавлен enabled (по умолчанию true — старые вызовы не ломаются)
+  static BoxDecoration outlineGildedButton({bool highlighted = false, bool enabled = true}) =>
       BoxDecoration(
-        color: panelDark.withOpacity(highlighted ? 0.15 : 0.08),
+        color: panelDark.withOpacity(
+          enabled ? (highlighted ? 0.15 : 0.08) : 0.05,
+        ),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: highlighted
-              ? seaFoamGreen.withOpacity(0.8)
-              : raptureGold.withOpacity(0.3),
+          color: enabled
+              ? (highlighted ? seaFoamGreen.withOpacity(0.8) : raptureGold.withOpacity(0.3))
+              : raptureGold.withOpacity(0.15),
           width: highlighted ? 2.0 : 1.5,
         ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.3),
-            blurRadius: 8,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        boxShadow: enabled
+            ? [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.3),
+                  blurRadius: 8,
+                  offset: const Offset(0, 4),
+                ),
+              ]
+            : const [],
       );
 
   // Art Deco input decoration
@@ -779,6 +795,10 @@ class TitanicTheme {
     return base.copyWith(
       scaffoldBackgroundColor: abyssalBlue,
       primaryColor: raptureGold,
+
+      // ✅ NEW: более читаемое disabled для всего приложения (PWA/mobile тоже)
+      disabledColor: ivoryCream.withOpacity(0.45),
+
       colorScheme: base.colorScheme.copyWith(
         background: abyssalBlue,
         surface: surfaceNavy,
@@ -821,19 +841,52 @@ class TitanicTheme {
         ),
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       ),
+
+      // ✅ UPDATED: явные состояния enabled/disabled, без переименований/сломов API
       elevatedButtonTheme: ElevatedButtonThemeData(
-        style: ElevatedButton.styleFrom(
-          backgroundColor: raptureGold,
-          foregroundColor: const Color(0xFF0A0A0A),
-          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
-          textStyle: buttonText,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
+        style: ButtonStyle(
+          minimumSize: MaterialStateProperty.all(const Size(64, 48)),
+          padding: MaterialStateProperty.all(
+            const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
           ),
-          elevation: 8,
-          shadowColor: Colors.black.withOpacity(0.5),
+          textStyle: MaterialStateProperty.all(buttonText),
+          shape: MaterialStateProperty.all(
+            RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+          backgroundColor: MaterialStateProperty.resolveWith((states) {
+            if (states.contains(MaterialState.disabled)) {
+              return panelDark.withOpacity(0.35);
+            }
+            if (states.contains(MaterialState.pressed)) {
+              return brassAccent.withOpacity(0.95);
+            }
+            return raptureGold;
+          }),
+          foregroundColor: MaterialStateProperty.resolveWith((states) {
+            if (states.contains(MaterialState.disabled)) {
+              return ivoryCream.withOpacity(0.45);
+            }
+            return const Color(0xFF0A0A0A);
+          }),
+          elevation: MaterialStateProperty.resolveWith((states) {
+            if (states.contains(MaterialState.disabled)) return 0;
+            if (states.contains(MaterialState.pressed)) return 2;
+            return 6; // более "взрослая" высота, чем 8
+          }),
+          shadowColor: MaterialStateProperty.all(
+            Colors.black.withOpacity(0.5),
+          ),
+          overlayColor: MaterialStateProperty.resolveWith((states) {
+            if (states.contains(MaterialState.pressed)) {
+              return seaFoamGreen.withOpacity(0.10);
+            }
+            return null;
+          }),
         ),
       ),
+
       cardTheme: CardThemeData(
         color: surfaceNavy.withOpacity(0.8),
         elevation: 6,
