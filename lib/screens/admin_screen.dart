@@ -7,7 +7,7 @@ import 'package:titanic/services/persistent_storage.dart';
 import 'login_screen.dart';
 import 'package:titanic/screens/movie_poll_admin_screen.dart';
 import 'package:titanic/screens/admin/blood_poker_tab.dart';
-
+import 'package:titanic/theme/app_theme.dart';
 
 class AdminScreen extends StatefulWidget {
   const AdminScreen({Key? key}) : super(key: key);
@@ -17,8 +17,151 @@ class AdminScreen extends StatefulWidget {
 
 class _AdminScreenState extends State<AdminScreen> {
   final supabase = Supabase.instance.client;
+  String? _userRole;
+  bool _loadingRole = true;
 
-  int _tabIndex = 0;
+  // Сгруппированные вкладки по категориям
+  final List<AdminTabCategory> _tabCategories = [];
+  
+  // Текущая выбранная вкладка
+  AdminTabItem? _selectedTab;
+  
+  // Контроллер для мобильного drawer
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUserRole();
+  }
+
+  Future<void> _loadUserRole() async {
+    try {
+      final session = supabase.auth.currentSession;
+      final userId = session?.user?.id;
+      if (userId != null) {
+        final res = await supabase
+            .from('user_credentials')
+            .select('role')
+            .eq('id', userId)
+            .maybeSingle();
+        if (res is Map<String, dynamic>) {
+          setState(() {
+            _userRole = (res['role'] ?? '').toString();
+            _loadingRole = false;
+            _initializeTabs();
+          });
+        }
+      }
+    } catch (_) {
+      setState(() {
+        _userRole = 'admin';
+        _loadingRole = false;
+        _initializeTabs();
+      });
+    }
+  }
+
+  void _initializeTabs() {
+    _tabCategories.clear();
+    
+    // Всегда доступные вкладки (базовое администрирование)
+    final basicTabs = AdminTabCategory(
+      title: 'Основное',
+      icon: Icons.dashboard,
+      tabs: [
+        AdminTabItem(
+          title: 'Пользователи',
+          icon: Icons.people,
+          widget: const UsersTab(),
+          roles: const ['admin', 'superadmin', 'moderator'],
+          color: TitanicTheme.seaFoamGreen,
+        ),
+        AdminTabItem(
+          title: 'Банки цветов',
+          icon: Icons.account_balance,
+          widget: const ColorBanksTab(),
+          roles: const ['admin', 'superadmin', 'economist'],
+          color: TitanicTheme.deepTeal,
+        ),
+      ],
+    );
+
+    // Управление контентом
+    final contentTabs = AdminTabCategory(
+      title: 'Контент',
+      icon: Icons.movie,
+      tabs: [
+        AdminTabItem(
+          title: 'Голосование за фильм',
+          icon: Icons.movie,
+          widget: const MoviePollAdminScreen(),
+          roles: const ['admin', 'superadmin', 'hollywood'],
+          color: TitanicTheme.coralAccent,
+        ),
+        AdminTabItem(
+          title: 'Покер на крови',
+          icon: Icons.casino,
+          widget: const BloodPokerTab(),
+          roles: const ['admin', 'superadmin', 'mafia'],
+          color: Colors.redAccent,
+        ),
+      ],
+    );
+
+    // Политические инструменты
+    final politicsTabs = AdminTabCategory(
+      title: 'Политика',
+      icon: Icons.gavel,
+      tabs: [
+        AdminTabItem(
+          title: 'Дебаты',
+          icon: Icons.forum,
+          widget: const DebatesTab(),
+          roles: const ['admin', 'superadmin', 'politician', 'moderator'],
+          color: TitanicTheme.raptureGold,
+        ),
+        AdminTabItem(
+          title: 'Политрешения',
+          icon: Icons.gavel,
+          widget: const ResolutionsTab(),
+          roles: const ['admin', 'superadmin', 'politician'],
+          color: TitanicTheme.copperDetail,
+        ),
+      ],
+    );
+
+    // Добавляем только те категории, у которых есть доступные вкладки для текущей роли
+    for (final category in [basicTabs, contentTabs, politicsTabs]) {
+      final availableTabs = category.tabs
+          .where((tab) => _hasAccessToTab(tab))
+          .toList();
+      if (availableTabs.isNotEmpty) {
+        _tabCategories.add(AdminTabCategory(
+          title: category.title,
+          icon: category.icon,
+          tabs: availableTabs,
+        ));
+      }
+    }
+
+    // Выбираем первую доступную вкладку
+    if (_tabCategories.isNotEmpty && _tabCategories[0].tabs.isNotEmpty) {
+      _selectedTab = _tabCategories[0].tabs[0];
+    }
+  }
+
+  bool _hasAccessToTab(AdminTabItem tab) {
+    if (_userRole == null) return false;
+    if (tab.roles.contains('admin') || tab.roles.contains('superadmin')) {
+      // Проверяем, является ли пользователь админом
+      final role = _userRole!.toLowerCase();
+      return role.contains('admin') || 
+             role.contains('superadmin') || 
+             tab.roles.any((r) => role.contains(r.toLowerCase()));
+    }
+    return tab.roles.any((r) => _userRole!.toLowerCase().contains(r.toLowerCase()));
+  }
 
   Future<void> _logout() async {
     try {
@@ -28,23 +171,28 @@ class _AdminScreenState extends State<AdminScreen> {
       await supabase.auth.signOut();
     } catch (_) {}
     if (!mounted) return;
-    Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const LoginScreen()));
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+    );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final tabs = [
-      const UsersTab(),
-      const DebatesTab(),
-      const ResolutionsTab(),
-      const ColorBanksTab(),
-      const MoviePollAdminScreen(),
-      const BloodPokerTab(),
-    ];
-
+  Widget _buildMobileLayout() {
     return Scaffold(
+      key: _scaffoldKey,
       appBar: AppBar(
-        title: const Text('Admin — Панель управления'),
+        leading: IconButton(
+          icon: const Icon(Icons.menu),
+          onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+        ),
+        title: Text(
+          _selectedTab?.title ?? 'Админ панель',
+          style: TextStyle(
+            fontFamily: 'CormorantGaramond',
+            fontSize: 20,
+            color: TitanicTheme.ivoryCream,
+          ),
+        ),
+        backgroundColor: TitanicTheme.abyssalBlue,
         actions: [
           IconButton(
             tooltip: 'Выйти',
@@ -53,26 +201,347 @@ class _AdminScreenState extends State<AdminScreen> {
           ),
         ],
       ),
-      body: tabs[_tabIndex],
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _tabIndex,
-        onTap: (i) => setState(() => _tabIndex = i),
-        type: BottomNavigationBarType.fixed,
-        backgroundColor: Colors.white,
-        selectedItemColor: Colors.blueAccent,
-        unselectedItemColor: Colors.grey.shade600,
-        selectedLabelStyle: const TextStyle(fontWeight: FontWeight.w600),
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.people), label: 'Пользователи'),
-          BottomNavigationBarItem(icon: Icon(Icons.forum), label: 'Дебаты'),
-          BottomNavigationBarItem(icon: Icon(Icons.gavel), label: 'Политрешения'),
-          BottomNavigationBarItem(icon: Icon(Icons.account_balance), label: 'Банки цветов'),
-          BottomNavigationBarItem(icon: Icon(Icons.movie), label: 'Голосование'),
-          BottomNavigationBarItem(icon: Icon(Icons.casino), label: 'Покер на крови'),
+      drawer: _buildDrawer(),
+      body: TitanicTheme.luxuryArtDecoBackground(
+        child: _selectedTab?.widget ?? const Center(child: CircularProgressIndicator()),
+      ),
+    );
+  }
+
+  Widget _buildDesktopLayout() {
+    final isSmallScreen = MediaQuery.of(context).size.width < 800;
+    
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          'Админ панель — ${_selectedTab?.title ?? ""}',
+          style: TextStyle(
+            fontFamily: 'CormorantGaramond',
+            fontSize: isSmallScreen ? 18 : 22,
+            color: TitanicTheme.ivoryCream,
+          ),
+        ),
+        backgroundColor: TitanicTheme.abyssalBlue,
+        actions: [
+          IconButton(
+            tooltip: 'Выйти',
+            icon: const Icon(Icons.logout),
+            onPressed: _logout,
+          ),
+        ],
+      ),
+      body: TitanicTheme.luxuryArtDecoBackground(
+        child: Row(
+          children: [
+            // Боковая панель для десктопа
+            Container(
+              width: isSmallScreen ? 70 : 240,
+              decoration: BoxDecoration(
+                color: TitanicTheme.panelDark.withOpacity(0.95),
+                border: Border(
+                  right: BorderSide(
+                    color: TitanicTheme.raptureGold.withOpacity(0.3),
+                    width: 1,
+                  ),
+                ),
+              ),
+              child: _buildDesktopSidebar(),
+            ),
+            // Основной контент
+            Expanded(
+              child: _selectedTab?.widget ?? const Center(child: CircularProgressIndicator()),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDrawer() {
+    return Drawer(
+      backgroundColor: TitanicTheme.panelDark.withOpacity(0.98),
+      child: Column(
+        children: [
+          // Заголовок
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: TitanicTheme.abyssalBlue.withOpacity(0.9),
+              border: Border(
+                bottom: BorderSide(
+                  color: TitanicTheme.raptureGold.withOpacity(0.3),
+                ),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Админ панель',
+                  style: TextStyle(
+                    fontFamily: 'CormorantGaramond',
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                    color: TitanicTheme.ivoryCream,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                if (_userRole != null)
+                  Text(
+                    'Роль: $_userRole',
+                    style: TextStyle(
+                      fontFamily: 'Cinzel',
+                      fontSize: 12,
+                      color: TitanicTheme.ivoryCream.withOpacity(0.7),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          // Список категорий
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.all(8),
+              itemCount: _tabCategories.length,
+              itemBuilder: (context, catIndex) {
+                final category = _tabCategories[catIndex];
+                return _buildCategorySection(category, isDrawer: true);
+              },
+            ),
+          ),
+          // Выход
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              border: Border(
+                top: BorderSide(
+                  color: TitanicTheme.raptureGold.withOpacity(0.2),
+                ),
+              ),
+            ),
+            child: ListTile(
+              leading: const Icon(Icons.logout, color: Colors.redAccent),
+              title: Text(
+                'Выйти',
+                style: TextStyle(
+                  fontFamily: 'Cinzel',
+                  color: Colors.redAccent,
+                ),
+              ),
+              onTap: _logout,
+            ),
+          ),
         ],
       ),
     );
   }
+
+  Widget _buildDesktopSidebar() {
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: 16),
+          // Лого/информация
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Админ-панель',
+                  style: TextStyle(
+                    fontFamily: 'CormorantGaramond',
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: TitanicTheme.ivoryCream,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                if (_userRole != null)
+                  Text(
+                    'Роль: $_userRole',
+                    style: TextStyle(
+                      fontFamily: 'Cinzel',
+                      fontSize: 11,
+                      color: TitanicTheme.ivoryCream.withOpacity(0.6),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+          // Категории
+          ..._tabCategories.map((category) => _buildCategorySection(category)),
+          const SizedBox(height: 24),
+          // Выход
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: ListTile(
+              leading: const Icon(Icons.logout, size: 20, color: Colors.redAccent),
+              title: Text(
+                'Выйти',
+                style: TextStyle(
+                  fontFamily: 'Cinzel',
+                  fontSize: 14,
+                  color: Colors.redAccent,
+                ),
+              ),
+              onTap: _logout,
+              contentPadding: EdgeInsets.zero,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCategorySection(AdminTabCategory category, {bool isDrawer = false}) {
+    final isSmallScreen = MediaQuery.of(context).size.width < 800;
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (isDrawer || !isSmallScreen) ...[
+          Padding(
+            padding: isDrawer 
+                ? const EdgeInsets.fromLTRB(16, 16, 16, 8)
+                : const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(
+              children: [
+                Icon(category.icon, size: 16, color: TitanicTheme.raptureGold.withOpacity(0.7)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    category.title,
+                    style: TextStyle(
+                      fontFamily: 'Cinzel',
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: TitanicTheme.raptureGold.withOpacity(0.9),
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          ...category.tabs.map((tab) => _buildTabItem(tab, isDrawer: isDrawer)),
+        ]
+      ],
+    );
+  }
+
+  Widget _buildTabItem(AdminTabItem tab, {bool isDrawer = false, bool compact = false}) {
+    final isSelected = _selectedTab == tab;
+    final isSmallScreen = MediaQuery.of(context).size.width < 800;
+    
+    if (compact && !isSmallScreen) {
+      // Компактный вид (только иконка)
+      return Tooltip(
+        message: tab.title,
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+          decoration: BoxDecoration(
+            color: isSelected 
+                ? tab.color.withOpacity(0.3)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: IconButton(
+            icon: Icon(tab.icon, color: isSelected ? tab.color : TitanicTheme.ivoryCream.withOpacity(0.7)),
+            onPressed: () {
+              setState(() => _selectedTab = tab);
+              if (isDrawer) Navigator.pop(context);
+            },
+            tooltip: tab.title,
+          ),
+        ),
+      );
+    }
+    
+    return Container(
+      margin: isDrawer 
+          ? const EdgeInsets.symmetric(horizontal: 8, vertical: 2)
+          : const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: isSelected 
+            ? tab.color.withOpacity(0.2)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(8),
+        border: isSelected
+            ? Border.all(color: tab.color.withOpacity(0.4), width: 1)
+            : null,
+      ),
+      child: ListTile(
+        leading: Icon(tab.icon, color: isSelected ? tab.color : TitanicTheme.ivoryCream.withOpacity(0.7)),
+        title: isDrawer || !isSmallScreen
+            ? Text(
+                tab.title,
+                style: TextStyle(
+                  fontFamily: 'Cinzel',
+                  fontSize: 14,
+                  color: isSelected ? tab.color : TitanicTheme.ivoryCream.withOpacity(0.9),
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                ),
+              )
+            : null,
+        trailing: isSelected
+            ? Icon(Icons.chevron_right, color: tab.color, size: 16)
+            : null,
+        contentPadding: isDrawer 
+            ? const EdgeInsets.symmetric(horizontal: 12)
+            : const EdgeInsets.symmetric(horizontal: 8),
+        onTap: () {
+          setState(() => _selectedTab = tab);
+          if (isDrawer) Navigator.pop(context);
+        },
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loadingRole) {
+      return TitanicTheme.luxuryArtDecoBackground(
+        child: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    // Определяем мобильный или десктоп режим
+    final isMobile = MediaQuery.of(context).size.width < 600;
+    
+    return isMobile ? _buildMobileLayout() : _buildDesktopLayout();
+  }
+}
+
+// Модели для организации вкладок
+class AdminTabCategory {
+  final String title;
+  final IconData icon;
+  final List<AdminTabItem> tabs;
+
+  AdminTabCategory({
+    required this.title,
+    required this.icon,
+    required this.tabs,
+  });
+}
+
+class AdminTabItem {
+  final String title;
+  final IconData icon;
+  final Widget widget;
+  final List<String> roles;
+  final Color color;
+
+  AdminTabItem({
+    required this.title,
+    required this.icon,
+    required this.widget,
+    required this.roles,
+    required this.color,
+  });
 }
 
 // ----------------- UsersTab -----------------
@@ -101,7 +570,7 @@ class _UsersTabState extends State<UsersTab> {
     try {
       final res = await supabase
           .from('user_credentials')
-          .select('id, telegram_username, first_name, last_name, role, v_balance, m_balance, color, inventory, enterprises')
+          .select('id, telegram_username, first_name, last_name, role, v_balance, m_balance, color, inventory, enterprises, usurer')
           .order('first_name');
       if (res is List) {
         setState(() {
@@ -134,6 +603,100 @@ class _UsersTabState extends State<UsersTab> {
     }
   }
 
+  Widget _buildUserCard(Map<String, dynamic> user, BuildContext context) {
+    final name = ((user['first_name'] ?? '') + ' ' + (user['last_name'] ?? '')).trim();
+    final displayName = name.isEmpty ? (user['telegram_username'] ?? 'Без имени') : name;
+    final role = user['role'] ?? '-';
+    final vBalance = (user['v_balance'] ?? 0).toString();
+    final mBalance = (user['m_balance'] ?? 0).toString();
+    final color = user['color'] ?? '—';
+    final isUsurer = (user['usurer'] == true) || (user['usurer']?.toString().toLowerCase() == 'true');
+
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Text(
+                    displayName,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 16,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.edit, size: 20),
+                  onPressed: () => _editUser(user),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                _buildBadge('Роль: $role', TitanicTheme.deepTeal),
+                _buildBadge('V: $vBalance', TitanicTheme.raptureGold),
+                _buildBadge('M: $mBalance', TitanicTheme.seaFoamGreen),
+                if (color.isNotEmpty && color != '—')
+                  _buildBadge('Цвет: $color', _getColorFromString(color)),
+                if (isUsurer)
+                  _buildBadge('Ростовщик', Colors.redAccent),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBadge(String text, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 12,
+          color: color,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+    );
+  }
+
+  Color _getColorFromString(String colorName) {
+    switch (colorName.toLowerCase()) {
+      case 'красный':
+        return const Color(0xFFC62828);
+      case 'зелёный':
+        return const Color(0xFF2E7D32);
+      case 'синий':
+        return const Color(0xFF1565C0);
+      case 'малиновый':
+        return const Color(0xFFAD1457);
+      case 'жёлтый':
+        return const Color(0xFFF9A825);
+      case 'золотой':
+        return const Color(0xFFD4AF37);
+      default:
+        return TitanicTheme.raptureGold;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final visible = _users.where((u) {
@@ -146,37 +709,53 @@ class _UsersTabState extends State<UsersTab> {
 
     return Column(children: [
       Padding(
-        padding: const EdgeInsets.all(8.0),
-        child: Row(children: [
-          Expanded(
-            child: TextField(
-              decoration: const InputDecoration(hintText: 'Поиск username/имя/фамилия'),
-              onChanged: (v) => setState(() => _filter = v),
+        padding: const EdgeInsets.all(12),
+        child: Card(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              children: [
+                TextField(
+                  decoration: const InputDecoration(
+                    hintText: 'Поиск по имени, фамилии или username',
+                    prefixIcon: Icon(Icons.search),
+                    border: OutlineInputBorder(),
+                  ),
+                  onChanged: (v) => setState(() => _filter = v),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    icon: _loading 
+                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.refresh),
+                    label: const Text('Обновить список'),
+                    onPressed: _loadUsers,
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(width: 8),
-          ElevatedButton(
-            onPressed: _loadUsers,
-            child: _loading ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Обновить'),
-          ),
-        ]),
+        ),
       ),
       Expanded(
         child: _loading
             ? const Center(child: CircularProgressIndicator())
-            : ListView.separated(
-                itemCount: visible.length,
-                separatorBuilder: (_, __) => const Divider(height: 0),
-                itemBuilder: (context, i) {
-                  final u = visible[i];
-                  final name = ((u['first_name'] ?? '') + ' ' + (u['last_name'] ?? '')).trim();
-                  return ListTile(
-                    title: Text(name.isEmpty ? (u['telegram_username'] ?? 'Без имени') : name),
-                    subtitle: Text('role: ${u['role'] ?? '-'}  V:${(u['v_balance'] ?? 0).toString()} M:${(u['m_balance'] ?? 0).toString()}'),
-                    trailing: IconButton(icon: const Icon(Icons.edit), onPressed: () => _editUser(u)),
-                  );
-                },
-              ),
+            : visible.isEmpty
+                ? const Center(
+                    child: Text(
+                      'Пользователи не найдены',
+                      style: TextStyle(fontSize: 16, color: Colors.grey),
+                    ),
+                  )
+                : ListView.builder(
+                    itemCount: visible.length,
+                    itemBuilder: (context, i) => _buildUserCard(visible[i], context),
+                  ),
       ),
     ]);
   }
@@ -196,7 +775,7 @@ class _UserEditDialogState extends State<_UserEditDialog> {
   late TextEditingController _colorCtrl;
   late TextEditingController _inventoryCtrl;
   late TextEditingController _enterprisesCtrl;
-  bool _usurer = false; // НОВОЕ ПОЛЕ
+  bool _usurer = false;
 
   @override
   void initState() {
@@ -207,7 +786,7 @@ class _UserEditDialogState extends State<_UserEditDialog> {
     _colorCtrl = TextEditingController(text: (widget.user['color'] ?? '').toString());
     _inventoryCtrl = TextEditingController(text: jsonEncode(widget.user['inventory'] ?? {}));
     _enterprisesCtrl = TextEditingController(text: jsonEncode(widget.user['enterprises'] ?? {}));
-    _usurer = (widget.user['usurer'] == true) || (widget.user['usurer']?.toString().toLowerCase() == 'true'); // ИНИЦИАЛИЗАЦИЯ
+    _usurer = (widget.user['usurer'] == true) || (widget.user['usurer']?.toString().toLowerCase() == 'true');
   }
 
   @override
@@ -221,7 +800,6 @@ class _UserEditDialogState extends State<_UserEditDialog> {
     super.dispose();
   }
 
-
   Map<String, dynamic> _buildPayload() {
     final Map out = {};
     final v = double.tryParse(_vCtrl.text.replaceAll(',', '.'));
@@ -230,7 +808,7 @@ class _UserEditDialogState extends State<_UserEditDialog> {
     if (m != null) out['m_balance'] = m;
     out['role'] = _roleCtrl.text.trim();
     out['color'] = _colorCtrl.text.trim();
-    out['usurer'] = _usurer; // ДОБАВЛЕНО
+    out['usurer'] = _usurer;
     try {
       final inv = jsonDecode(_inventoryCtrl.text);
       out['inventory'] = inv;
@@ -244,39 +822,126 @@ class _UserEditDialogState extends State<_UserEditDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Редактировать пользователя'),
-      content: SingleChildScrollView(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          TextField(controller: _roleCtrl, decoration: const InputDecoration(labelText: 'role')),
-          TextField(controller: _vCtrl, decoration: const InputDecoration(labelText: 'V balance'), keyboardType: TextInputType.numberWithOptions(decimal: true)),
-          TextField(controller: _mCtrl, decoration: const InputDecoration(labelText: 'M balance'), keyboardType: TextInputType.numberWithOptions(decimal: true)),
-          TextField(controller: _colorCtrl, decoration: const InputDecoration(labelText: 'color (hex)')),
-          
-          // НОВОЕ: Чекбокс для флага ростовщика
-          CheckboxListTile(
-            title: const Text('Ростовщик (только для мафии)'),
-            value: _usurer,
-            onChanged: (value) {
-              setState(() {
-                _usurer = value ?? false;
-              });
-            },
-          ),
-          
-          const SizedBox(height: 8),
-          TextField(controller: _inventoryCtrl, minLines: 2, maxLines: 6, decoration: const InputDecoration(labelText: 'inventory (JSON)')),
-          const SizedBox(height: 8),
-          TextField(controller: _enterprisesCtrl, minLines: 2, maxLines: 6, decoration: const InputDecoration(labelText: 'enterprises (JSON)')),
-        ]),
+    return Dialog(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
       ),
-      actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Отмена')),
-        ElevatedButton(
-          onPressed: () => Navigator.of(context).pop(_buildPayload()),
-          child: const Text('Сохранить'),
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Редактировать пользователя',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _roleCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Роль',
+                  border: OutlineInputBorder(),
+                  filled: true,
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _vCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Баланс V',
+                  border: OutlineInputBorder(),
+                  filled: true,
+                ),
+                keyboardType: TextInputType.numberWithOptions(decimal: true),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _mCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Баланс M',
+                  border: OutlineInputBorder(),
+                  filled: true,
+                ),
+                keyboardType: TextInputType.numberWithOptions(decimal: true),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _colorCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Цвет (hex или название)',
+                  border: OutlineInputBorder(),
+                  filled: true,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Дополнительные настройки',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 8),
+                      CheckboxListTile(
+                        title: const Text('Ростовщик (только для мафии)'),
+                        value: _usurer,
+                        onChanged: (value) {
+                          setState(() {
+                            _usurer = value ?? false;
+                          });
+                        },
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _inventoryCtrl,
+                minLines: 2,
+                maxLines: 4,
+                decoration: const InputDecoration(
+                  labelText: 'Инвентарь (JSON)',
+                  border: OutlineInputBorder(),
+                  filled: true,
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _enterprisesCtrl,
+                minLines: 2,
+                maxLines: 4,
+                decoration: const InputDecoration(
+                  labelText: 'Предприятия (JSON)',
+                  border: OutlineInputBorder(),
+                  filled: true,
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text('Отмена'),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    onPressed: () => Navigator.of(context).pop(_buildPayload()),
+                    child: const Text('Сохранить'),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
-      ],
+      ),
     );
   }
 }
@@ -467,7 +1132,7 @@ class _DebatesTabState extends State<DebatesTab> {
           : '${p['first_name'] ?? ''} ${p['last_name'] ?? ''}'.trim();
       items.add(DropdownMenuItem<String?>(value: id, child: Text(name)));
     }
-    return DropdownButton<String?>(
+    return DropdownButtonFormField<String?>(
       value: current,
       isExpanded: true,
       items: items,
@@ -482,6 +1147,11 @@ class _DebatesTabState extends State<DebatesTab> {
           }
         });
       },
+      decoration: InputDecoration(
+        labelText: first ? 'Спикер A' : 'Спикер B',
+        border: const OutlineInputBorder(),
+        filled: true,
+      ),
     );
   }
 
@@ -493,33 +1163,27 @@ class _DebatesTabState extends State<DebatesTab> {
       parsed = Colors.grey;
     }
     return Card(
-      margin: const EdgeInsets.symmetric(vertical: 6),
+      margin: const EdgeInsets.symmetric(vertical: 8),
       child: Padding(
-        padding: const EdgeInsets.all(10),
+        padding: const EdgeInsets.all(12),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(
             children: [
-              Container(width: 14, height: 14, decoration: BoxDecoration(color: parsed, borderRadius: BorderRadius.circular(3), border: Border.all(color: Colors.black12))),
-              const SizedBox(width: 8),
-              Text(c.label, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+              Container(width: 20, height: 20, decoration: BoxDecoration(color: parsed, borderRadius: BorderRadius.circular(4), border: Border.all(color: Colors.black12))),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(c.label, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+              ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           Row(children: [
             Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text('Спикер A', style: TextStyle(fontSize: 12, color: Colors.black54)),
-                const SizedBox(height: 6),
-                _buildSpeakerDropdown(c.label, true),
-              ]),
+              child: _buildSpeakerDropdown(c.label, true),
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text('Спикер B', style: TextStyle(fontSize: 12, color: Colors.black54)),
-                const SizedBox(height: 6),
-                _buildSpeakerDropdown(c.label, false),
-              ]),
+              child: _buildSpeakerDropdown(c.label, false),
             ),
           ]),
         ]),
@@ -530,6 +1194,8 @@ class _DebatesTabState extends State<DebatesTab> {
   @override
   Widget build(BuildContext context) {
     final hasActive = _activeDebate != null;
+    final isMobile = MediaQuery.of(context).size.width < 600;
+    
     return SingleChildScrollView(
       padding: const EdgeInsets.all(12),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -538,36 +1204,76 @@ class _DebatesTabState extends State<DebatesTab> {
             padding: const EdgeInsets.all(12.0),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               const Text('Создать дебаты', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-              const SizedBox(height: 8),
-              TextField(controller: _titleCtrl, decoration: const InputDecoration(labelText: 'Заголовок')),
-              const SizedBox(height: 8),
-              TextField(controller: _descCtrl, decoration: const InputDecoration(labelText: 'Описание (опционально)')),
               const SizedBox(height: 12),
+              TextField(
+                controller: _titleCtrl, 
+                decoration: const InputDecoration(
+                  labelText: 'Заголовок',
+                  border: OutlineInputBorder(),
+                  filled: true,
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _descCtrl, 
+                decoration: const InputDecoration(
+                  labelText: 'Описание (опционально)',
+                  border: OutlineInputBorder(),
+                  filled: true,
+                ),
+                maxLines: 2,
+              ),
+              const SizedBox(height: 16),
               const Text('Назначить спикеров по цветам (максимум 2 на цвет)', style: TextStyle(color: Colors.black87)),
-              const SizedBox(height: 8),
-              ..._colorDefs.map((c) => _buildColorRow(c)).toList(),
               const SizedBox(height: 12),
-              Row(children: [
-                ElevatedButton(
-                  onPressed: _creating ? null : _createDebate,
-                  child: _creating ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Создать дебаты'),
-                ),
-                const SizedBox(width: 12),
-                ElevatedButton(
-                  onPressed: hasActive && !_closing ? _closeDebate : null,
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
-                  child: _closing ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Закрыть текущие дебаты'),
-                ),
-              ])
+              ..._colorDefs.map((c) => _buildColorRow(c)).toList(),
+              const SizedBox(height: 16),
+              isMobile
+                  ? Column(
+                      children: [
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            onPressed: _creating ? null : _createDebate,
+                            child: _creating 
+                                ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                                : const Text('Создать дебаты'),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            onPressed: hasActive && !_closing ? _closeDebate : null,
+                            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+                            child: _closing 
+                                ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                                : const Text('Закрыть текущие дебаты'),
+                          ),
+                        ),
+                      ],
+                    )
+                  : Row(children: [
+                      ElevatedButton(
+                        onPressed: _creating ? null : _createDebate,
+                        child: _creating ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Создать дебаты'),
+                      ),
+                      const SizedBox(width: 12),
+                      ElevatedButton(
+                        onPressed: hasActive && !_closing ? _closeDebate : null,
+                        style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+                        child: _closing ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Закрыть текущие дебаты'),
+                      ),
+                    ])
             ]),
           ),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 16),
         Card(
           child: Padding(
             padding: const EdgeInsets.all(12),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('Текущее состояние', style: TextStyle(fontWeight: FontWeight.w700)),
+              const Text('Текущее состояние', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
               const SizedBox(height: 8),
               if (_activeDebate != null) ...[
                 Text('Активный дебат: ${_activeDebate?['title'] ?? '—'}'),
@@ -599,7 +1305,6 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
   // form controllers
   final TextEditingController _titleCtrl = TextEditingController();
   final TextEditingController _descCtrl = TextEditingController();
-  String _SelectedColor = 'зелёный';
   String _selectedColor = 'зелёный';
 
   // dynamic options fields
@@ -737,7 +1442,7 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
     final ctrl = TextEditingController();
     final added = await showDialog<String?>(context: context, builder: (_) => AlertDialog(
       title: const Text('Добавить вариант'),
-      content: TextField(controller: ctrl, decoration: const InputDecoration(labelText: 'Вариант')),
+      content: TextField(controller: ctrl, decoration: const InputDecoration(labelText: 'Вариант', border: OutlineInputBorder())),
       actions: [
         TextButton(onPressed: () => Navigator.of(context).pop(null), child: const Text('Отмена')),
         ElevatedButton(onPressed: () => Navigator.of(context).pop(ctrl.text.trim()), child: const Text('Добавить')),
@@ -811,12 +1516,12 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
     ]);
 
     return Card(
-      margin: const EdgeInsets.symmetric(vertical: 6),
+      margin: const EdgeInsets.symmetric(vertical: 8),
       child: Padding(
-        padding: const EdgeInsets.all(10),
+        padding: const EdgeInsets.all(12),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
-            Expanded(child: Text(r['title'] ?? '—', style: const TextStyle(fontWeight: FontWeight.w700))),
+            Expanded(child: Text(r['title'] ?? '—', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16))),
             if (!closed)
               ElevatedButton(
                 onPressed: () => _closeResolution(id),
@@ -824,7 +1529,7 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
                 child: const Text('Закрыть'),
               ),
           ]),
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
           Text('Описание: ${r['description'] ?? '-'}'),
           const SizedBox(height: 6),
           Text('Создано: ${r['created_at'] ?? '-'}'),
@@ -836,7 +1541,7 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
             Text('Всего вложено (M): ${r['total_m'] ?? '-'}'),
             const SizedBox(height: 6),
           ],
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           FutureBuilder<List<dynamic>>(
             future: combinedFuture,
             builder: (context, snap) {
@@ -894,7 +1599,7 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Варианты и ставки (детально):', style: const TextStyle(fontWeight: FontWeight.w600)),
+                  const Text('Варианты и ставки:', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
                   const SizedBox(height: 8),
                   // list options with per-option aggregated values
                   ...opts.map((o) {
@@ -909,11 +1614,14 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
 
                     return Container(
                       margin: const EdgeInsets.symmetric(vertical: 6),
-                      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
                       decoration: BoxDecoration(
-                        color: Colors.grey.shade50,
+                        color: isWinner ? Colors.yellow.withOpacity(0.1) : Colors.grey.shade50,
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.grey.shade200),
+                        border: Border.all(
+                          color: isWinner ? Colors.yellow.withOpacity(0.5) : Colors.grey.shade200,
+                          width: isWinner ? 1.5 : 1,
+                        ),
                       ),
                       child: Row(
                         children: [
@@ -929,8 +1637,8 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
                                   ),
                               ]),
                               const SizedBox(height: 6),
-                              Text('Ставок: $cnt  •  Сумма: ${sum.toString()}'),
-                            ]), 
+                              Text('Ставок: $cnt  •  Сумма: ${sum.toString()} M'),
+                            ]),
                           ),
                           Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
                             Text(color, style: const TextStyle(color: Colors.black54)),
@@ -941,41 +1649,48 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
                       ),
                     );
                   }).toList(),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 12),
                   // totals and winner summary
-                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                    Expanded(
-                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Text('Итого вложено (M): $totalToShow', style: const TextStyle(fontWeight: FontWeight.w600)),
-                        const SizedBox(height: 6),
-                        if (closed)
-                          Text(
-                            winningOption != null
-                                ? 'Победивший вариант: ${winningOption['label']} [${winningOption['color'] ?? '-'}]'
-                                : 'Победивший вариант: —',
-                            style: const TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                        if (!closed)
-                          Text(
-                            winningOption != null
-                                ? 'Текущий лидер: ${winningOption['label']} [${winningOption['color'] ?? '-'}]'
-                                : 'Текущий лидер: —',
-                            style: const TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                      ]),
+                  Card(
+                    color: Colors.blue.shade50,
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Итого вложено (M): $totalToShow', style: const TextStyle(fontWeight: FontWeight.w600)),
+                          const SizedBox(height: 8),
+                          if (closed)
+                            Text(
+                              winningOption != null
+                                  ? 'Победивший вариант: ${winningOption['label']} [${winningOption['color'] ?? '-'}]'
+                                  : 'Победивший вариант: —',
+                              style: const TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                          if (!closed)
+                            Text(
+                              winningOption != null
+                                  ? 'Текущий лидер: ${winningOption['label']} [${winningOption['color'] ?? '-'}]'
+                                  : 'Текущий лидер: —',
+                              style: const TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                        ],
+                      ),
                     ),
-                  ]),
+                  ),
                 ],
               );
             },
           ),
-        ]), 
+        ]),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final isMobile = MediaQuery.of(context).size.width < 600;
+    
     return RefreshIndicator(
       onRefresh: _loadResolutions,
       child: SingleChildScrollView(
@@ -987,12 +1702,27 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
               padding: const EdgeInsets.all(12.0),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 const Text('Создать политрешение', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-                const SizedBox(height: 8),
-                TextField(controller: _titleCtrl, decoration: const InputDecoration(labelText: 'Заголовок')),
-                const SizedBox(height: 8),
-                TextField(controller: _descCtrl, decoration: const InputDecoration(labelText: 'Описание (опционально)')),
-                // removed resolution-level color per request (colors are per-option)
                 const SizedBox(height: 12),
+                TextField(
+                  controller: _titleCtrl, 
+                  decoration: const InputDecoration(
+                    labelText: 'Заголовок',
+                    border: OutlineInputBorder(),
+                    filled: true,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _descCtrl, 
+                  decoration: const InputDecoration(
+                    labelText: 'Описание (опционально)',
+                    border: OutlineInputBorder(),
+                    filled: true,
+                  ),
+                  maxLines: 2,
+                ),
+                // removed resolution-level color per request (colors are per-option)
+                const SizedBox(height: 16),
                 const Text('Варианты ответа:', style: TextStyle(fontWeight: FontWeight.w600)),
                 const SizedBox(height: 8),
                 ..._optionCtrls.asMap().entries.map((e) {
@@ -1001,7 +1731,14 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
                   return Padding(
                     padding: const EdgeInsets.symmetric(vertical: 6.0),
                     child: Row(children: [
-                      Expanded(child: TextField(controller: ctrl, decoration: InputDecoration(labelText: 'Вариант ${idx + 1}'))),
+                      Expanded(child: TextField(
+                        controller: ctrl,
+                        decoration: InputDecoration(
+                          labelText: 'Вариант ${idx + 1}',
+                          border: const OutlineInputBorder(),
+                          filled: true,
+                        ),
+                      )),
                       const SizedBox(width: 8),
                       IconButton(
                           onPressed: () {
@@ -1012,28 +1749,57 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
                     ]),
                   );
                 }).toList(),
-                Row(children: [
-                  ElevatedButton.icon(onPressed: _addOptionField, icon: const Icon(Icons.add), label: const Text('Добавить поле варианта')),
-                  const SizedBox(width: 12),
-                  ElevatedButton(
-                    onPressed: _creating ? null : _createResolution,
-                    child: _creating ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Создать политрешение'),
-                  ),
-                ])
+                isMobile
+                    ? Column(
+                        children: [
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              icon: const Icon(Icons.add),
+                              label: const Text('Добавить поле варианта'),
+                              onPressed: _addOptionField,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton(
+                              onPressed: _creating ? null : _createResolution,
+                              child: _creating ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Создать политрешение'),
+                            ),
+                          ),
+                        ],
+                      )
+                    : Row(children: [
+                        ElevatedButton.icon(onPressed: _addOptionField, icon: const Icon(Icons.add), label: const Text('Добавить поле варианта')),
+                        const SizedBox(width: 12),
+                        ElevatedButton(
+                          onPressed: _creating ? null : _createResolution,
+                          child: _creating ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Создать политрешение'),
+                        ),
+                      ])
               ]),
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
           Card(
             child: Padding(
               padding: const EdgeInsets.all(12),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text('Список политрешений', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-                const SizedBox(height: 8),
+                const Text('Список политрешений', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 12),
                 if (_loading)
                   const Center(child: CircularProgressIndicator())
                 else if (_resolutions.isEmpty)
-                  const Text('Нет политрешений')
+                  const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(20),
+                      child: Text(
+                        'Нет политрешений',
+                        style: TextStyle(fontSize: 16, color: Colors.grey),
+                      ),
+                    ),
+                  )
                 else
                   Column(children: _resolutions.map((r) => _buildResolutionCard(r)).toList()),
               ]),
@@ -1214,6 +1980,86 @@ class _ColorBanksTabState extends State<ColorBanksTab> {
     }
   }
 
+  Widget _buildColorCard(String color) {
+    final val = _balances[color] ?? 0;
+    Color parsed;
+    try {
+      switch (color) {
+        case 'зелёный':
+          parsed = const Color(0xFF00FF00);
+          break;
+        case 'красный':
+          parsed = const Color(0xFFFF0000);
+          break;
+        case 'синий':
+          parsed = const Color(0xFF0000FF);
+          break;
+        case 'жёлтый':
+          parsed = const Color(0xFFFFFF00);
+          break;
+        case 'малиновый':
+          parsed = const Color(0xFFFF00FF);
+          break;
+        default:
+          parsed = Colors.grey;
+      }
+    } catch (_) {
+      parsed = Colors.grey;
+    }
+    
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 20,
+                      height: 20,
+                      decoration: BoxDecoration(
+                        color: parsed,
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(color: Colors.black12),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      color,
+                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+                    ),
+                  ],
+                ),
+                Text(
+                  '${val.toString()} M',
+                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 18, color: Colors.green),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.history, size: 16),
+                label: const Text('История операций'),
+                onPressed: () => _showHistory(color),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: parsed.withOpacity(0.1),
+                  foregroundColor: parsed,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _showHistory(String color) async {
     showDialog(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator()));
     List<Map<String, dynamic>> hist = [];
@@ -1227,45 +2073,72 @@ class _ColorBanksTabState extends State<ColorBanksTab> {
 
     await showDialog(
       context: context,
-      builder: (_) => AlertDialog(
-        title: Text('История по цвету: $color'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: hist.isEmpty
-              ? const Text('История недоступна или отсутствует.')
-              : Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Flexible(
-                      child: ListView.separated(
-                        shrinkWrap: true,
-                        itemCount: hist.length,
-                        separatorBuilder: (_, __) => const Divider(height: 0),
-                        itemBuilder: (context, i) {
-                          final row = hist[i];
-                          final amt = (row['amount'] is num) ? row['amount'].toString() : row['amount']?.toString() ?? '-';
-                          final comment = row['comment']?.toString() ?? (row['resolution_id'] != null ? 'Резолюция #${row['resolution_id']}' : '-');
-                          final created = row['created_at']?.toString() ?? '-';
-                          String readableDate;
-                          try {
-                            final dt = DateTime.tryParse(created);
-                            readableDate = dt != null ? '${dt.toLocal()}' : created;
-                          } catch (_) {
-                            readableDate = created;
-                          }
-                          return ListTile(
-                            dense: true,
-                            title: Text('$amt M'),
-                            subtitle: Text(comment),
-                            trailing: Text(readableDate, style: const TextStyle(fontSize: 11, color: Colors.black54)),
-                          );
-                        },
-                      ),
+      builder: (_) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'История по цвету: $color',
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                ],
+              ),
+            ),
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.6,
+              ),
+              child: hist.isEmpty
+                  ? const Padding(
+                      padding: EdgeInsets.all(20),
+                      child: Text('История недоступна или отсутствует.'),
+                    )
+                  : ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: hist.length,
+                      separatorBuilder: (_, __) => const Divider(height: 0),
+                      itemBuilder: (context, i) {
+                        final row = hist[i];
+                        final amt = (row['amount'] is num) ? row['amount'].toString() : row['amount']?.toString() ?? '-';
+                        final comment = row['comment']?.toString() ?? (row['resolution_id'] != null ? 'Резолюция #${row['resolution_id']}' : '-');
+                        final created = row['created_at']?.toString() ?? '-';
+                        String readableDate;
+                        try {
+                          final dt = DateTime.tryParse(created);
+                          readableDate = dt != null ? '${dt.toLocal()}' : created;
+                        } catch (_) {
+                          readableDate = created;
+                        }
+                        return ListTile(
+                          title: Text('$amt M', style: const TextStyle(fontWeight: FontWeight.w600)),
+                          subtitle: Text(comment),
+                          trailing: Text(readableDate, style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                        );
+                      },
                     ),
-                  ],
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Закрыть'),
                 ),
+              ),
+            ),
+          ],
         ),
-        actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Закрыть'))],
       ),
     );
   }
@@ -1285,47 +2158,24 @@ class _ColorBanksTabState extends State<ColorBanksTab> {
                 Row(
                   children: [
                     const Expanded(child: Text('Банки цветов', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700))),
-                    IconButton(onPressed: _loadBanks, icon: const Icon(Icons.refresh)),
+                    IconButton(
+                      onPressed: _loadBanks, 
+                      icon: const Icon(Icons.refresh),
+                      tooltip: 'Обновить',
+                    ),
                   ],
                 ),
                 const SizedBox(height: 8),
+                const Text(
+                  'Текущие балансы цветов в майндах (M)',
+                  style: TextStyle(color: Colors.grey),
+                ),
+                const SizedBox(height: 16),
                 if (_loading)
                   const Center(child: CircularProgressIndicator())
                 else
                   Column(
-                    children: fixedColors.map((c) {
-                      final val = _balances[c] ?? 0;
-                      Color parsed;
-                      try {
-                        switch (c) {
-                          case 'зелёный':
-                            parsed = const Color(0xFF00FF00);
-                            break;
-                          case 'красный':
-                            parsed = const Color(0xFFFF0000);
-                            break;
-                          case 'синий':
-                            parsed = const Color(0xFF0000FF);
-                            break;
-                          case 'жёлтый':
-                            parsed = const Color(0xFFFFFF00);
-                            break;
-                          case 'малиновый':
-                            parsed = const Color(0xFFFF00FF);
-                            break;
-                          default:
-                            parsed = Colors.grey;
-                        }
-                      } catch (_) {
-                        parsed = Colors.grey;
-                      }
-                      return ListTile(
-                        leading: Container(width: 16, height: 16, decoration: BoxDecoration(color: parsed, borderRadius: BorderRadius.circular(3), border: Border.all(color: Colors.black12))),
-                        title: Text(c, style: const TextStyle(fontWeight: FontWeight.w600)),
-                        subtitle: Text('Текущий баланс: ${val.toString()} M'),
-                        trailing: TextButton(onPressed: () => _showHistory(c), child: const Text('История')),
-                      );
-                    }).toList(),
+                    children: fixedColors.map((c) => _buildColorCard(c)).toList(),
                   ),
               ]),
             ),

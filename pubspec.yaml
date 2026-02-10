@@ -67,6 +67,13 @@ flutter:
       - assets/images/ui/
       - assets/art_deco_login.png
       - assets/art_deco_frame_overlay.png
+      - assets/navbar.png
+      - assets/mafia.png
+      - assets/hollywood.png
+      - assets/economist.png
+      - assets/journalist.png
+      - assets/public_figure.png
+      - assets/politic.png
   #   - images/a_dot_burr.jpeg
   #   - images/a_dot_ham.jpeg
 

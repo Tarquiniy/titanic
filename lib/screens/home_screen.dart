@@ -1246,6 +1246,135 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // Функция для получения пути к изображению в зависимости от роли
+  String _getRoleImagePath(String role) {
+    final roleLower = role.toLowerCase();
+
+    if (roleLower.contains('мафия') || roleLower.contains('mafia')) {
+      return 'assets/mafia.png';
+    } else if (roleLower.contains('голливуд') || roleLower.contains('hollywood')) {
+      return 'assets/hollywood.png';
+    } else if (roleLower.contains('экономист') || roleLower.contains('economist')) {
+      return 'assets/economist.png';
+    } else if (roleLower.contains('журналист') || roleLower.contains('journalist')) {
+      return 'assets/journalist.png';
+    } else if (roleLower.contains('общественный') || roleLower.contains('public') || roleLower.contains('деятель')) {
+      return 'assets/public_figure.png';
+    } else if (roleLower.contains('политик') || roleLower.contains('politician')) {
+      return 'assets/politic.png';
+    } else {
+      return 'assets/default_role.png'; // Запасное изображение, если нет подходящей роли
+    }
+  }
+
+  // Вспомогательный виджет для отображения аватара с изображением роли
+  // УВЕЛИЧЕН РАЗМЕР АВАТАРКИ
+  Widget _buildRoleAvatar(String role) {
+    final imagePath = _getRoleImagePath(role);
+
+    return Container(
+      width: 90, // УВЕЛИЧЕНО с 60 до 90
+      height: 90, // УВЕЛИЧЕНО с 60 до 90
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: TitanicTheme.abyssalBlue, // Темно-синий фон
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.5), // Более выраженная тень
+            blurRadius: 15, // УВЕЛИЧЕН
+            offset: const Offset(0, 8), // УВЕЛИЧЕН
+          ),
+          BoxShadow(
+            color: TitanicTheme.raptureGold.withOpacity(0.3), // Золотое свечение
+            blurRadius: 10, // УВЕЛИЧЕНО
+            spreadRadius: 2, // ДОБАВЛЕНО
+          ),
+        ],
+        border: Border.all(
+          color: TitanicTheme.raptureGold.withOpacity(0.5), // Золотая граница
+          width: 2.5, // УВЕЛИЧЕНО
+        ),
+      ),
+      child: Center(
+        child: ColorFiltered(
+          colorFilter: ColorFilter.mode(
+            TitanicTheme.raptureGold, // Золотой цвет для изображения
+            BlendMode.srcIn,
+          ),
+          child: Image.asset(
+            imagePath,
+            width: 56, // УВЕЛИЧЕНО с 32 до 56
+            height: 56, // УВЕЛИЧЕНО с 32 до 56
+            errorBuilder: (context, error, stackTrace) {
+              // Если изображение не найдено, показываем иконку по умолчанию
+              return Icon(
+                Icons.person,
+                size: 56, // УВЕЛИЧЕНО с 32 до 56
+                color: TitanicTheme.raptureGold, // Золотой цвет для иконки
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Вспомогательный виджет для кнопки в форме кристалла
+  Widget _buildCrystalButton({
+    required IconData icon,
+    required VoidCallback onPressed,
+    Color iconColor = TitanicTheme.raptureGold, // Золотой цвет иконки
+  }) {
+    return GestureDetector(
+      onTap: onPressed,
+      child: Container(
+        width: 44,
+        height: 44,
+        child: Transform.rotate(
+          angle: 45 * 3.1415926535 / 180, // Поворот на 45 градусов для ромба
+          child: Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  TitanicTheme.surfaceNavy.withOpacity(0.9),
+                  TitanicTheme.abyssalBlue.withOpacity(0.8),
+                ],
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.5),
+                  blurRadius: 8,
+                  offset: const Offset(3, 3),
+                ),
+                BoxShadow(
+                  color: TitanicTheme.raptureGold.withOpacity(0.3),
+                  blurRadius: 4,
+                  offset: const Offset(-2, -2),
+                ),
+              ],
+              border: Border.all(
+                color: TitanicTheme.raptureGold.withOpacity(0.3), // Золотая граница
+                width: 1.2,
+              ),
+            ),
+            child: Center(
+              child: Transform.rotate(
+                angle: -45 * 3.1415926535 / 180, // Компенсация поворота для иконки
+                child: Icon(
+                  icon,
+                  color: iconColor, // Золотой цвет иконки
+                  size: 22,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   // -----------------------
   // BUILD
   // -----------------------
@@ -1262,8 +1391,7 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               // ВЕРХНЯЯ ПАНЕЛЬ С КНОПКАМИ
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
@@ -1279,124 +1407,40 @@ class _HomeScreenState extends State<HomeScreen> {
                       width: 1.5,
                     ),
                   ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.3),
+                      blurRadius: 10,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
                 ),
                 child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    // ЛОГОТИП И ЗАГОЛОВОК
-                    Row(
-                      children: [
-                        Container(
-                          width: 40,
-                          height: 40,
-                          decoration: BoxDecoration(
-                            gradient: TitanicTheme.goldGradient,
-                            shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.4),
-                                blurRadius: 8,
-                                offset: const Offset(0, 3),
-                              ),
-                            ],
-                          ),
-                          child: Icon(
-                            Icons.directions_boat,
-                            color: TitanicTheme.abyssalBlue,
-                            size: 24,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'ГЛАВНАЯ ПАЛУБА',
-                              style: TextStyle(
-                                fontFamily: 'Cinzel',
-                                fontSize: isSmallScreen ? 14 : 16,
-                                fontWeight: FontWeight.w700,
-                                color: TitanicTheme.ivoryCream,
-                                letterSpacing: 1.5,
-                              ),
-                            ),
-                            Container(
-                              height: 2,
-                              width: 80,
-                              margin: const EdgeInsets.only(top: 2),
-                              decoration: BoxDecoration(
-                                gradient: LinearGradient(
-                                  colors: [
-                                    TitanicTheme.raptureGold,
-                                    TitanicTheme.seaFoamGreen,
-                                  ],
-                                ),
-                                borderRadius: BorderRadius.circular(1),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
+                    // КНОПКА КОРАБЛИКА В ФОРМЕ КРИСТАЛЛА С ТЕМНО-СИНЕЙ ЗАЛИВКОЙ И ЗОЛОТОЙ ИКОНКОЙ
+                    _buildCrystalButton(
+                      icon: Icons.sailing,
+                      onPressed: () {}, // Обработчик пока не назначен
+                      iconColor: TitanicTheme.raptureGold, // Золотой цвет иконки
                     ),
 
-                    // КНОПКИ ДЕЙСТВИЙ
-                    Row(
-                      children: [
-                        Container(
-                          width: 40,
-                          height: 40,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            gradient: TitanicTheme.goldGradient,
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.3),
-                                blurRadius: 6,
-                                offset: const Offset(0, 3),
-                              ),
-                            ],
-                          ),
-                          child: IconButton(
-                            padding: EdgeInsets.zero,
-                            icon: Icon(
-                              Icons.inventory_2,
-                              size: 20,
-                              color: TitanicTheme.abyssalBlue,
-                            ),
-                            onPressed: _openInventoryScreen,
-                          ),
+                    // РАСТЯНУТОЕ ИЗОБРАЖЕНИЕ NAVBAR.PNG
+                    Expanded(
+                      child: Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 12),
+                        child: Image.asset(
+                          'assets/navbar.png',
+                          height: isSmallScreen ? 32 : 40,
+                          fit: BoxFit.fitWidth,
                         ),
-                        const SizedBox(width: 12),
-                        Container(
-                          width: 40,
-                          height: 40,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            gradient: LinearGradient(
-                              colors: [
-                                TitanicTheme.copperDetail.withOpacity(0.9),
-                                TitanicTheme.brassAccent.withOpacity(0.8),
-                              ],
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.3),
-                                blurRadius: 6,
-                                offset: const Offset(0, 3),
-                              ),
-                            ],
-                          ),
-                          child: IconButton(
-                            padding: EdgeInsets.zero,
-                            icon: Icon(
-                              Icons.exit_to_app,
-                              size: 20,
-                              color: TitanicTheme.abyssalBlue,
-                            ),
-                            onPressed: _logout,
-                          ),
-                        ),
-                      ],
+                      ),
+                    ),
+
+                    // КНОПКА ВЫХОДА В ФОРМЕ КРИСТАЛЛА С ТЕМНО-СИНЕЙ ЗАЛИВКОЙ И ЗОЛОТОЙ ИКОНКОЙ
+                    _buildCrystalButton(
+                      icon: Icons.exit_to_app,
+                      onPressed: _logout,
+                      iconColor: TitanicTheme.raptureGold, // Золотой цвет иконки
                     ),
                   ],
                 ),
@@ -1436,29 +1480,10 @@ class _HomeScreenState extends State<HomeScreen> {
                               Row(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Container(
-                                    width: 60,
-                                    height: 60,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      gradient: TitanicTheme.goldGradient,
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: Colors.black.withOpacity(0.4),
-                                          blurRadius: 10,
-                                          offset: const Offset(0, 6),
-                                        ),
-                                      ],
-                                    ),
-                                    child: Center(
-                                      child: Icon(
-                                        Icons.person,
-                                        size: 32,
-                                        color: TitanicTheme.abyssalBlue,
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 16),
+                                  // АВАТАР С ИЗОБРАЖЕНИЕМ РОЛИ - ТЕПЕРЬ БОЛЬШЕ
+                                  _buildRoleAvatar(user.role),
+
+                                  const SizedBox(width: 20), // УВЕЛИЧЕН ОТСТУП с 16 до 20
                                   Expanded(
                                     child: Column(
                                       crossAxisAlignment:
@@ -1468,48 +1493,48 @@ class _HomeScreenState extends State<HomeScreen> {
                                           '${user.firstName} ${user.lastName}',
                                           style: TextStyle(
                                             fontFamily: 'CormorantGaramond',
-                                            fontSize: isSmallScreen ? 20 : 24,
+                                            fontSize: isSmallScreen ? 22 : 26, // УВЕЛИЧЕН
                                             fontWeight: FontWeight.w700,
                                             color: TitanicTheme.ivoryCream,
                                             letterSpacing: 0.5,
                                           ),
                                         ),
-                                        const SizedBox(height: 2),
+                                        const SizedBox(height: 4), // УВЕЛИЧЕН
                                         Text(
                                           '@${user.username}',
                                           style: TextStyle(
                                             fontFamily: 'Cinzel',
-                                            fontSize: 14,
+                                            fontSize: 15, // УВЕЛИЧЕН
                                             color: TitanicTheme.ivoryCream
                                                 .withOpacity(0.7),
                                             letterSpacing: 0.3,
                                           ),
                                         ),
                                         if (_userColor != null) ...[
-                                          const SizedBox(height: 8),
+                                          const SizedBox(height: 12), // УВЕЛИЧЕН
                                           Container(
                                             padding: const EdgeInsets.symmetric(
-                                                horizontal: 10, vertical: 4),
+                                                horizontal: 12, vertical: 6), // УВЕЛИЧЕН
                                             decoration: BoxDecoration(
                                               color: _getColorFromString(
                                                       _userColor!)
-                                                  .withOpacity(0.2),
+                                                  .withOpacity(0.25), // БОЛЬШЕ НЕПРОЗРАЧНОСТИ
                                               borderRadius:
-                                                  BorderRadius.circular(12),
+                                                  BorderRadius.circular(14), // УВЕЛИЧЕН
                                               border: Border.all(
                                                 color: _getColorFromString(
                                                         _userColor!)
-                                                    .withOpacity(0.4),
-                                                width: 1,
+                                                    .withOpacity(0.5), // БОЛЬШЕ НЕПРОЗРАЧНОСТИ
+                                                width: 1.5, // УВЕЛИЧЕН
                                               ),
                                             ),
                                             child: Text(
                                               _userColor!,
                                               style: TextStyle(
                                                 fontFamily: 'Cinzel',
-                                                fontSize: 12,
+                                                fontSize: 14, // УВЕЛИЧЕН
                                                 color: TitanicTheme.ivoryCream,
-                                                fontWeight: FontWeight.w500,
+                                                fontWeight: FontWeight.w600, // УВЕЛИЧЕН
                                               ),
                                             ),
                                           ),
@@ -1519,19 +1544,19 @@ class _HomeScreenState extends State<HomeScreen> {
                                   ),
                                 ],
                               ),
-                              const SizedBox(height: 20),
+                              const SizedBox(height: 24), // УВЕЛИЧЕН
 
                               // БАЛАНСЫ
                               Container(
-                                padding: const EdgeInsets.all(16),
+                                padding: const EdgeInsets.all(18), // УВЕЛИЧЕН
                                 decoration: BoxDecoration(
                                   color: TitanicTheme.surfaceNavy
-                                      .withOpacity(0.3),
-                                  borderRadius: BorderRadius.circular(16),
+                                      .withOpacity(0.35), // БОЛЬШЕ НЕПРОЗРАЧНОСТИ
+                                  borderRadius: BorderRadius.circular(18), // УВЕЛИЧЕН
                                   border: Border.all(
                                     color: TitanicTheme.raptureGold
-                                        .withOpacity(0.2),
-                                    width: 1,
+                                        .withOpacity(0.25), // БОЛЬШЕ НЕПРОЗРАЧНОСТИ
+                                    width: 1.5,
                                   ),
                                 ),
                                 child: Row(
@@ -1544,18 +1569,18 @@ class _HomeScreenState extends State<HomeScreen> {
                                           'Войсы',
                                           style: TextStyle(
                                             fontFamily: 'Cinzel',
-                                            fontSize: 12,
+                                            fontSize: 13, // УВЕЛИЧЕН
                                             color: TitanicTheme.ivoryCream
                                                 .withOpacity(0.7),
                                             letterSpacing: 1.0,
                                           ),
                                         ),
-                                        const SizedBox(height: 4),
+                                        const SizedBox(height: 6), // УВЕЛИЧЕН
                                         Text(
                                           user.vBalance.toStringAsFixed(2),
                                           style: TextStyle(
                                             fontFamily: 'CormorantGaramond',
-                                            fontSize: isSmallScreen ? 22 : 26,
+                                            fontSize: isSmallScreen ? 24 : 28, // УВЕЛИЧЕН
                                             fontWeight: FontWeight.w700,
                                             color: TitanicTheme.raptureGold,
                                             letterSpacing: 1.0,
@@ -1564,10 +1589,10 @@ class _HomeScreenState extends State<HomeScreen> {
                                       ],
                                     ),
                                     Container(
-                                      width: 1,
-                                      height: 40,
+                                      width: 1.5, // УВЕЛИЧЕН
+                                      height: 45, // УВЕЛИЧЕН
                                       color: TitanicTheme.raptureGold
-                                          .withOpacity(0.2),
+                                          .withOpacity(0.25), // БОЛЬШЕ НЕПРОЗРАЧНОСТИ
                                     ),
                                     Column(
                                       children: [
@@ -1575,18 +1600,18 @@ class _HomeScreenState extends State<HomeScreen> {
                                           'Майнды',
                                           style: TextStyle(
                                             fontFamily: 'Cinzel',
-                                            fontSize: 12,
+                                            fontSize: 13, // УВЕЛИЧЕН
                                             color: TitanicTheme.ivoryCream
                                                 .withOpacity(0.7),
                                             letterSpacing: 1.0,
                                           ),
                                         ),
-                                        const SizedBox(height: 4),
+                                        const SizedBox(height: 6), // УВЕЛИЧЕН
                                         Text(
                                           user.mBalance.toStringAsFixed(2),
                                           style: TextStyle(
                                             fontFamily: 'CormorantGaramond',
-                                            fontSize: isSmallScreen ? 22 : 26,
+                                            fontSize: isSmallScreen ? 24 : 28, // УВЕЛИЧЕН
                                             fontWeight: FontWeight.w700,
                                             color: TitanicTheme.seaFoamGreen,
                                             letterSpacing: 1.0,
@@ -1597,7 +1622,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                   ],
                                 ),
                               ),
-                              const SizedBox(height: 20),
+                              const SizedBox(height: 24), // УВЕЛИЧЕН
 
                               // КНОПКИ ДЕЙСТВИЙ
                               Row(
@@ -1611,7 +1636,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                       expanded: true,
                                     ),
                                   ),
-                                  const SizedBox(width: 12),
+                                  const SizedBox(width: 16), // УВЕЛИЧЕН
                                   Expanded(
                                     child: ArtDecoButton(
                                       text: 'Инвентарь',
@@ -1627,7 +1652,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                         ),
                       ),
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 24), // УВЕЛИЧЕН
 
                       // СЕКЦИЯ ВОЗМОЖНОСТЕЙ РОЛИ
                       Container(
@@ -1655,37 +1680,37 @@ class _HomeScreenState extends State<HomeScreen> {
                                 'Возможности вашей роли',
                                 style: TextStyle(
                                   fontFamily: 'CormorantGaramond',
-                                  fontSize: isSmallScreen ? 20 : 22,
+                                  fontSize: isSmallScreen ? 22 : 24, // УВЕЛИЧЕН
                                   fontWeight: FontWeight.w700,
                                   color: TitanicTheme.ivoryCream,
                                   letterSpacing: 0.5,
                                 ),
                               ),
-                              const SizedBox(height: 8),
+                              const SizedBox(height: 12), // УВЕЛИЧЕН
                               Container(
                                 padding: const EdgeInsets.symmetric(
-                                    horizontal: 12, vertical: 6),
+                                    horizontal: 14, vertical: 8), // УВЕЛИЧЕН
                                 decoration: BoxDecoration(
                                   color: TitanicTheme.raptureGold
-                                      .withOpacity(0.1),
-                                  borderRadius: BorderRadius.circular(10),
+                                      .withOpacity(0.15), // БОЛЬШЕ НЕПРОЗРАЧНОСТИ
+                                  borderRadius: BorderRadius.circular(12), // УВЕЛИЧЕН
                                   border: Border.all(
                                     color: TitanicTheme.raptureGold
-                                        .withOpacity(0.3),
+                                        .withOpacity(0.4), // БОЛЬШЕ НЕПРОЗРАЧНОСТИ
                                   ),
                                 ),
                                 child: Text(
                                   user.role,
                                   style: TextStyle(
                                     fontFamily: 'Cinzel',
-                                    fontSize: 14,
+                                    fontSize: 15, // УВЕЛИЧЕН
                                     fontWeight: FontWeight.w600,
                                     color: TitanicTheme.raptureGold,
                                     letterSpacing: 0.5,
                                   ),
                                 ),
                               ),
-                              const SizedBox(height: 20),
+                              const SizedBox(height: 24), // УВЕЛИЧЕН
 
                               // КНОПКИ ДЛЯ РОЛЕЙ
                               if (_isRole('economist')) ...[
@@ -1696,7 +1721,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                   primary: true,
                                   expanded: true,
                                 ),
-                                const SizedBox(height: 12),
+                                const SizedBox(height: 16), // УВЕЛИЧЕН
                               ],
 
                               if (_hasActiveDebate &&
@@ -1708,7 +1733,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                   primary: false,
                                   expanded: true,
                                 ),
-                                const SizedBox(height: 12),
+                                const SizedBox(height: 16), // УВЕЛИЧЕН
                               ],
 
                               if (_hasActiveResolution &&
@@ -1723,20 +1748,20 @@ class _HomeScreenState extends State<HomeScreen> {
                                       borderRadius: BorderRadius.circular(12),
                                       child: Container(
                                         padding: const EdgeInsets.symmetric(
-                                            vertical: 14, horizontal: 16),
+                                            vertical: 16, horizontal: 18), // УВЕЛИЧЕН
                                         child: Row(
                                           mainAxisAlignment:
                                               MainAxisAlignment.center,
                                           children: [
                                             Icon(Icons.gavel,
                                                 color: TitanicTheme.seaFoamGreen,
-                                                size: 20),
-                                            const SizedBox(width: 10),
+                                                size: 22), // УВЕЛИЧЕН
+                                            const SizedBox(width: 12), // УВЕЛИЧЕН
                                             Text(
                                               'Политрешение',
                                               style: TextStyle(
                                                 fontFamily: 'Cinzel',
-                                                fontSize: 16,
+                                                fontSize: 17, // УВЕЛИЧЕН
                                                 fontWeight: FontWeight.w600,
                                                 color: TitanicTheme.ivoryCream,
                                                 letterSpacing: 0.8,
@@ -1748,7 +1773,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                     ),
                                   ),
                                 ),
-                                const SizedBox(height: 12),
+                                const SizedBox(height: 16), // УВЕЛИЧЕН
                               ],
 
                               if (user.role == 'politician') ...[
@@ -1766,18 +1791,18 @@ class _HomeScreenState extends State<HomeScreen> {
                                       borderRadius: BorderRadius.circular(12),
                                       child: Container(
                                         padding: const EdgeInsets.symmetric(
-                                            vertical: 14, horizontal: 16),
+                                            vertical: 16, horizontal: 18), // УВЕЛИЧЕН
                                         child: Row(
                                           mainAxisAlignment:
                                               MainAxisAlignment.center,
                                           children: [
                                             if (_rpcLoading)
                                               SizedBox(
-                                                width: 20,
-                                                height: 20,
+                                                width: 22, // УВЕЛИЧЕН
+                                                height: 22, // УВЕЛИЧЕН
                                                 child:
                                                     CircularProgressIndicator(
-                                                  strokeWidth: 2,
+                                                  strokeWidth: 2.5, // УВЕЛИЧЕН
                                                   color: _isSpeechButtonEnabled
                                                       ? Colors.black
                                                       : TitanicTheme.raptureGold,
@@ -1789,9 +1814,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                                 color: _isSpeechButtonEnabled
                                                     ? Colors.black
                                                     : TitanicTheme.raptureGold,
-                                                size: 20,
+                                                size: 22, // УВЕЛИЧЕН
                                               ),
-                                            const SizedBox(width: 10),
+                                            const SizedBox(width: 12), // УВЕЛИЧЕН
                                             Expanded(
                                               child: Text(
                                                 _isSpeechButtonEnabled
@@ -1799,7 +1824,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                                     : 'Речь жизни (неактивна)',
                                                 style: TextStyle(
                                                   fontFamily: 'Cinzel',
-                                                  fontSize: 16,
+                                                  fontSize: 17, // УВЕЛИЧЕН
                                                   fontWeight: FontWeight.w600,
                                                   color: _isSpeechButtonEnabled
                                                       ? Colors.black
@@ -1815,13 +1840,13 @@ class _HomeScreenState extends State<HomeScreen> {
                                     ),
                                   ),
                                 ),
-                                const SizedBox(height: 12),
+                                const SizedBox(height: 16), // УВЕЛИЧЕН
                               ],
                             ],
                           ),
                         ),
                       ),
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 24), // УВЕЛИЧЕН
 
                       // БЛОК ФИЛЬМОВ
                       Container(
@@ -1848,13 +1873,13 @@ class _HomeScreenState extends State<HomeScreen> {
                               'Кинематограф',
                               style: TextStyle(
                                 fontFamily: 'CormorantGaramond',
-                                fontSize: isSmallScreen ? 20 : 22,
+                                fontSize: isSmallScreen ? 22 : 24, // УВЕЛИЧЕН
                                 fontWeight: FontWeight.w700,
                                 color: TitanicTheme.ivoryCream,
                                 letterSpacing: 0.5,
                               ),
                             ),
-                            const SizedBox(height: 16),
+                            const SizedBox(height: 20), // УВЕЛИЧЕН
 
                             // Кнопка "Я посмотрел фильм"
                             WatchedMovieBlock(
@@ -1866,7 +1891,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 } catch (_) {}
                               },
                             ),
-                            const SizedBox(height: 12),
+                            const SizedBox(height: 16), // УВЕЛИЧЕН
 
                             // Голосование за фильм
                             MovieVoteBlock(
@@ -1879,7 +1904,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 } catch (_) {}
                               },
                             ),
-                            const SizedBox(height: 12),
+                            const SizedBox(height: 16), // УВЕЛИЧЕН
 
                             // Hollywood кнопки
                             HollywoodPayBlock(
@@ -1898,7 +1923,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
                       // БЛОКИ ДЛЯ МАФИИ
                       if (_isRole('мафия')) ...[
-                        const SizedBox(height: 20),
+                        const SizedBox(height: 24), // УВЕЛИЧЕН
                         Container(
                           decoration: BoxDecoration(
                             color: TitanicTheme.panelDark.withOpacity(0.9),
@@ -1923,13 +1948,13 @@ class _HomeScreenState extends State<HomeScreen> {
                                 'Особые возможности',
                                 style: TextStyle(
                                   fontFamily: 'CormorantGaramond',
-                                  fontSize: isSmallScreen ? 20 : 22,
+                                  fontSize: isSmallScreen ? 22 : 24, // УВЕЛИЧЕН
                                   fontWeight: FontWeight.w700,
                                   color: TitanicTheme.ivoryCream,
                                   letterSpacing: 0.5,
                                 ),
                               ),
-                              const SizedBox(height: 16),
+                              const SizedBox(height: 20), // УВЕЛИЧЕН
 
                               mafia_blocks.MafiaBlock(
                                 currentUserId: user.id,
@@ -1943,7 +1968,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 onDebtCollected: _onDebtCollected,
                                 onEnterpriseBought: _onMafiaEnterpriseBought,
                               ),
-                              const SizedBox(height: 16),
+                              const SizedBox(height: 20), // УВЕЛИЧЕН
 
                               BloodPokerBlock(
                                 currentUserId: user.id,
@@ -1955,7 +1980,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ],
 
                       // ЖУРНАЛ СОБЫТИЙ
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 24), // УВЕЛИЧЕН
                       Container(
                         decoration: BoxDecoration(
                           color: TitanicTheme.panelDark.withOpacity(0.9),
@@ -1981,32 +2006,32 @@ class _HomeScreenState extends State<HomeScreen> {
                                 'Журнал событий',
                                 style: TextStyle(
                                   fontFamily: 'CormorantGaramond',
-                                  fontSize: isSmallScreen ? 20 : 22,
+                                  fontSize: isSmallScreen ? 22 : 24, // УВЕЛИЧЕН
                                   fontWeight: FontWeight.w700,
                                   color: TitanicTheme.ivoryCream,
                                   letterSpacing: 0.5,
                                 ),
                               ),
-                              const SizedBox(height: 16),
+                              const SizedBox(height: 20), // УВЕЛИЧЕН
 
                               if (_journalEntries.isEmpty)
                                 Padding(
                                   padding:
-                                      const EdgeInsets.symmetric(vertical: 30),
+                                      const EdgeInsets.symmetric(vertical: 40), // УВЕЛИЧЕН
                                   child: Column(
                                     children: [
                                       Icon(
                                         Icons.history_toggle_off,
-                                        size: 50,
+                                        size: 60, // УВЕЛИЧЕН
                                         color: TitanicTheme.ivoryCream
                                             .withOpacity(0.2),
                                       ),
-                                      const SizedBox(height: 12),
+                                      const SizedBox(height: 16), // УВЕЛИЧЕН
                                       Text(
                                         'История событий пуста',
                                         style: TextStyle(
                                           fontFamily: 'Cinzel',
-                                          fontSize: 14,
+                                          fontSize: 15, // УВЕЛИЧЕН
                                           color: TitanicTheme.ivoryCream
                                               .withOpacity(0.5),
                                           letterSpacing: 0.5,
@@ -2018,19 +2043,19 @@ class _HomeScreenState extends State<HomeScreen> {
                               else
                                 ..._journalEntries.take(5).map((entry) {
                                   return Container(
-                                    margin: const EdgeInsets.only(bottom: 12),
+                                    margin: const EdgeInsets.only(bottom: 16), // УВЕЛИЧЕН
                                     decoration: BoxDecoration(
                                       color: TitanicTheme.surfaceNavy
-                                          .withOpacity(0.3),
-                                      borderRadius: BorderRadius.circular(12),
+                                          .withOpacity(0.35), // БОЛЬШЕ НЕПРОЗРАЧНОСТИ
+                                      borderRadius: BorderRadius.circular(14), // УВЕЛИЧЕН
                                       border: Border.all(
                                         color: TitanicTheme.raptureGold
-                                            .withOpacity(0.1),
-                                        width: 1,
+                                            .withOpacity(0.15), // БОЛЬШЕ НЕПРОЗРАЧНОСТИ
+                                        width: 1.5, // УВЕЛИЧЕН
                                       ),
                                     ),
                                     child: Padding(
-                                      padding: const EdgeInsets.all(12),
+                                      padding: const EdgeInsets.all(14), // УВЕЛИЧЕН
                                       child: Column(
                                         crossAxisAlignment:
                                             CrossAxisAlignment.start,
@@ -2040,7 +2065,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                                 'Событие',
                                             style: TextStyle(
                                               fontFamily: 'Cinzel',
-                                              fontSize: 14,
+                                              fontSize: 15, // УВЕЛИЧЕН
                                               fontWeight: FontWeight.w600,
                                               color: TitanicTheme.ivoryCream,
                                               letterSpacing: 0.3,
@@ -2048,12 +2073,12 @@ class _HomeScreenState extends State<HomeScreen> {
                                             maxLines: 2,
                                             overflow: TextOverflow.ellipsis,
                                           ),
-                                          const SizedBox(height: 8),
+                                          const SizedBox(height: 10), // УВЕЛИЧЕН
                                           Text(
                                             entry['message']?.toString() ?? '',
                                             style: TextStyle(
                                               fontFamily: 'Cinzel',
-                                              fontSize: 13,
+                                              fontSize: 14, // УВЕЛИЧЕН
                                               color: TitanicTheme.ivoryCream
                                                   .withOpacity(0.85),
                                               letterSpacing: 0.3,
@@ -2062,25 +2087,25 @@ class _HomeScreenState extends State<HomeScreen> {
                                             maxLines: 3,
                                             overflow: TextOverflow.ellipsis,
                                           ),
-                                          const SizedBox(height: 8),
+                                          const SizedBox(height: 10), // УВЕЛИЧЕН
                                           Row(
                                             mainAxisAlignment:
                                                 MainAxisAlignment.end,
                                             children: [
                                               Icon(
                                                 Icons.access_time,
-                                                size: 12,
+                                                size: 14, // УВЕЛИЧЕН
                                                 color: TitanicTheme.ivoryCream
                                                     .withOpacity(0.5),
                                               ),
-                                              const SizedBox(width: 6),
+                                              const SizedBox(width: 8), // УВЕЛИЧЕН
                                               Text(
                                                 _formatJournalDate(entry[
                                                         'created_at']
                                                     ?.toString()),
                                                 style: TextStyle(
                                                   fontFamily: 'Cinzel',
-                                                  fontSize: 11,
+                                                  fontSize: 12, // УВЕЛИЧЕН
                                                   color: TitanicTheme.ivoryCream
                                                       .withOpacity(0.5),
                                                   letterSpacing: 0.3,
@@ -2097,7 +2122,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                         ),
                       ),
-                      const SizedBox(height: 40),
+                      const SizedBox(height: 50), // УВЕЛИЧЕН
                     ],
                   ),
                 ),
@@ -2167,5 +2192,4 @@ Future<void> openBuyTurnFlow({
   required Future<void> Function() onRefreshProfile,
   required Function(String) showMessage,
 }) async {
-  // Заглушка - замените на реальную реализацию
 }

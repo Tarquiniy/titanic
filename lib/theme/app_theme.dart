@@ -842,7 +842,7 @@ class TitanicTheme {
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       ),
 
-      // ✅ UPDATED: явные состояния enabled/disabled, без переименований/сломов API
+      // ✅ ВЕРНУТ ОРИГИНАЛЬНЫЙ СТИЛЬ КНОПОК
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ButtonStyle(
           minimumSize: MaterialStateProperty.all(const Size(64, 48)),
@@ -923,4 +923,93 @@ class TitanicTheme {
       splashFactory: InkRipple.splashFactory,
     );
   }
+
+  static BoxDecoration artDecoCapsuleButton({Color? primaryColor}) {
+  final color = primaryColor ?? raptureGold;
+  return BoxDecoration(
+    gradient: LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [
+        color.withOpacity(0.9),
+        color.withOpacity(0.7),
+        color.withOpacity(0.5),
+      ],
+      stops: const [0.0, 0.5, 1.0],
+    ),
+    borderRadius: BorderRadius.circular(22),
+    border: Border.all(
+      color: ivoryCream.withOpacity(0.3),
+      width: 1.5,
+    ),
+    boxShadow: [
+      BoxShadow(
+        color: Colors.black.withOpacity(0.5),
+        blurRadius: 8,
+        offset: const Offset(3, 3),
+      ),
+      BoxShadow(
+        color: color.withOpacity(0.3),
+        blurRadius: 4,
+        offset: const Offset(-2, -2),
+      ),
+    ],
+  );
+}
+
+// Декоративный элемент ар-деко (геометрический узор)
+static Widget artDecoPattern({double size = 20, Color? color}) {
+  final patternColor = color ?? raptureGold;
+  return Container(
+    width: size,
+    height: size,
+    decoration: BoxDecoration(
+      borderRadius: BorderRadius.circular(4),
+      gradient: LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [
+          patternColor.withOpacity(0.8),
+          patternColor.withOpacity(0.4),
+        ],
+      ),
+      border: Border.all(
+        color: ivoryCream.withOpacity(0.2),
+        width: 1,
+      ),
+    ),
+    child: Center(
+      child: Container(
+        width: size * 0.4,
+        height: size * 0.4,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: abyssalBlue.withOpacity(0.7),
+          border: Border.all(
+            color: ivoryCream.withOpacity(0.3),
+            width: 1,
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+// Стиль текста в духе ар-деко
+static TextStyle artDecoText({double fontSize = 16, Color? color}) {
+  return TextStyle(
+    fontFamily: 'Cinzel',
+    fontSize: fontSize,
+    fontWeight: FontWeight.w600,
+    color: color ?? ivoryCream,
+    letterSpacing: 1.0,
+    shadows: [
+      Shadow(
+        color: Colors.black.withOpacity(0.4),
+        blurRadius: 2,
+        offset: const Offset(1, 1),
+      ),
+    ],
+  );
+}
 }

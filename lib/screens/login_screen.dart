@@ -21,7 +21,9 @@ class _LoginScreenState extends State<LoginScreen> {
   String? _error;
   final SupabaseClient supabase = Supabase.instance.client;
 
-  // Оверлеи (рамка + орнамент) — поверх фоновой картинки
+  // Background overlay assets (optional). If the asset is missing in pubspec.yaml,
+  // the UI will simply skip drawing it (see errorBuilder).
+  static const String _bgAsset = 'assets/art_deco_login.png';
   static const String _frameOverlayAsset = 'assets/art_deco_frame_overlay.png';
   static const String _ornamentAsset = 'assets/art_deco_ornament.png';
 
@@ -37,7 +39,9 @@ class _LoginScreenState extends State<LoginScreen> {
       if (id == null || id.isEmpty) return;
       final row = await supabase
           .from('user_credentials')
-          .select('id, telegram_username, role, first_name, last_name, v_balance, m_balance, color, region')
+          .select(
+            'id, telegram_username, role, first_name, last_name, v_balance, m_balance, color, region',
+          )
           .eq('id', id)
           .maybeSingle();
       if (row is Map<String, dynamic>) {
@@ -53,9 +57,13 @@ class _LoginScreenState extends State<LoginScreen> {
           region: row['region']?.toString(),
         );
         if ((row['role'] ?? '').toString().toLowerCase() == 'admin') {
-          Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const AdminScreen()));
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (_) => const AdminScreen()),
+          );
         } else {
-          Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => HomeScreen(currentUser: user)));
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (_) => HomeScreen(currentUser: user)),
+          );
         }
       }
     } catch (_) {}
@@ -75,7 +83,9 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       final data = await supabase
           .from('user_credentials')
-          .select('id, telegram_username, role, first_name, last_name, v_balance, m_balance, password, color, region')
+          .select(
+            'id, telegram_username, role, first_name, last_name, v_balance, m_balance, password, color, region',
+          )
           .eq('telegram_username', username)
           .maybeSingle();
       if (data == null) {
@@ -103,9 +113,13 @@ class _LoginScreenState extends State<LoginScreen> {
         await saveUserId(user.id);
       } catch (_) {}
       if ((row['role'] ?? '').toString().toLowerCase() == 'admin') {
-        Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const AdminScreen()));
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const AdminScreen()),
+        );
       } else {
-        Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => HomeScreen(currentUser: user)));
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => HomeScreen(currentUser: user)),
+        );
       }
     } catch (e) {
       setState(() => _error = 'Ошибка: ${e.toString()}');
@@ -147,91 +161,100 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  Widget _buildOverlayFrameAndOrnament() {
-    // Рамка: ярче + на весь экран + золотое тонирование
-    return IgnorePointer(
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          Positioned.fill(
-            child: Opacity(
-              opacity: 0.62, // ярче
-              child: ColorFiltered(
-                colorFilter: ColorFilter.mode(
-                  TitanicTheme.raptureGold.withOpacity(0.95),
-                  BlendMode.srcATop,
-                ),
-                child: Image.asset(
-                  _frameOverlayAsset,
-                  fit: BoxFit.cover, // на весь экран
-                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                ),
-              ),
-            ),
+  Widget _buildArtDecoBackground({required Widget child}) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        // Base background image
+        const Positioned.fill(
+          child: Image(
+            image: AssetImage(_bgAsset),
+            fit: BoxFit.cover,
           ),
+        ),
 
-          // Орнамент сверху/снизу — как на референсе
-          Align(
-            alignment: Alignment.topCenter,
-            child: Padding(
-              padding: const EdgeInsets.only(top: 14),
-              child: Opacity(
-                opacity: 0.9,
-                child: ColorFiltered(
-                  colorFilter: ColorFilter.mode(
-                    TitanicTheme.raptureGold.withOpacity(0.95),
-                    BlendMode.srcATop,
-                  ),
-                  child: Image.asset(
-                    _ornamentAsset,
-                    fit: BoxFit.contain,
-                    height: 42,
-                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                  ),
-                ),
-              ),
-            ),
+        // Darken layer to keep readability
+        Positioned.fill(
+          child: Container(
+            color: TitanicTheme.abyssalBlue.withOpacity(0.82),
           ),
-          Align(
-            alignment: Alignment.bottomCenter,
-            child: Padding(
-              padding: const EdgeInsets.only(bottom: 14),
-              child: Opacity(
-                opacity: 0.9,
-                child: ColorFiltered(
-                  colorFilter: ColorFilter.mode(
-                    TitanicTheme.raptureGold.withOpacity(0.95),
-                    BlendMode.srcATop,
-                  ),
-                  child: Image.asset(
-                    _ornamentAsset,
-                    fit: BoxFit.contain,
-                    height: 42,
-                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                  ),
-                ),
-              ),
-            ),
-          ),
+        ),
 
-          // Виньетка (чтобы золото “светилось” сильнее)
-          Positioned.fill(
-            child: DecoratedBox(
+        // Subtle vignette for depth
+        Positioned.fill(
+          child: IgnorePointer(
+            child: Container(
               decoration: BoxDecoration(
                 gradient: RadialGradient(
-                  center: const Alignment(0, -0.1),
+                  center: const Alignment(0.0, -0.2),
                   radius: 1.05,
                   colors: [
                     Colors.transparent,
-                    Colors.black.withOpacity(0.55),
+                    Colors.black.withOpacity(0.35),
                   ],
                   stops: const [0.55, 1.0],
                 ),
               ),
             ),
           ),
-        ],
-      ),
+        ),
+
+        // Frame overlay (optional)
+        Positioned.fill(
+          child: IgnorePointer(
+            child: Opacity(
+              opacity: 0.22,
+              child: Image.asset(
+                _frameOverlayAsset,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+              ),
+            ),
+          ),
+        ),
+
+        // Top ornament (optional)
+        Positioned(
+          top: 10,
+          left: 0,
+          right: 0,
+          child: IgnorePointer(
+            child: Opacity(
+              opacity: 0.22,
+              child: Image.asset(
+                _ornamentAsset,
+                height: 44,
+                fit: BoxFit.contain,
+                errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+              ),
+            ),
+          ),
+        ),
+
+        // Bottom ornament (optional, mirrored)
+        Positioned(
+          bottom: 10,
+          left: 0,
+          right: 0,
+          child: IgnorePointer(
+            child: Opacity(
+              opacity: 0.18,
+              child: RotatedBox(
+                quarterTurns: 2,
+                child: Image.asset(
+                  _ornamentAsset,
+                  height: 44,
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                ),
+              ),
+            ),
+          ),
+        ),
+
+        // Foreground content
+        child,
+      ],
     );
   }
 
@@ -242,288 +265,272 @@ class _LoginScreenState extends State<LoginScreen> {
 
     return Scaffold(
       backgroundColor: Colors.transparent,
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          // БАЗОВЫЙ ФОН (НЕ УБИРАЕМ)
-          Positioned.fill(
-            child: Image.asset(
-              'assets/art_deco_login.png',
-              fit: BoxFit.cover,
-            ),
-          ),
-
-          // Тёмная подложка
-          Positioned.fill(
+      body: _buildArtDecoBackground(
+        child: SafeArea(
+          child: SingleChildScrollView(
+            physics: const BouncingScrollPhysics(),
             child: Container(
-              color: TitanicTheme.abyssalBlue.withOpacity(0.86),
-            ),
-          ),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 40),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // ЗАГОЛОВОЧНАЯ СЕКЦИЯ
+                  Column(
+                    children: [
+                      // Декоративный элемент
+                      Container(
+                        width: 80,
+                        height: 80,
+                        decoration: BoxDecoration(
+                          gradient: TitanicTheme.goldGradient,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.4),
+                              blurRadius: 15,
+                              offset: const Offset(0, 8),
+                            ),
+                          ],
+                        ),
+                        child: Center(
+                          child: Icon(
+                            Icons.directions_boat,
+                            size: 50,
+                            color: TitanicTheme.abyssalBlue,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
 
-          // РАМКА + ОРНАМЕНТ ПОВЕРХ
-          _buildOverlayFrameAndOrnament(),
+                      // Заголовок
+                      Text(
+                        'TITANIC',
+                        style: TextStyle(
+                          fontFamily: 'CormorantGaramond',
+                          fontSize: isSmallScreen ? 42 : 48,
+                          fontWeight: FontWeight.w800,
+                          color: TitanicTheme.raptureGold,
+                          letterSpacing: 6.0,
+                          height: 1.0,
+                          shadows: [
+                            Shadow(
+                              color: Colors.black.withOpacity(0.8),
+                              blurRadius: 12,
+                              offset: const Offset(2, 2),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 8),
 
-          // КОНТЕНТ
-          SafeArea(
-            child: SingleChildScrollView(
-              physics: const BouncingScrollPhysics(),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 40),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // ЗАГОЛОВОЧНАЯ СЕКЦИЯ
-                    Column(
-                      children: [
-                        Container(
-                          width: 80,
-                          height: 80,
-                          decoration: BoxDecoration(
-                            gradient: TitanicTheme.goldGradient,
-                            shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.4),
-                                blurRadius: 15,
-                                offset: const Offset(0, 8),
-                              ),
+                      // Подзаголовок
+                      Text(
+                        'ВХОД В СИСТЕМУ',
+                        style: TextStyle(
+                          fontFamily: 'Cinzel',
+                          fontSize: isSmallScreen ? 16 : 18,
+                          fontWeight: FontWeight.w600,
+                          color: TitanicTheme.ivoryCream.withOpacity(0.9),
+                          letterSpacing: 3.0,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+
+                      // Декоративная линия
+                      Container(
+                        height: 2,
+                        width: 120,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              TitanicTheme.raptureGold.withOpacity(0.6),
+                              TitanicTheme.seaFoamGreen.withOpacity(0.6),
                             ],
                           ),
-                          child: Center(
-                            child: Icon(
-                              Icons.directions_boat,
-                              size: 50,
-                              color: TitanicTheme.abyssalBlue,
-                            ),
-                          ),
+                          borderRadius: BorderRadius.circular(1),
                         ),
-                        const SizedBox(height: 20),
+                      ),
+                    ],
+                  ),
 
-                        Text(
-                          'TITANIC',
-                          style: TextStyle(
-                            fontFamily: 'CormorantGaramond',
-                            fontSize: isSmallScreen ? 42 : 48,
-                            fontWeight: FontWeight.w800,
-                            color: TitanicTheme.raptureGold,
-                            letterSpacing: 6.0,
-                            height: 1.0,
-                            shadows: [
-                              Shadow(
-                                color: Colors.black.withOpacity(0.8),
-                                blurRadius: 12,
-                                offset: const Offset(2, 2),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 8),
+                  const SizedBox(height: 40),
 
-                        Text(
-                          'ВХОД В СИСТЕМУ',
-                          style: TextStyle(
-                            fontFamily: 'Cinzel',
-                            fontSize: isSmallScreen ? 16 : 18,
-                            fontWeight: FontWeight.w600,
-                            color: TitanicTheme.ivoryCream.withOpacity(0.9),
-                            letterSpacing: 3.0,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-
-                        Container(
-                          height: 2,
-                          width: 120,
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [
-                                TitanicTheme.raptureGold.withOpacity(0.8),
-                                TitanicTheme.seaFoamGreen.withOpacity(0.7),
-                              ],
-                            ),
-                            borderRadius: BorderRadius.circular(1),
-                          ),
+                  // ФОРМА ВХОДА
+                  Container(
+                    decoration: BoxDecoration(
+                      color: TitanicTheme.panelDark.withOpacity(0.9),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: TitanicTheme.raptureGold.withOpacity(0.3),
+                        width: 1.5,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.5),
+                          blurRadius: 25,
+                          offset: const Offset(0, 12),
+                          spreadRadius: 1,
                         ),
                       ],
                     ),
-
-                    const SizedBox(height: 40),
-
-                    // ФОРМА ВХОДА (оставляем читабельной)
-                    Container(
-                      decoration: BoxDecoration(
-                        color: TitanicTheme.panelDark, // без полупрозрачности
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: TitanicTheme.raptureGold.withOpacity(0.45),
-                          width: 1.6,
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      children: [
+                        // Поле username
+                        TextField(
+                          controller: _emailCtrl,
+                          keyboardType: TextInputType.text,
+                          textInputAction: TextInputAction.next,
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: isSmallScreen ? 15 : 16,
+                            fontFamily: 'Cinzel',
+                          ),
+                          cursorColor: TitanicTheme.raptureGold,
+                          cursorWidth: 2.0,
+                          cursorHeight: 20,
+                          decoration: _fieldDecoration(
+                            label: 'Telegram Username',
+                            icon: Icons.person_outline,
+                          ),
+                          onSubmitted: (_) => FocusScope.of(context).nextFocus(),
                         ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.55),
-                            blurRadius: 25,
-                            offset: const Offset(0, 12),
-                            spreadRadius: 1,
-                          ),
-                          BoxShadow(
-                            color: TitanicTheme.raptureGold.withOpacity(0.10),
-                            blurRadius: 26,
-                            offset: const Offset(0, 0),
-                          ),
-                        ],
-                      ),
-                      padding: const EdgeInsets.all(24),
-                      child: Column(
-                        children: [
-                          TextField(
-                            controller: _emailCtrl,
-                            keyboardType: TextInputType.text,
-                            textInputAction: TextInputAction.next,
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: isSmallScreen ? 15 : 16,
-                              fontFamily: 'Cinzel',
-                            ),
-                            cursorColor: TitanicTheme.raptureGold,
-                            cursorWidth: 2.0,
-                            cursorHeight: 20,
-                            decoration: _fieldDecoration(
-                              label: 'Telegram Username',
-                              icon: Icons.person_outline,
-                            ),
-                            onSubmitted: (_) => FocusScope.of(context).nextFocus(),
-                          ),
-                          const SizedBox(height: 16),
+                        const SizedBox(height: 16),
 
-                          TextField(
-                            controller: _passCtrl,
-                            obscureText: true,
-                            textInputAction: TextInputAction.done,
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: isSmallScreen ? 15 : 16,
-                              fontFamily: 'Cinzel',
-                            ),
-                            cursorColor: TitanicTheme.raptureGold,
-                            cursorWidth: 2.0,
-                            cursorHeight: 20,
-                            decoration: _fieldDecoration(
-                              label: 'Пароль',
-                              icon: Icons.lock_outline,
-                            ),
-                            onSubmitted: (_) {
-                              if (!_loading) _signIn();
-                            },
+                        // Поле пароля
+                        TextField(
+                          controller: _passCtrl,
+                          obscureText: true,
+                          textInputAction: TextInputAction.done,
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: isSmallScreen ? 15 : 16,
+                            fontFamily: 'Cinzel',
                           ),
+                          cursorColor: TitanicTheme.raptureGold,
+                          cursorWidth: 2.0,
+                          cursorHeight: 20,
+                          decoration: _fieldDecoration(
+                            label: 'Пароль',
+                            icon: Icons.lock_outline,
+                          ),
+                          onSubmitted: (_) {
+                            if (!_loading) _signIn();
+                          },
+                        ),
 
-                          if (_error != null) ...[
-                            const SizedBox(height: 20),
-                            Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                              decoration: BoxDecoration(
-                                color: Colors.redAccent.withOpacity(0.12),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                  color: Colors.redAccent.withOpacity(0.30),
-                                  width: 1.5,
-                                ),
+                        // Сообщение об ошибке
+                        if (_error != null) ...[
+                          const SizedBox(height: 20),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            decoration: BoxDecoration(
+                              color: Colors.redAccent.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: Colors.redAccent.withOpacity(0.25),
+                                width: 1.5,
                               ),
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.warning_amber_rounded,
-                                    color: Colors.redAccent.withOpacity(0.92),
-                                    size: 20,
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Text(
-                                      _error!,
-                                      style: TextStyle(
-                                        color: Colors.redAccent.withOpacity(0.92),
-                                        fontSize: 14,
-                                        fontFamily: 'Cinzel',
-                                      ),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.warning_amber_rounded,
+                                  color: Colors.redAccent.withOpacity(0.9),
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    _error!,
+                                    style: TextStyle(
+                                      color: Colors.redAccent.withOpacity(0.9),
+                                      fontSize: 14,
+                                      fontFamily: 'Cinzel',
                                     ),
                                   ),
-                                ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+
+                        const SizedBox(height: 24),
+
+                        // Декоративный разделитель
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Divider(
+                                color: TitanicTheme.raptureGold.withOpacity(0.3),
+                                thickness: 1,
+                                height: 20,
+                              ),
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 16),
+                              child: Icon(
+                                Icons.diamond,
+                                color: TitanicTheme.raptureGold,
+                                size: 16,
+                              ),
+                            ),
+                            Expanded(
+                              child: Divider(
+                                color: TitanicTheme.raptureGold.withOpacity(0.3),
+                                thickness: 1,
+                                height: 20,
                               ),
                             ),
                           ],
-
-                          const SizedBox(height: 24),
-
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Divider(
-                                  color: TitanicTheme.raptureGold.withOpacity(0.35),
-                                  thickness: 1,
-                                  height: 20,
-                                ),
-                              ),
-                              Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 16),
-                                child: Icon(
-                                  Icons.diamond,
-                                  color: TitanicTheme.raptureGold.withOpacity(0.9),
-                                  size: 16,
-                                ),
-                              ),
-                              Expanded(
-                                child: Divider(
-                                  color: TitanicTheme.raptureGold.withOpacity(0.35),
-                                  thickness: 1,
-                                  height: 20,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 24),
-
-                          ArtDecoButton(
-                            text: 'ВОЙТИ В СИСТЕМУ',
-                            icon: Icons.login_rounded,
-                            primary: true,
-                            loading: _loading,
-                            onPressed: _loading ? null : _signIn,
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    const SizedBox(height: 30),
-
-                    Column(
-                      children: [
-                        Container(
-                          height: 3,
-                          width: 150,
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [
-                                TitanicTheme.raptureGold.withOpacity(0.0),
-                                TitanicTheme.raptureGold.withOpacity(0.85),
-                                TitanicTheme.seaFoamGreen.withOpacity(0.55),
-                                TitanicTheme.raptureGold.withOpacity(0.85),
-                                TitanicTheme.raptureGold.withOpacity(0.0),
-                              ],
-                              stops: const [0.0, 0.3, 0.5, 0.7, 1.0],
-                            ),
-                            borderRadius: BorderRadius.circular(2),
-                          ),
                         ),
-                        const SizedBox(height: 10),
+                        const SizedBox(height: 24),
+
+                        // Кнопка входа
+                        ArtDecoButton(
+                          text: 'ВОЙТИ В СИСТЕМУ',
+                          icon: Icons.login_rounded,
+                          primary: true,
+                          loading: _loading,
+                          expanded: true,
+                          onPressed: _loading ? null : _signIn,
+                        ),
                       ],
                     ),
-                  ],
-                ),
+                  ),
+
+                  const SizedBox(height: 30),
+
+                  // ДЕКОРАТИВНЫЙ ЭЛЕМЕНТ ВНИЗУ
+                  Column(
+                    children: [
+                      Container(
+                        height: 3,
+                        width: 150,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              TitanicTheme.raptureGold.withOpacity(0.0),
+                              TitanicTheme.raptureGold.withOpacity(0.7),
+                              TitanicTheme.seaFoamGreen.withOpacity(0.5),
+                              TitanicTheme.raptureGold.withOpacity(0.7),
+                              TitanicTheme.raptureGold.withOpacity(0.0),
+                            ],
+                            stops: const [0.0, 0.3, 0.5, 0.7, 1.0],
+                          ),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                    ],
+                  ),
+                ],
               ),
             ),
           ),
-        ],
+        ),
       ),
     );
   }
