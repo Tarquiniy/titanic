@@ -18,7 +18,7 @@ enum AdminDrawerItem {
   resolutions,
   bloodPoker,
   moviePoll,
-  economist, // заглушка для экономистов
+  economist,
 }
 
 class AdminScreen extends StatefulWidget {
@@ -29,7 +29,7 @@ class AdminScreen extends StatefulWidget {
 
 class _AdminScreenState extends State<AdminScreen> {
   final supabase = Supabase.instance.client;
-  AdminDrawerItem _selectedItem = AdminDrawerItem.users; // по умолчанию пользователи
+  AdminDrawerItem _selectedItem = AdminDrawerItem.users;
 
   Future<void> _logout() async {
     try {
@@ -44,7 +44,6 @@ class _AdminScreenState extends State<AdminScreen> {
     );
   }
 
-  /// Возвращает виджет для выбранного пункта меню
   Widget _buildBody() {
     switch (_selectedItem) {
       case AdminDrawerItem.users:
@@ -60,12 +59,10 @@ class _AdminScreenState extends State<AdminScreen> {
       case AdminDrawerItem.moviePoll:
         return const MoviePollAdminScreen();
       case AdminDrawerItem.economist:
-        // Заглушка для экономистов (можно развить позже)
         return const _EconomistPlaceholder();
     }
   }
 
-  /// Заголовок экрана в зависимости от выбранного пункта
   String _getTitle() {
     switch (_selectedItem) {
       case AdminDrawerItem.users:
@@ -121,7 +118,6 @@ class _AdminScreenState extends State<AdminScreen> {
     );
   }
 
-  /// Строим боковое меню с группировкой по ролям
   Widget _buildDrawer(bool isSmall) {
     return Drawer(
       backgroundColor: TitanicTheme.surfaceNavy,
@@ -145,7 +141,6 @@ class _AdminScreenState extends State<AdminScreen> {
         child: ListView(
           padding: EdgeInsets.zero,
           children: [
-            // Шапка Drawer
             DrawerHeader(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
@@ -217,8 +212,6 @@ class _AdminScreenState extends State<AdminScreen> {
                 ],
               ),
             ),
-
-            // === ОБЩИЕ РАЗДЕЛЫ ===
             _buildDrawerTile(
               icon: Icons.people,
               label: 'Список игроков',
@@ -231,7 +224,6 @@ class _AdminScreenState extends State<AdminScreen> {
               item: AdminDrawerItem.colorBanks,
               isSmall: isSmall,
             ),
-
             const Divider(
               color: Color(0xFFD4AF37),
               thickness: 0.5,
@@ -239,8 +231,6 @@ class _AdminScreenState extends State<AdminScreen> {
               endIndent: 16,
               height: 24,
             ),
-
-            // === ПОЛИТИКИ ===
             Padding(
               padding: const EdgeInsets.only(left: 16, top: 8, bottom: 4),
               child: Text(
@@ -265,8 +255,6 @@ class _AdminScreenState extends State<AdminScreen> {
               item: AdminDrawerItem.resolutions,
               isSmall: isSmall,
             ),
-
-            // === МАФИЯ ===
             Padding(
               padding: const EdgeInsets.only(left: 16, top: 8, bottom: 4),
               child: Text(
@@ -285,8 +273,6 @@ class _AdminScreenState extends State<AdminScreen> {
               item: AdminDrawerItem.bloodPoker,
               isSmall: isSmall,
             ),
-
-            // === ГОЛЛИВУД ===
             Padding(
               padding: const EdgeInsets.only(left: 16, top: 8, bottom: 4),
               child: Text(
@@ -305,8 +291,6 @@ class _AdminScreenState extends State<AdminScreen> {
               item: AdminDrawerItem.moviePoll,
               isSmall: isSmall,
             ),
-
-            // === ЭКОНОМИСТЫ ===
             Padding(
               padding: const EdgeInsets.only(left: 16, top: 8, bottom: 4),
               child: Text(
@@ -325,9 +309,7 @@ class _AdminScreenState extends State<AdminScreen> {
               item: AdminDrawerItem.economist,
               isSmall: isSmall,
             ),
-
             const SizedBox(height: 20),
-            // Кнопка выхода внизу (дублирующая, но может быть удобно)
             Container(
               margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: ArtDecoButton(
@@ -346,7 +328,6 @@ class _AdminScreenState extends State<AdminScreen> {
     );
   }
 
-  /// Универсальная плитка для Drawer с подсветкой выбранного элемента
   Widget _buildDrawerTile({
     required IconData icon,
     required String label,
@@ -396,7 +377,7 @@ class _AdminScreenState extends State<AdminScreen> {
           setState(() {
             _selectedItem = item;
           });
-          Navigator.of(context).pop(); // закрываем drawer
+          Navigator.of(context).pop();
         },
       ),
     );
@@ -456,10 +437,6 @@ class _EconomistPlaceholder extends StatelessWidget {
     );
   }
 }
-
-// ----------------- ОСТАЛЬНЫЕ ВКЛАДКИ (UsersTab, DebatesTab, ResolutionsTab, ColorBanksTab) -----------------
-// Полностью идентичны предыдущей версии, поэтому оставляем их без изменений.
-// (Код вставлен ниже для полноты, но он не менялся)
 
 // ----------------- UsersTab -----------------
 class UsersTab extends StatefulWidget {
@@ -645,6 +622,7 @@ class _UsersTabState extends State<UsersTab> {
   }
 }
 
+// ==================== УЛУЧШЕННЫЙ ДИАЛОГ РЕДАКТИРОВАНИЯ ПОЛЬЗОВАТЕЛЯ ====================
 class _UserEditDialog extends StatefulWidget {
   final Map<String, dynamic> user;
   const _UserEditDialog({required this.user, Key? key}) : super(key: key);
@@ -653,36 +631,95 @@ class _UserEditDialog extends StatefulWidget {
 }
 
 class _UserEditDialogState extends State<_UserEditDialog> {
+  late TextEditingController _roleCtrl;
   late TextEditingController _vCtrl;
   late TextEditingController _mCtrl;
-  late TextEditingController _roleCtrl;
   late TextEditingController _colorCtrl;
-  late TextEditingController _inventoryCtrl;
-  late TextEditingController _enterprisesCtrl;
   bool _usurer = false;
+
+  // Структурированные данные для инвентаря и предприятий
+  List<Map<String, dynamic>> _inventoryItems = [];
+  List<Map<String, dynamic>> _enterprisesItems = [];
 
   @override
   void initState() {
     super.initState();
+    _roleCtrl = TextEditingController(text: (widget.user['role'] ?? '').toString());
     _vCtrl = TextEditingController(text: (widget.user['v_balance'] ?? '').toString());
     _mCtrl = TextEditingController(text: (widget.user['m_balance'] ?? '').toString());
-    _roleCtrl = TextEditingController(text: (widget.user['role'] ?? '').toString());
     _colorCtrl = TextEditingController(text: (widget.user['color'] ?? '').toString());
-    _inventoryCtrl = TextEditingController(text: jsonEncode(widget.user['inventory'] ?? {}));
-    _enterprisesCtrl = TextEditingController(text: jsonEncode(widget.user['enterprises'] ?? {}));
     _usurer = (widget.user['usurer'] == true) ||
         (widget.user['usurer']?.toString().toLowerCase() == 'true');
+
+    _inventoryItems = _parseInventory(widget.user['inventory']);
+    _enterprisesItems = _parseEnterprises(widget.user['enterprises']);
   }
 
-  @override
-  void dispose() {
-    _vCtrl.dispose();
-    _mCtrl.dispose();
-    _roleCtrl.dispose();
-    _colorCtrl.dispose();
-    _inventoryCtrl.dispose();
-    _enterprisesCtrl.dispose();
-    super.dispose();
+  List<Map<String, dynamic>> _parseInventory(dynamic inv) {
+    final List<Map<String, dynamic>> result = [];
+    if (inv == null) return result;
+
+    dynamic decoded = inv;
+    if (inv is String) {
+      try {
+        decoded = jsonDecode(inv);
+      } catch (_) {
+        decoded = null;
+      }
+    }
+    if (decoded == null) return result;
+
+    if (decoded is List) {
+      for (final item in decoded) {
+        if (item is Map) {
+          final name = item['name'] ?? item['label'] ?? 'Предмет';
+          final voices = item['voices'] ?? item['count'] ?? 0;
+          result.add({
+            'name': name.toString(),
+            'voices': voices is num ? voices.toInt() : int.tryParse(voices.toString()) ?? 0,
+          });
+        }
+      }
+    } else if (decoded is Map) {
+      decoded.forEach((key, value) {
+        result.add({
+          'name': key.toString(),
+          'voices': value is num ? value.toInt() : int.tryParse(value.toString()) ?? 0,
+        });
+      });
+    }
+    return result;
+  }
+
+  List<Map<String, dynamic>> _parseEnterprises(dynamic ent) {
+    final List<Map<String, dynamic>> result = [];
+    if (ent == null) return result;
+
+    dynamic decoded = ent;
+    if (ent is String) {
+      try {
+        decoded = jsonDecode(ent);
+      } catch (_) {
+        decoded = null;
+      }
+    }
+    if (decoded == null) return result;
+
+    if (decoded is List) {
+      for (final item in decoded) {
+        if (item is Map) {
+          result.add(Map<String, dynamic>.from(item));
+        }
+      }
+    } else if (decoded is Map) {
+      decoded.forEach((key, value) {
+        result.add({
+          'name': key.toString(),
+          ...(value is Map ? Map<String, dynamic>.from(value) : {}),
+        });
+      });
+    }
+    return result;
   }
 
   Map<String, dynamic> _buildPayload() {
@@ -694,24 +731,28 @@ class _UserEditDialogState extends State<_UserEditDialog> {
     out['role'] = _roleCtrl.text.trim();
     out['color'] = _colorCtrl.text.trim();
     out['usurer'] = _usurer;
-    try {
-      final inv = jsonDecode(_inventoryCtrl.text);
-      out['inventory'] = inv;
-    } catch (_) {}
-    try {
-      final ent = jsonDecode(_enterprisesCtrl.text);
-      out['enterprises'] = ent;
-    } catch (_) {}
+    out['inventory'] = _inventoryItems.isNotEmpty ? _inventoryItems : null;
+    out['enterprises'] = _enterprisesItems.isNotEmpty ? _enterprisesItems : null;
     return Map<String, dynamic>.from(out);
+  }
+
+  @override
+  void dispose() {
+    _roleCtrl.dispose();
+    _vCtrl.dispose();
+    _mCtrl.dispose();
+    _colorCtrl.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final isSmall = MediaQuery.of(context).size.width < 380;
+
     return AlertDialog(
       title: Text(
         'Редактировать пользователя',
-        style: TitanicTheme.titleLarge,
+        style: TitanicTheme.titleLarge.copyWith(color: Colors.white),
       ),
       backgroundColor: TitanicTheme.panelDark,
       shape: RoundedRectangleBorder(
@@ -721,11 +762,24 @@ class _UserEditDialogState extends State<_UserEditDialog> {
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Блок (роль)
             TextField(
               controller: _roleCtrl,
+              style: const TextStyle(color: Colors.white),
+              cursorColor: TitanicTheme.raptureGold,
               decoration: TitanicTheme.inputDecoration.copyWith(
-                labelText: 'role',
+                labelText: 'Блок (роль)',
+                labelStyle: const TextStyle(color: Colors.white70),
+                enabledBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: TitanicTheme.raptureGold.withOpacity(0.3)),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: TitanicTheme.raptureGold, width: 2),
+                  borderRadius: BorderRadius.circular(12),
+                ),
                 contentPadding: EdgeInsets.symmetric(
                   horizontal: 12,
                   vertical: isSmall ? 12 : 14,
@@ -733,10 +787,23 @@ class _UserEditDialogState extends State<_UserEditDialog> {
               ),
             ),
             const SizedBox(height: 12),
+
+            // Войсы
             TextField(
               controller: _vCtrl,
+              style: const TextStyle(color: Colors.white),
+              cursorColor: TitanicTheme.raptureGold,
               decoration: TitanicTheme.inputDecoration.copyWith(
-                labelText: 'V balance',
+                labelText: 'Войсы',
+                labelStyle: const TextStyle(color: Colors.white70),
+                enabledBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: TitanicTheme.raptureGold.withOpacity(0.3)),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: TitanicTheme.raptureGold, width: 2),
+                  borderRadius: BorderRadius.circular(12),
+                ),
                 contentPadding: EdgeInsets.symmetric(
                   horizontal: 12,
                   vertical: isSmall ? 12 : 14,
@@ -745,10 +812,23 @@ class _UserEditDialogState extends State<_UserEditDialog> {
               keyboardType: TextInputType.numberWithOptions(decimal: true),
             ),
             const SizedBox(height: 12),
+
+            // Майнды
             TextField(
               controller: _mCtrl,
+              style: const TextStyle(color: Colors.white),
+              cursorColor: TitanicTheme.raptureGold,
               decoration: TitanicTheme.inputDecoration.copyWith(
-                labelText: 'M balance',
+                labelText: 'Майнды',
+                labelStyle: const TextStyle(color: Colors.white70),
+                enabledBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: TitanicTheme.raptureGold.withOpacity(0.3)),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: TitanicTheme.raptureGold, width: 2),
+                  borderRadius: BorderRadius.circular(12),
+                ),
                 contentPadding: EdgeInsets.symmetric(
                   horizontal: 12,
                   vertical: isSmall ? 12 : 14,
@@ -757,44 +837,885 @@ class _UserEditDialogState extends State<_UserEditDialog> {
               keyboardType: TextInputType.numberWithOptions(decimal: true),
             ),
             const SizedBox(height: 12),
+
+            // Цвет игрока
             TextField(
               controller: _colorCtrl,
+              style: const TextStyle(color: Colors.white),
+              cursorColor: TitanicTheme.raptureGold,
               decoration: TitanicTheme.inputDecoration.copyWith(
-                labelText: 'color (hex)',
+                labelText: 'Цвет игрока',
+                labelStyle: const TextStyle(color: Colors.white70),
+                enabledBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: TitanicTheme.raptureGold.withOpacity(0.3)),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: TitanicTheme.raptureGold, width: 2),
+                  borderRadius: BorderRadius.circular(12),
+                ),
                 contentPadding: EdgeInsets.symmetric(
                   horizontal: 12,
                   vertical: isSmall ? 12 : 14,
                 ),
               ),
             ),
-            CheckboxListTile(
-              title: const Text('Ростовщик (только для мафии)'),
-              value: _usurer,
-              onChanged: (value) {
-                setState(() {
-                  _usurer = value ?? false;
-                });
-              },
-              activeColor: TitanicTheme.raptureGold,
-              checkColor: TitanicTheme.abyssalBlue,
-              contentPadding: EdgeInsets.zero,
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _inventoryCtrl,
-              minLines: 2,
-              maxLines: 6,
-              decoration: TitanicTheme.inputDecoration.copyWith(
-                labelText: 'inventory (JSON)',
+            const SizedBox(height: 12),
+
+            // Флаг ростовщика
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.black12,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: CheckboxListTile(
+                title: const Text(
+                  'Ростовщик (только для мафии)',
+                  style: TextStyle(color: Colors.white),
+                ),
+                value: _usurer,
+                onChanged: (value) {
+                  setState(() {
+                    _usurer = value ?? false;
+                  });
+                },
+                activeColor: TitanicTheme.raptureGold,
+                checkColor: TitanicTheme.abyssalBlue,
+                contentPadding: EdgeInsets.zero,
               ),
             ),
+            const SizedBox(height: 16),
+
+            // Инвентарь
+            Text(
+              'Инвентарь',
+              style: TitanicTheme.subtitle.copyWith(color: Colors.white),
+            ),
             const SizedBox(height: 8),
+            _InventoryEditor(
+              items: _inventoryItems,
+              onChanged: (newItems) {
+                setState(() {
+                  _inventoryItems = newItems;
+                });
+              },
+            ),
+            const SizedBox(height: 16),
+
+            // Предприятия
+            Text(
+              'Предприятия',
+              style: TitanicTheme.subtitle.copyWith(color: Colors.white),
+            ),
+            const SizedBox(height: 8),
+            _EnterprisesEditor(
+              items: _enterprisesItems,
+              onChanged: (newItems) {
+                setState(() {
+                  _enterprisesItems = newItems;
+                });
+              },
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text(
+            'Отмена',
+            style: TextStyle(color: Colors.white70),
+          ),
+        ),
+        ElevatedButton(
+          onPressed: () => Navigator.of(context).pop(_buildPayload()),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: TitanicTheme.raptureGold,
+            foregroundColor: Colors.black87,
+          ),
+          child: const Text('Сохранить'),
+        ),
+      ],
+    );
+  }
+}
+
+// ==================== ВИДЖЕТ РЕДАКТОРА ИНВЕНТАРЯ ====================
+class _InventoryEditor extends StatefulWidget {
+  final List<Map<String, dynamic>> items;
+  final ValueChanged<List<Map<String, dynamic>>> onChanged;
+
+  const _InventoryEditor({required this.items, required this.onChanged, Key? key})
+      : super(key: key);
+
+  @override
+  State<_InventoryEditor> createState() => _InventoryEditorState();
+}
+
+class _InventoryEditorState extends State<_InventoryEditor> {
+  late List<Map<String, dynamic>> _items;
+
+  @override
+  void initState() {
+    super.initState();
+    _items = List.from(widget.items);
+  }
+
+  void _addItem() {
+    showDialog(
+      context: context,
+      builder: (ctx) => _InventoryItemDialog(
+        onSave: (name, voices) {
+          setState(() {
+            _items.add({'name': name, 'voices': voices});
+            widget.onChanged(_items);
+          });
+        },
+      ),
+    );
+  }
+
+  void _editItem(int index) {
+    final item = _items[index];
+    showDialog(
+      context: context,
+      builder: (ctx) => _InventoryItemDialog(
+        initialName: item['name'],
+        initialVoices: item['voices'],
+        onSave: (name, voices) {
+          setState(() {
+            _items[index] = {'name': name, 'voices': voices};
+            widget.onChanged(_items);
+          });
+        },
+      ),
+    );
+  }
+
+  void _deleteItem(int index) {
+    setState(() {
+      _items.removeAt(index);
+      widget.onChanged(_items);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isSmall = MediaQuery.of(context).size.width < 380;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (_items.isEmpty)
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.black12,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Center(
+              child: Text(
+                'Инвентарь пуст',
+                style: TextStyle(color: Colors.white70),
+              ),
+            ),
+          )
+        else
+          // Вместо ListView используем Column и вручную добавляем разделители
+          Column(
+            children: _items.asMap().entries.expand((entry) {
+              final i = entry.key;
+              final item = entry.value;
+              return [
+                Container(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: isSmall ? 12 : 16,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: TitanicTheme.surfaceNavy.withOpacity(0.3),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: TitanicTheme.raptureGold.withOpacity(0.2),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              item['name'] ?? 'Без названия',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Войсы: ${item['voices'] ?? 0}',
+                              style: TextStyle(
+                                color: TitanicTheme.ivoryCream.withOpacity(0.8),
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.edit, size: 20),
+                            color: TitanicTheme.seaFoamGreen,
+                            onPressed: () => _editItem(i),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(
+                              minWidth: 40,
+                              minHeight: 40,
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.delete, size: 20),
+                            color: Colors.redAccent,
+                            onPressed: () => _deleteItem(i),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(
+                              minWidth: 40,
+                              minHeight: 40,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                if (i < _items.length - 1) const SizedBox(height: 8),
+              ];
+            }).toList(),
+          ),
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerRight,
+          child: ArtDecoButton(
+            text: 'Добавить предмет',
+            icon: Icons.add,
+            onPressed: _addItem,
+            primary: false,
+            width: 180,
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// Диалог добавления/редактирования предмета инвентаря
+class _InventoryItemDialog extends StatefulWidget {
+  final String? initialName;
+  final int? initialVoices;
+  final Function(String name, int voices) onSave;
+
+  const _InventoryItemDialog({
+    this.initialName,
+    this.initialVoices,
+    required this.onSave,
+    Key? key,
+  }) : super(key: key);
+
+  @override
+  State<_InventoryItemDialog> createState() => _InventoryItemDialogState();
+}
+
+class _InventoryItemDialogState extends State<_InventoryItemDialog> {
+  late TextEditingController _nameCtrl;
+  late TextEditingController _voicesCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameCtrl = TextEditingController(text: widget.initialName ?? '');
+    _voicesCtrl = TextEditingController(
+        text: widget.initialVoices?.toString() ?? '0');
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _voicesCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(
+        widget.initialName == null ? 'Добавить предмет' : 'Редактировать предмет',
+        style: TitanicTheme.titleLarge.copyWith(color: Colors.white),
+      ),
+      backgroundColor: TitanicTheme.panelDark,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: TitanicTheme.raptureGold.withOpacity(0.4), width: 1.5),
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _nameCtrl,
+            style: const TextStyle(color: Colors.white),
+            cursorColor: TitanicTheme.raptureGold,
+            decoration: TitanicTheme.inputDecoration.copyWith(
+              labelText: 'Название предмета',
+              labelStyle: const TextStyle(color: Colors.white70),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _voicesCtrl,
+            style: const TextStyle(color: Colors.white),
+            cursorColor: TitanicTheme.raptureGold,
+            keyboardType: TextInputType.number,
+            decoration: TitanicTheme.inputDecoration.copyWith(
+              labelText: 'Количество войсов',
+              labelStyle: const TextStyle(color: Colors.white70),
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Отмена', style: TextStyle(color: Colors.white70)),
+        ),
+        ElevatedButton(
+          onPressed: () {
+            final name = _nameCtrl.text.trim();
+            if (name.isEmpty) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Введите название')),
+              );
+              return;
+            }
+            final voices = int.tryParse(_voicesCtrl.text.trim()) ?? 0;
+            if (voices <= 0) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Введите положительное число войсов')),
+              );
+              return;
+            }
+            widget.onSave(name, voices);
+            Navigator.of(context).pop();
+          },
+          style: ElevatedButton.styleFrom(
+            backgroundColor: TitanicTheme.raptureGold,
+            foregroundColor: Colors.black87,
+          ),
+          child: const Text('Сохранить'),
+        ),
+      ],
+    );
+  }
+}
+
+// ==================== ВИДЖЕТ РЕДАКТОРА ПРЕДПРИЯТИЙ ====================
+class _EnterprisesEditor extends StatefulWidget {
+  final List<Map<String, dynamic>> items;
+  final ValueChanged<List<Map<String, dynamic>>> onChanged;
+
+  const _EnterprisesEditor({required this.items, required this.onChanged, Key? key})
+      : super(key: key);
+
+  @override
+  State<_EnterprisesEditor> createState() => _EnterprisesEditorState();
+}
+
+class _EnterprisesEditorState extends State<_EnterprisesEditor> {
+  late List<Map<String, dynamic>> _items;
+
+  @override
+  void initState() {
+    super.initState();
+    _items = List.from(widget.items);
+  }
+
+  void _addEnterprise() {
+    showDialog(
+      context: context,
+      builder: (ctx) => _EnterpriseDialog(
+        onSave: (enterprise) {
+          setState(() {
+            _items.add(enterprise);
+            widget.onChanged(_items);
+          });
+        },
+      ),
+    );
+  }
+
+  void _editEnterprise(int index) {
+    final enterprise = _items[index];
+    showDialog(
+      context: context,
+      builder: (ctx) => _EnterpriseDialog(
+        initialData: enterprise,
+        onSave: (updated) {
+          setState(() {
+            _items[index] = updated;
+            widget.onChanged(_items);
+          });
+        },
+      ),
+    );
+  }
+
+  void _deleteEnterprise(int index) {
+    setState(() {
+      _items.removeAt(index);
+      widget.onChanged(_items);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isSmall = MediaQuery.of(context).size.width < 380;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (_items.isEmpty)
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.black12,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Center(
+              child: Text(
+                'Предприятий нет',
+                style: TextStyle(color: Colors.white70),
+              ),
+            ),
+          )
+        else
+          Column(
+            children: _items.asMap().entries.map((entry) {
+              final i = entry.key;
+              final e = entry.value;
+              return Column(
+                children: [
+                  Container(
+                    padding: EdgeInsets.all(isSmall ? 12 : 14),
+                    decoration: BoxDecoration(
+                      color: TitanicTheme.surfaceNavy.withOpacity(0.3),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: TitanicTheme.raptureGold.withOpacity(0.2),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                e['name'] ?? e['title'] ?? 'Предприятие',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.edit, size: 20),
+                                  color: TitanicTheme.seaFoamGreen,
+                                  onPressed: () => _editEnterprise(i),
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(
+                                    minWidth: 40,
+                                    minHeight: 40,
+                                  ),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.delete, size: 20),
+                                  color: Colors.redAccent,
+                                  onPressed: () => _deleteEnterprise(i),
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(
+                                    minWidth: 40,
+                                    minHeight: 40,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        if (e['color'] != null)
+                          _buildInfoRow('Цвет', e['color'].toString()),
+                        if (e['region'] != null)
+                          _buildInfoRow('Регион', e['region'].toString()),
+                        if (e['investors'] != null)
+                          _buildInfoRow('Инвесторы', _formatInvestors(e['investors'])),
+                        if (e['description'] != null)
+                          _buildInfoRow('Описание', e['description'].toString()),
+                      ],
+                    ),
+                  ),
+                  if (i < _items.length - 1) const SizedBox(height: 8),
+                ],
+              );
+            }).toList(),
+          ),
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerRight,
+          child: ArtDecoButton(
+            text: 'Добавить предприятие',
+            icon: Icons.add,
+            onPressed: _addEnterprise,
+            primary: false,
+            width: 200,
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildInfoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '$label: ',
+            style: TextStyle(
+              color: TitanicTheme.ivoryCream.withOpacity(0.7),
+              fontSize: 12,
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(color: Colors.white, fontSize: 12),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatInvestors(dynamic investors) {
+    if (investors == null) return '—';
+    if (investors is List) {
+      return investors.map((i) {
+        if (i is Map) {
+          final name = i['player_name'] ?? i['name'] ?? 'Игрок';
+          final minds = i['minds'] ?? i['amount'] ?? 0;
+          return '$name: $minds M';
+        }
+        return i.toString();
+      }).join(', ');
+    }
+    return investors.toString();
+  }
+}
+
+// Диалог добавления/редактирования предприятия
+class _EnterpriseDialog extends StatefulWidget {
+  final Map<String, dynamic>? initialData;
+  final Function(Map<String, dynamic>) onSave;
+
+  const _EnterpriseDialog({this.initialData, required this.onSave, Key? key})
+      : super(key: key);
+
+  @override
+  State<_EnterpriseDialog> createState() => _EnterpriseDialogState();
+}
+
+class _EnterpriseDialogState extends State<_EnterpriseDialog> {
+  late TextEditingController _nameCtrl;
+  late TextEditingController _colorCtrl;
+  late TextEditingController _regionCtrl;
+  late TextEditingController _descCtrl;
+  final List<Map<String, dynamic>> _investors = [];
+
+  final List<String> _colorOptions = [
+    'красный',
+    'зелёный',
+    'синий',
+    'жёлтый',
+    'малиновый',
+  ];
+  final List<String> _regionOptions = [
+    'Азиатская группа',
+    'Англа-саксонская группа',
+    'Предсоциалистический блок',
+    'Пиренейская группа',
+    'Центрально-европейская группа',
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    final initial = widget.initialData ?? {};
+    _nameCtrl = TextEditingController(text: initial['name']?.toString() ?? '');
+    _colorCtrl = TextEditingController(text: initial['color']?.toString() ?? '');
+    _regionCtrl = TextEditingController(text: initial['region']?.toString() ?? '');
+    _descCtrl = TextEditingController(text: initial['description']?.toString() ?? '');
+
+    if (initial['investors'] != null && initial['investors'] is List) {
+      _investors.addAll(
+          List<Map<String, dynamic>>.from(initial['investors'] as List));
+    }
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _colorCtrl.dispose();
+    _regionCtrl.dispose();
+    _descCtrl.dispose();
+    super.dispose();
+  }
+
+  void _addInvestor() {
+    setState(() {
+      _investors.add({'player_name': 'Новый инвестор', 'minds': 0});
+    });
+  }
+
+  void _removeInvestor(int index) {
+    setState(() {
+      _investors.removeAt(index);
+    });
+  }
+
+  void _editInvestor(int index) {
+    final investor = _investors[index];
+    final nameCtrl = TextEditingController(text: investor['player_name']);
+    final mindsCtrl = TextEditingController(text: investor['minds'].toString());
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Редактировать инвестора'),
+        backgroundColor: TitanicTheme.panelDark,
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
             TextField(
-              controller: _enterprisesCtrl,
-              minLines: 2,
-              maxLines: 6,
+              controller: nameCtrl,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(labelText: 'Имя'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: mindsCtrl,
+              style: const TextStyle(color: Colors.white),
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Майнды'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Отмена'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              setState(() {
+                _investors[index] = {
+                  'player_name': nameCtrl.text.trim(),
+                  'minds': int.tryParse(mindsCtrl.text.trim()) ?? 0,
+                };
+              });
+              Navigator.of(ctx).pop();
+            },
+            child: const Text('Сохранить'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(
+        widget.initialData == null ? 'Добавить предприятие' : 'Редактировать предприятие',
+        style: TitanicTheme.titleLarge.copyWith(color: Colors.white),
+      ),
+      backgroundColor: TitanicTheme.panelDark,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: TitanicTheme.raptureGold.withOpacity(0.4), width: 1.5),
+      ),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: _nameCtrl,
+              style: const TextStyle(color: Colors.white),
+              cursorColor: TitanicTheme.raptureGold,
               decoration: TitanicTheme.inputDecoration.copyWith(
-                labelText: 'enterprises (JSON)',
+                labelText: 'Название',
+                labelStyle: const TextStyle(color: Colors.white70),
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            DropdownButtonFormField<String>(
+              value: _colorCtrl.text.isEmpty ? null : _colorCtrl.text,
+              items: _colorOptions.map((c) {
+                return DropdownMenuItem(
+                  value: c,
+                  child: Text(c, style: const TextStyle(color: Colors.white)),
+                );
+              }).toList(),
+              onChanged: (value) => _colorCtrl.text = value ?? '',
+              decoration: TitanicTheme.inputDecoration.copyWith(
+                labelText: 'Цвет',
+                labelStyle: const TextStyle(color: Colors.white70),
+              ),
+              style: const TextStyle(color: Colors.white),
+              dropdownColor: TitanicTheme.panelDark,
+            ),
+            const SizedBox(height: 12),
+
+            DropdownButtonFormField<String>(
+              value: _regionCtrl.text.isEmpty ? null : _regionCtrl.text,
+              items: _regionOptions.map((r) {
+                return DropdownMenuItem(
+                  value: r,
+                  child: Text(r, style: const TextStyle(color: Colors.white)),
+                );
+              }).toList(),
+              onChanged: (value) => _regionCtrl.text = value ?? '',
+              decoration: TitanicTheme.inputDecoration.copyWith(
+                labelText: 'Регион',
+                labelStyle: const TextStyle(color: Colors.white70),
+              ),
+              style: const TextStyle(color: Colors.white),
+              dropdownColor: TitanicTheme.panelDark,
+            ),
+            const SizedBox(height: 12),
+
+            TextField(
+              controller: _descCtrl,
+              style: const TextStyle(color: Colors.white),
+              cursorColor: TitanicTheme.raptureGold,
+              maxLines: 2,
+              decoration: TitanicTheme.inputDecoration.copyWith(
+                labelText: 'Описание (необязательно)',
+                labelStyle: const TextStyle(color: Colors.white70),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            Text(
+              'Инвесторы',
+              style: TitanicTheme.subtitle.copyWith(color: Colors.white),
+            ),
+            const SizedBox(height: 8),
+            if (_investors.isEmpty)
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.black12,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Text(
+                  'Нет инвесторов',
+                  style: TextStyle(color: Colors.white70),
+                ),
+              )
+            else
+              // Заменяем ListView на Column
+              Column(
+                children: _investors.asMap().entries.map((entry) {
+                  final i = entry.key;
+                  final inv = entry.value;
+                  return Column(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.black26,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    inv['player_name'] ?? '—',
+                                    style: const TextStyle(color: Colors.white),
+                                  ),
+                                  Text(
+                                    '${inv['minds'] ?? 0} M',
+                                    style: TextStyle(
+                                      color: TitanicTheme.raptureGold,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.edit, size: 18),
+                              color: TitanicTheme.seaFoamGreen,
+                              onPressed: () => _editInvestor(i),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(
+                                minWidth: 36,
+                                minHeight: 36,
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete, size: 18),
+                              color: Colors.redAccent,
+                              onPressed: () => _removeInvestor(i),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(
+                                minWidth: 36,
+                                minHeight: 36,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (i < _investors.length - 1) const SizedBox(height: 6),
+                    ],
+                  );
+                }).toList(),
+              ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: ArtDecoButton(
+                text: 'Добавить инвестора',
+                icon: Icons.person_add,
+                onPressed: _addInvestor,
+                primary: false,
+                width: 180,
+                padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
               ),
             ),
           ],
@@ -803,10 +1724,33 @@ class _UserEditDialogState extends State<_UserEditDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Отмена'),
+          child: const Text('Отмена', style: TextStyle(color: Colors.white70)),
         ),
         ElevatedButton(
-          onPressed: () => Navigator.of(context).pop(_buildPayload()),
+          onPressed: () {
+            final name = _nameCtrl.text.trim();
+            if (name.isEmpty) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Введите название предприятия')),
+              );
+              return;
+            }
+            final enterprise = {
+              'name': name,
+              'color': _colorCtrl.text.trim(),
+              'region': _regionCtrl.text.trim(),
+              'description': _descCtrl.text.trim(),
+              'investors': List.from(_investors),
+              'created_at': widget.initialData?['created_at'] ??
+                  DateTime.now().toUtc().toIso8601String(),
+            };
+            widget.onSave(enterprise);
+            Navigator.of(context).pop();
+          },
+          style: ElevatedButton.styleFrom(
+            backgroundColor: TitanicTheme.raptureGold,
+            foregroundColor: Colors.black87,
+          ),
           child: const Text('Сохранить'),
         ),
       ],
@@ -814,7 +1758,7 @@ class _UserEditDialogState extends State<_UserEditDialog> {
   }
 }
 
-// ----------------- DebatesTab -----------------
+// ----------------- DebatesTab (admin create/close) -----------------
 class DebatesTab extends StatefulWidget {
   const DebatesTab({Key? key}) : super(key: key);
   @override
@@ -870,11 +1814,13 @@ class _DebatesTabState extends State<DebatesTab> {
           .select('id, first_name, last_name, telegram_username')
           .eq('role', 'politician')
           .order('first_name');
-      _politicians = (res is List)
-          ? res.map((e) => Map<String, dynamic>.from(e as Map)).toList()
-          : [];
+      if (res is List) {
+        _politicians = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      } else {
+        _politicians = <Map<String, dynamic>>[];
+      }
     } catch (_) {
-      _politicians = [];
+      _politicians = <Map<String, dynamic>>[];
     }
     if (mounted) setState(() {});
   }
@@ -888,7 +1834,11 @@ class _DebatesTabState extends State<DebatesTab> {
           .order('created_at', ascending: false)
           .limit(1)
           .maybeSingle();
-      _activeDebate = (row is Map<String, dynamic>) ? Map<String, dynamic>.from(row) : null;
+      if (row is Map<String, dynamic>) {
+        _activeDebate = Map<String, dynamic>.from(row);
+      } else {
+        _activeDebate = null;
+      }
     } catch (_) {
       _activeDebate = null;
     }
@@ -898,6 +1848,7 @@ class _DebatesTabState extends State<DebatesTab> {
   Future<void> _createDebate() async {
     if (_creating) return;
     setState(() => _creating = true);
+
     try {
       final existing = await supabase
           .from('debates')
@@ -1298,7 +2249,7 @@ class _DebatesTabState extends State<DebatesTab> {
   }
 }
 
-// ----------------- ResolutionsTab -----------------
+// ----------------- ResolutionsTab (admin political resolutions) -----------------
 class ResolutionsTab extends StatefulWidget {
   const ResolutionsTab({Key? key}) : super(key: key);
   @override
@@ -1365,17 +2316,21 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
             .select(
                 'id, title, description, created_by, created_at, is_closed, closed_at, total_m, winning_bet_id, winning_option_id')
             .order('created_at', ascending: false);
-        _resolutions = (res is List)
-            ? res.map((e) => Map<String, dynamic>.from(e as Map)).toList()
-            : [];
+        if (res is List) {
+          _resolutions = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+        } else {
+          _resolutions = [];
+        }
       } catch (e) {
         final res2 = await supabase
             .from('political_resolutions')
             .select('*')
             .order('created_at', ascending: false);
-        _resolutions = (res2 is List)
-            ? res2.map((e) => Map<String, dynamic>.from(e as Map)).toList()
-            : [];
+        if (res2 is List) {
+          _resolutions = res2.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+        } else {
+          _resolutions = [];
+        }
       }
     } catch (e) {
       _resolutions = [];
@@ -1508,8 +2463,7 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
     }
   }
 
-  Future<List<Map<String, dynamic>>> _loadOptionsForResolution(
-      int resolutionId) async {
+  Future<List<Map<String, dynamic>>> _loadOptionsForResolution(int resolutionId) async {
     try {
       final res = await supabase
           .from('resolution_options')
@@ -1525,8 +2479,7 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
     }
   }
 
-  Future<List<Map<String, dynamic>>> _loadResultsForResolution(
-      int resolutionId) async {
+  Future<List<Map<String, dynamic>>> _loadResultsForResolution(int resolutionId) async {
     try {
       final res = await supabase
           .from('resolution_results_admin')
