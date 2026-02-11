@@ -1,7 +1,8 @@
-// lib/screens/admin/blood_poker_tab.dart
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:titanic/theme/app_theme.dart';
+import 'package:titanic/widgets/art_deco_button.dart';
 
 class BloodPokerTab extends StatefulWidget {
   const BloodPokerTab({Key? key}) : super(key: key);
@@ -13,13 +14,11 @@ class BloodPokerTab extends StatefulWidget {
 class _BloodPokerTabState extends State<BloodPokerTab> {
   final supabase = Supabase.instance.client;
 
-  // Для создания нового этапа
   final TextEditingController _titleCtrl = TextEditingController();
   final TextEditingController _descriptionCtrl = TextEditingController();
   final List<TextEditingController> _optionCtrls = [TextEditingController()];
   bool _creating = false;
 
-  // Списки этапов
   List<Map<String, dynamic>> _activeStages = [];
   List<Map<String, dynamic>> _closedStages = [];
   bool _loading = false;
@@ -56,14 +55,12 @@ class _BloodPokerTabState extends State<BloodPokerTab> {
   Future<void> _loadStages() async {
     setState(() => _loading = true);
     try {
-      // Загружаем активные этапы
       final activeRes = await supabase
           .from('blood_poker_stages')
           .select()
           .eq('is_closed', false)
           .order('created_at', ascending: false);
 
-      // Загружаем завершенные этапы
       final closedRes = await supabase
           .from('blood_poker_stages')
           .select()
@@ -72,8 +69,12 @@ class _BloodPokerTabState extends State<BloodPokerTab> {
           .limit(50);
 
       setState(() {
-        _activeStages = (activeRes is List) ? activeRes.map((e) => Map<String, dynamic>.from(e as Map)).toList() : [];
-        _closedStages = (closedRes is List) ? closedRes.map((e) => Map<String, dynamic>.from(e as Map)).toList() : [];
+        _activeStages = (activeRes is List)
+            ? activeRes.map((e) => Map<String, dynamic>.from(e as Map)).toList()
+            : [];
+        _closedStages = (closedRes is List)
+            ? closedRes.map((e) => Map<String, dynamic>.from(e as Map)).toList()
+            : [];
       });
     } catch (e) {
       debugPrint('BloodPokerTab._loadStages error: $e');
@@ -89,7 +90,10 @@ class _BloodPokerTabState extends State<BloodPokerTab> {
       return;
     }
 
-    final options = _optionCtrls.map((c) => c.text.trim()).where((t) => t.isNotEmpty).toList();
+    final options = _optionCtrls
+        .map((c) => c.text.trim())
+        .where((t) => t.isNotEmpty)
+        .toList();
     if (options.length < 2) {
       _showMessage('Добавьте хотя бы 2 варианта');
       return;
@@ -97,7 +101,6 @@ class _BloodPokerTabState extends State<BloodPokerTab> {
 
     setState(() => _creating = true);
     try {
-      // Проверяем, нет ли уже активного этапа
       final existing = await supabase
           .from('blood_poker_stages')
           .select('id')
@@ -106,12 +109,12 @@ class _BloodPokerTabState extends State<BloodPokerTab> {
           .maybeSingle();
 
       if (existing != null) {
-        _showMessage('Уже есть активный этап покера на крови. Завершите его перед созданием нового.');
+        _showMessage(
+            'Уже есть активный этап покера на крови. Завершите его перед созданием нового.');
         setState(() => _creating = false);
         return;
       }
 
-      // Создаем новый этап
       final stageRes = await supabase
           .from('blood_poker_stages')
           .insert({
@@ -127,18 +130,18 @@ class _BloodPokerTabState extends State<BloodPokerTab> {
         throw Exception('Не удалось создать этап');
       }
 
-      final stageId = stageRes['id'] is int ? stageRes['id'] as int : int.parse(stageRes['id'].toString());
+      final stageId = stageRes['id'] is int
+          ? stageRes['id'] as int
+          : int.parse(stageRes['id'].toString());
 
-      // Создаем варианты
       final optionRows = options.map((label) => ({
-        'stage_id': stageId,
-        'label': label,
-        'created_at': DateTime.now().toUtc().toIso8601String(),
-      })).toList();
+            'stage_id': stageId,
+            'label': label,
+            'created_at': DateTime.now().toUtc().toIso8601String(),
+          })).toList();
 
       await supabase.from('blood_poker_options').insert(optionRows);
 
-      // Очищаем форму
       _titleCtrl.clear();
       _descriptionCtrl.clear();
       for (final ctrl in _optionCtrls) {
@@ -165,7 +168,9 @@ class _BloodPokerTabState extends State<BloodPokerTab> {
           .eq('stage_id', stageId)
           .order('id');
 
-      return (res is List) ? res.map((e) => Map<String, dynamic>.from(e as Map)).toList() : [];
+      return (res is List)
+          ? res.map((e) => Map<String, dynamic>.from(e as Map)).toList()
+          : [];
     } catch (e) {
       return [];
     }
@@ -196,8 +201,23 @@ class _BloodPokerTabState extends State<BloodPokerTab> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Завершить покер на крови?'),
-        content: const Text('После завершения будут определены 3 победителя с наибольшими ставками. Все майнды будут распределены на счета цветов мафиози.'),
+        title: Text(
+          'Завершить покер на крови?',
+          style: TitanicTheme.titleLarge,
+        ),
+        backgroundColor: TitanicTheme.panelDark,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(
+            color: TitanicTheme.raptureGold.withOpacity(0.4),
+            width: 1.5,
+          ),
+        ),
+        content: Text(
+          'После завершения будут определены 3 победителя с наибольшими ставками. '
+          'Все майнды будут распределены на счета цветов мафиози.',
+          style: TitanicTheme.body,
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
@@ -215,7 +235,6 @@ class _BloodPokerTabState extends State<BloodPokerTab> {
 
     setState(() => _loading = true);
     try {
-      // 1. Получаем все ставки для этого этапа
       final bets = await _loadBetsForStage(stageId);
 
       if (bets.isEmpty) {
@@ -224,48 +243,46 @@ class _BloodPokerTabState extends State<BloodPokerTab> {
         return;
       }
 
-      // 2. Группируем ставки по пользователям для подсчета общей суммы
       final Map<String, int> userTotalBets = {};
       for (final bet in bets) {
         final userId = bet['user_id']?.toString();
-        final amount = bet['amount'] is int ? bet['amount'] as int : int.tryParse(bet['amount'].toString()) ?? 0;
-        
+        final amount = bet['amount'] is int
+            ? bet['amount'] as int
+            : int.tryParse(bet['amount'].toString()) ?? 0;
         if (userId != null) {
           userTotalBets[userId] = (userTotalBets[userId] ?? 0) + amount;
         }
       }
 
-      // 3. Сортируем пользователей по общей сумме ставок
       final sortedUsers = userTotalBets.entries.toList()
         ..sort((a, b) => b.value.compareTo(a.value));
 
-      // 4. Определяем 3 победителей (или меньше, если ставок меньше)
       final List<Map<String, dynamic>> winners = [];
       for (var i = 0; i < sortedUsers.length && i < 3; i++) {
         final entry = sortedUsers[i];
         final userId = entry.key;
         final totalAmount = entry.value;
-        
-        // Находим все ставки этого пользователя
-        final userBets = bets.where((bet) => bet['user_id']?.toString() == userId).toList();
-        
+
+        final userBets = bets
+            .where((bet) => bet['user_id']?.toString() == userId)
+            .toList();
+
         winners.add({
           'user_id': userId,
           'total_amount': totalAmount,
           'bets_count': userBets.length,
-          'position': i + 1
+          'position': i + 1,
         });
       }
 
-      // 5. Распределяем майнды на счета цветов мафиози
-      // Для каждой ставки получаем цвет мафиози и добавляем майнды в банк цвета
       for (final bet in bets) {
         final userId = bet['user_id']?.toString();
-        final amount = bet['amount'] is int ? bet['amount'] as int : int.tryParse(bet['amount'].toString()) ?? 0;
+        final amount = bet['amount'] is int
+            ? bet['amount'] as int
+            : int.tryParse(bet['amount'].toString()) ?? 0;
 
         if (userId == null || amount <= 0) continue;
 
-        // Получаем цвет мафиози
         final userRes = await supabase
             .from('user_credentials')
             .select('color')
@@ -275,29 +292,28 @@ class _BloodPokerTabState extends State<BloodPokerTab> {
         if (userRes is Map<String, dynamic>) {
           final color = userRes['color']?.toString();
           if (color != null && color.isNotEmpty) {
-            // Обновляем банк цвета
             await _updateColorBank(color, amount);
           }
         }
       }
 
-      // 6. Обновляем этап - помечаем как завершенный
       await supabase
           .from('blood_poker_stages')
           .update({
             'is_closed': true,
             'closed_at': DateTime.now().toUtc().toIso8601String(),
-            'winners': winners, // Сохраняем информацию о победителях
+            'winners': winners,
           })
           .eq('id', stageId);
 
-      // 7. Добавляем запись в журнал
       await supabase.from('user_journal').insert({
         'user_id': 'system',
         'visible_role': 'all',
         'actor_id': 'system',
         'title': 'Покер на крови завершен',
-        'message': 'Этап покера завершен. Определены победители по общей сумме ставок. Все майнды распределены на счета цветов мафиози.',
+        'message':
+            'Этап покера завершен. Определены победители по общей сумме ставок. '
+            'Все майнды распределены на счета цветов мафиози.',
         'metadata': {
           'stage_id': stageId,
           'winners': winners,
@@ -306,7 +322,8 @@ class _BloodPokerTabState extends State<BloodPokerTab> {
         'created_at': DateTime.now().toUtc().toIso8601String(),
       });
 
-      _showMessage('Покер на крови завершен. Определены победители по общей сумме ставок. Майнды распределены.');
+      _showMessage(
+          'Покер на крови завершен. Определены победители по общей сумме ставок. Майнды распределены.');
       await _loadStages();
     } catch (e) {
       _showMessage('Ошибка при завершении: $e');
@@ -317,7 +334,6 @@ class _BloodPokerTabState extends State<BloodPokerTab> {
 
   Future<void> _updateColorBank(String color, int amount) async {
     try {
-      // Проверяем, существует ли запись для этого цвета
       final existing = await supabase
           .from('color_banks')
           .select('balance')
@@ -325,20 +341,19 @@ class _BloodPokerTabState extends State<BloodPokerTab> {
           .maybeSingle();
 
       if (existing is Map<String, dynamic>) {
-        // Обновляем существующую запись
-        final currentBalance = existing['balance'] is num ? (existing['balance'] as num).toDouble() : 0.0;
+        final currentBalance = existing['balance'] is num
+            ? (existing['balance'] as num).toDouble()
+            : 0.0;
         await supabase
             .from('color_banks')
             .update({'balance': currentBalance + amount})
             .eq('color', color);
       } else {
-        // Создаем новую запись
         await supabase
             .from('color_banks')
             .insert({'color': color, 'balance': amount});
       }
 
-      // Добавляем запись в историю банка цвета
       await supabase.from('color_bank_history').insert({
         'color': color,
         'amount': amount,
@@ -351,13 +366,14 @@ class _BloodPokerTabState extends State<BloodPokerTab> {
   }
 
   Future<void> _showStageDetails(Map<String, dynamic> stage) async {
-    final stageId = stage['id'] is int ? stage['id'] as int : int.tryParse(stage['id'].toString());
+    final stageId = stage['id'] is int
+        ? stage['id'] as int
+        : int.tryParse(stage['id'].toString());
     if (stageId == null) return;
 
     final options = await _loadOptionsForStage(stageId);
     final bets = await _loadBetsForStage(stageId);
 
-    // Группируем ставки по пользователям
     final Map<String, List<Map<String, dynamic>>> betsByUser = {};
     for (final bet in bets) {
       final userId = bet['user_id']?.toString();
@@ -367,34 +383,46 @@ class _BloodPokerTabState extends State<BloodPokerTab> {
       }
     }
 
-    // Группируем ставки по вариантам для отображения
     final Map<int, List<Map<String, dynamic>>> betsByOption = {};
     for (final bet in bets) {
-      final optionId = bet['option_id'] is int ? bet['option_id'] as int : int.tryParse(bet['option_id'].toString());
+      final optionId = bet['option_id'] is int
+          ? bet['option_id'] as int
+          : int.tryParse(bet['option_id'].toString());
       if (optionId != null) {
         betsByOption.putIfAbsent(optionId, () => []);
         betsByOption[optionId]!.add(bet);
       }
     }
 
-    // Подсчитываем общую сумму по каждому пользователю
     final Map<String, int> userTotalAmounts = {};
     for (final entry in betsByUser.entries) {
       final total = entry.value.fold<int>(0, (sum, bet) {
-        final amount = bet['amount'] is int ? bet['amount'] as int : int.tryParse(bet['amount'].toString()) ?? 0;
+        final amount = bet['amount'] is int
+            ? bet['amount'] as int
+            : int.tryParse(bet['amount'].toString()) ?? 0;
         return sum + amount;
       });
       userTotalAmounts[entry.key] = total;
     }
 
-    // Сортируем пользователей по общей сумме ставок
     final sortedUserIds = userTotalAmounts.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
 
     await showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(stage['title']?.toString() ?? 'Детали'),
+        title: Text(
+          stage['title']?.toString() ?? 'Детали',
+          style: TitanicTheme.titleLarge,
+        ),
+        backgroundColor: TitanicTheme.panelDark,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(
+            color: TitanicTheme.raptureGold.withOpacity(0.4),
+            width: 1.5,
+          ),
+        ),
         content: SizedBox(
           width: double.maxFinite,
           child: SingleChildScrollView(
@@ -402,47 +430,79 @@ class _BloodPokerTabState extends State<BloodPokerTab> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Описание: ${stage['description'] ?? '—'}'),
+                Text(
+                  'Описание: ${stage['description'] ?? '—'}',
+                  style: TitanicTheme.body,
+                ),
                 const SizedBox(height: 8),
-                Text('Создан: ${stage['created_at']}'),
+                Text(
+                  'Создан: ${stage['created_at']}',
+                  style: TitanicTheme.body,
+                ),
                 if (stage['is_closed'] == true)
-                  Text('Завершен: ${stage['closed_at']}'),
-
+                  Text(
+                    'Завершен: ${stage['closed_at']}',
+                    style: TitanicTheme.body,
+                  ),
                 const SizedBox(height: 16),
-                const Text('Статистика по пользователям:', style: TextStyle(fontWeight: FontWeight.bold)),
+                Text(
+                  'Статистика по пользователям:',
+                  style: TitanicTheme.subtitle,
+                ),
                 ...sortedUserIds.take(10).map((entry) {
                   final userId = entry.key;
                   final totalAmount = entry.value;
                   final userBets = betsByUser[userId] ?? [];
-                  final user = userBets.isNotEmpty && userBets[0]['user_credentials'] is Map
-                      ? Map<String, dynamic>.from(userBets[0]['user_credentials'] as Map)
+                  final user = userBets.isNotEmpty &&
+                          userBets[0]['user_credentials'] is Map
+                      ? Map<String, dynamic>.from(
+                          userBets[0]['user_credentials'] as Map)
                       : {};
-                  
-                  final name = '${user['first_name'] ?? ''} ${user['last_name'] ?? ''}'.trim();
-                  final displayName = name.isNotEmpty ? name : (user['telegram_username'] ?? 'Unknown');
+
+                  final name = '${user['first_name'] ?? ''} ${user['last_name'] ?? ''}'
+                      .trim();
+                  final displayName = name.isNotEmpty
+                      ? name
+                      : (user['telegram_username'] ?? 'Unknown');
                   final color = user['color']?.toString() ?? '—';
 
                   return Card(
                     margin: const EdgeInsets.symmetric(vertical: 4),
+                    color: TitanicTheme.surfaceNavy,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      side: BorderSide(
+                        color: TitanicTheme.raptureGold.withOpacity(0.2),
+                      ),
+                    ),
                     child: Padding(
                       padding: const EdgeInsets.all(8.0),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('$displayName (цвет: $color)',
-                            style: const TextStyle(fontWeight: FontWeight.w600)),
-                          Text('Всего ставок: ${userBets.length}, Общая сумма: $totalAmount M'),
-                          
-                          // Детали ставок пользователя
+                          Text(
+                            '$displayName (цвет: $color)',
+                            style: TitanicTheme.subtitle.copyWith(fontSize: 14),
+                          ),
+                          Text(
+                            'Всего ставок: ${userBets.length}, Общая сумма: $totalAmount M',
+                            style: TitanicTheme.body,
+                          ),
                           ...userBets.map((bet) {
-                            final optionInfo = bet['blood_poker_options'] is Map ?
-                              Map<String, dynamic>.from(bet['blood_poker_options'] as Map) : {};
-                            final optionLabel = optionInfo['label']?.toString() ?? '—';
+                            final optionInfo = bet['blood_poker_options'] is Map
+                                ? Map<String, dynamic>.from(
+                                    bet['blood_poker_options'] as Map)
+                                : {};
+                            final optionLabel =
+                                optionInfo['label']?.toString() ?? '—';
                             final amount = bet['amount']?.toString() ?? '0';
-                            
+
                             return Padding(
                               padding: const EdgeInsets.only(left: 8.0, top: 4),
-                              child: Text('• $optionLabel: $amount M'),
+                              child: Text(
+                                '• $optionLabel: $amount M',
+                                style: TitanicTheme.body.copyWith(fontSize: 12),
+                              ),
                             );
                           }).toList(),
                         ],
@@ -450,52 +510,81 @@ class _BloodPokerTabState extends State<BloodPokerTab> {
                     ),
                   );
                 }).toList(),
-
                 const SizedBox(height: 16),
-                const Text('Варианты ставок:', style: TextStyle(fontWeight: FontWeight.bold)),
+                Text(
+                  'Варианты ставок:',
+                  style: TitanicTheme.subtitle,
+                ),
                 ...options.map((option) {
-                  final optionId = option['id'] is int ? option['id'] as int : int.tryParse(option['id'].toString());
-                  final optionBets = optionId != null ? betsByOption[optionId] ?? [] : [];
-                  final totalForOption = optionBets.fold<int>(0, (sum, bet) {
-                    final amount = bet['amount'] is int ? bet['amount'] as int : int.tryParse(bet['amount'].toString()) ?? 0;
+                  final optionId = option['id'] is int
+                      ? option['id'] as int
+                      : int.tryParse(option['id'].toString());
+                  final optionBets = optionId != null
+                      ? betsByOption[optionId] ?? []
+                      : [];
+                  final totalForOption = optionBets.fold<int>(
+                      0, (sum, bet) {
+                    final amount = bet['amount'] is int
+                        ? bet['amount'] as int
+                        : int.tryParse(bet['amount'].toString()) ?? 0;
                     return sum + amount;
                   });
 
                   return Card(
                     margin: const EdgeInsets.symmetric(vertical: 4),
+                    color: TitanicTheme.surfaceNavy,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      side: BorderSide(
+                        color: TitanicTheme.raptureGold.withOpacity(0.2),
+                      ),
+                    ),
                     child: Padding(
                       padding: const EdgeInsets.all(8.0),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('${option['label']} (всего ставок: ${optionBets.length}, сумма: $totalForOption M)',
-                            style: const TextStyle(fontWeight: FontWeight.w600)),
+                          Text(
+                            '${option['label']} (всего ставок: ${optionBets.length}, сумма: $totalForOption M)',
+                            style: TitanicTheme.subtitle.copyWith(fontSize: 14),
+                          ),
                         ],
                       ),
                     ),
                   );
                 }).toList(),
-
                 const SizedBox(height: 16),
                 if (sortedUserIds.isNotEmpty) ...[
-                  const Text('Топ игроков по общей сумме ставок:', style: TextStyle(fontWeight: FontWeight.bold)),
+                  Text(
+                    'Топ игроков по общей сумме ставок:',
+                    style: TitanicTheme.subtitle,
+                  ),
                   ...sortedUserIds.take(3).map((entry) {
                     final userId = entry.key;
                     final totalAmount = entry.value;
                     final userBets = betsByUser[userId] ?? [];
-                    final user = userBets.isNotEmpty && userBets[0]['user_credentials'] is Map
-                        ? Map<String, dynamic>.from(userBets[0]['user_credentials'] as Map)
+                    final user = userBets.isNotEmpty &&
+                            userBets[0]['user_credentials'] is Map
+                        ? Map<String, dynamic>.from(
+                            userBets[0]['user_credentials'] as Map)
                         : {};
-                    
-                    final name = '${user['first_name'] ?? ''} ${user['last_name'] ?? ''}'.trim();
-                    final displayName = name.isNotEmpty ? name : (user['telegram_username'] ?? 'Unknown');
+
+                    final name =
+                        '${user['first_name'] ?? ''} ${user['last_name'] ?? ''}'
+                            .trim();
+                    final displayName = name.isNotEmpty
+                        ? name
+                        : (user['telegram_username'] ?? 'Unknown');
                     final color = user['color']?.toString() ?? '—';
 
                     final position = sortedUserIds.indexOf(entry) + 1;
-                    
+
                     return Padding(
                       padding: const EdgeInsets.symmetric(vertical: 2),
-                      child: Text('$position. $displayName: $totalAmount M (цвет: $color, ставок: ${userBets.length})'),
+                      child: Text(
+                        '$position. $displayName: $totalAmount M (цвет: $color, ставок: ${userBets.length})',
+                        style: TitanicTheme.body,
+                      ),
                     );
                   }).toList(),
                 ],
@@ -514,51 +603,68 @@ class _BloodPokerTabState extends State<BloodPokerTab> {
   }
 
   void _showMessage(String m) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(m),
+        backgroundColor: TitanicTheme.copperDetail,
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final isSmall = MediaQuery.of(context).size.width < 380;
+
     return RefreshIndicator(
       onRefresh: _loadStages,
+      color: TitanicTheme.raptureGold,
       child: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.all(isSmall ? 12 : 16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Создание нового этапа
             Card(
+              elevation: 4,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+                side: BorderSide(
+                  color: TitanicTheme.raptureGold.withOpacity(0.3),
+                  width: 1.5,
+                ),
+              ),
               child: Padding(
-                padding: const EdgeInsets.all(16),
+                padding: EdgeInsets.all(isSmall ? 12 : 16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'Создать новый этап покера на крови',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      style: TitanicTheme.titleLarge.copyWith(
+                        fontSize: isSmall ? 18 : 20,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: _titleCtrl,
+                      decoration: TitanicTheme.inputDecoration.copyWith(
+                        labelText: 'Название этапа',
+                      ),
                     ),
                     const SizedBox(height: 12),
                     TextField(
-                      controller: _titleCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'Название этапа',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
                       controller: _descriptionCtrl,
-                      decoration: const InputDecoration(
+                      decoration: TitanicTheme.inputDecoration.copyWith(
                         labelText: 'Описание (необязательно)',
-                        border: OutlineInputBorder(),
                       ),
-                      maxLines: 2,
+                      maxLines: 3,
                     ),
                     const SizedBox(height: 16),
-
-                    const Text('Варианты ставок (минимум 2):', style: TextStyle(fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 8),
-
+                    Text(
+                      'Варианты ставок (минимум 2):',
+                      style: TitanicTheme.subtitle,
+                    ),
+                    const SizedBox(height: 12),
                     ..._optionCtrls.asMap().entries.map((entry) {
                       final idx = entry.key;
                       final ctrl = entry.value;
@@ -569,16 +675,23 @@ class _BloodPokerTabState extends State<BloodPokerTab> {
                             Expanded(
                               child: TextField(
                                 controller: ctrl,
-                                decoration: InputDecoration(
+                                decoration:
+                                    TitanicTheme.inputDecoration.copyWith(
                                   labelText: 'Вариант ${idx + 1}',
-                                  border: const OutlineInputBorder(),
                                 ),
                               ),
                             ),
                             const SizedBox(width: 8),
                             if (_optionCtrls.length > 1)
                               IconButton(
-                                icon: const Icon(Icons.remove, color: Colors.red),
+                                icon: const Icon(Icons.remove),
+                                color: TitanicTheme.copperDetail,
+                                iconSize: isSmall ? 22 : 26,
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(
+                                  minWidth: 44,
+                                  minHeight: 44,
+                                ),
                                 onPressed: () => _removeOptionField(idx),
                                 tooltip: 'Удалить вариант',
                               ),
@@ -586,60 +699,102 @@ class _BloodPokerTabState extends State<BloodPokerTab> {
                         ),
                       );
                     }).toList(),
-
                     const SizedBox(height: 8),
-                    ElevatedButton.icon(
-                      onPressed: _addOptionField,
-                      icon: const Icon(Icons.add),
-                      label: const Text('Добавить вариант'),
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
+                      children: [
+                        ArtDecoButton(
+                          text: 'Добавить вариант',
+                          icon: Icons.add,
+                          onPressed: _addOptionField,
+                          primary: false,
+                        ),
+                      ],
                     ),
-
                     const SizedBox(height: 16),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: _creating ? null : _createStage,
-                        child: _creating
-                            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                            : const Text('Создать этап'),
-                      ),
+                    ArtDecoButton(
+                      text: 'Создать этап',
+                      onPressed: _creating ? null : _createStage,
+                      loading: _creating,
+                      primary: true,
+                      expanded: true,
                     ),
                   ],
                 ),
               ),
             ),
-
             const SizedBox(height: 24),
-
-            // Активные этапы
             Card(
+              elevation: 4,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+                side: BorderSide(
+                  color: TitanicTheme.seaFoamGreen.withOpacity(0.3),
+                  width: 1.5,
+                ),
+              ),
               child: Padding(
-                padding: const EdgeInsets.all(16),
+                padding: EdgeInsets.all(isSmall ? 12 : 16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'Активные этапы',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      style: TitanicTheme.titleLarge.copyWith(
+                        fontSize: isSmall ? 18 : 20,
+                      ),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 16),
                     _loading
                         ? const Center(child: CircularProgressIndicator())
                         : _activeStages.isEmpty
-                            ? const Text('Нет активных этапов')
+                            ? Center(
+                                child: Text(
+                                  'Нет активных этапов',
+                                  style: TitanicTheme.body,
+                                ),
+                              )
                             : Column(
                                 children: _activeStages.map((stage) {
-                                  final stageId = stage['id'] is int ? stage['id'] as int : int.parse(stage['id'].toString());
+                                  final stageId = stage['id'] is int
+                                      ? stage['id'] as int
+                                      : int.parse(stage['id'].toString());
                                   return Card(
                                     margin: const EdgeInsets.only(bottom: 8),
+                                    elevation: 1,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                      side: BorderSide(
+                                        color: TitanicTheme.raptureGold
+                                            .withOpacity(0.2),
+                                        width: 1,
+                                      ),
+                                    ),
                                     child: ListTile(
-                                      title: Text(stage['title']?.toString() ?? '—'),
+                                      contentPadding: EdgeInsets.symmetric(
+                                        horizontal: isSmall ? 12 : 16,
+                                        vertical: 8,
+                                      ),
+                                      title: Text(
+                                        stage['title']?.toString() ?? '—',
+                                        style: TitanicTheme.subtitle,
+                                      ),
                                       subtitle: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
                                         children: [
                                           if (stage['description'] != null)
-                                            Text('${stage['description']}'),
-                                          Text('Создан: ${stage['created_at']}'),
+                                            Text(
+                                              '${stage['description']}',
+                                              style: TitanicTheme.body,
+                                            ),
+                                          Text(
+                                            'Создан: ${stage['created_at']}',
+                                            style: TitanicTheme.body.copyWith(
+                                              fontSize: 12,
+                                            ),
+                                          ),
                                         ],
                                       ),
                                       trailing: Row(
@@ -647,12 +802,28 @@ class _BloodPokerTabState extends State<BloodPokerTab> {
                                         children: [
                                           IconButton(
                                             icon: const Icon(Icons.visibility),
-                                            onPressed: () => _showStageDetails(stage),
+                                            color: TitanicTheme.seaFoamGreen,
+                                            iconSize: isSmall ? 22 : 26,
+                                            padding: EdgeInsets.zero,
+                                            constraints: const BoxConstraints(
+                                              minWidth: 44,
+                                              minHeight: 44,
+                                            ),
+                                            onPressed: () =>
+                                                _showStageDetails(stage),
                                             tooltip: 'Детали',
                                           ),
                                           IconButton(
-                                            icon: const Icon(Icons.done_all, color: Colors.red),
-                                            onPressed: () => _closeStage(stageId),
+                                            icon: const Icon(Icons.done_all),
+                                            color: Colors.redAccent,
+                                            iconSize: isSmall ? 22 : 26,
+                                            padding: EdgeInsets.zero,
+                                            constraints: const BoxConstraints(
+                                              minWidth: 44,
+                                              minHeight: 44,
+                                            ),
+                                            onPressed: () =>
+                                                _closeStage(stageId),
                                             tooltip: 'Завершить',
                                           ),
                                         ],
@@ -665,35 +836,76 @@ class _BloodPokerTabState extends State<BloodPokerTab> {
                 ),
               ),
             ),
-
             const SizedBox(height: 24),
-
-            // Завершенные этапы
             Card(
+              elevation: 4,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+                side: BorderSide(
+                  color: TitanicTheme.copperDetail.withOpacity(0.3),
+                  width: 1.5,
+                ),
+              ),
               child: Padding(
-                padding: const EdgeInsets.all(16),
+                padding: EdgeInsets.all(isSmall ? 12 : 16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'Завершенные этапы',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      style: TitanicTheme.titleLarge.copyWith(
+                        fontSize: isSmall ? 18 : 20,
+                      ),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 16),
                     _loading
                         ? const Center(child: CircularProgressIndicator())
                         : _closedStages.isEmpty
-                            ? const Text('Нет завершенных этапов')
+                            ? Center(
+                                child: Text(
+                                  'Нет завершенных этапов',
+                                  style: TitanicTheme.body,
+                                ),
+                              )
                             : Column(
                                 children: _closedStages.map((stage) {
                                   return Card(
                                     margin: const EdgeInsets.only(bottom: 8),
+                                    elevation: 1,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                      side: BorderSide(
+                                        color: TitanicTheme.raptureGold
+                                            .withOpacity(0.1),
+                                        width: 1,
+                                      ),
+                                    ),
                                     child: ListTile(
-                                      title: Text(stage['title']?.toString() ?? '—'),
-                                      subtitle: Text('Завершен: ${stage['closed_at']}'),
+                                      contentPadding: EdgeInsets.symmetric(
+                                        horizontal: isSmall ? 12 : 16,
+                                        vertical: 8,
+                                      ),
+                                      title: Text(
+                                        stage['title']?.toString() ?? '—',
+                                        style: TitanicTheme.subtitle,
+                                      ),
+                                      subtitle: Text(
+                                        'Завершен: ${stage['closed_at']}',
+                                        style: TitanicTheme.body.copyWith(
+                                          fontSize: 12,
+                                        ),
+                                      ),
                                       trailing: IconButton(
                                         icon: const Icon(Icons.visibility),
-                                        onPressed: () => _showStageDetails(stage),
+                                        color: TitanicTheme.seaFoamGreen,
+                                        iconSize: isSmall ? 22 : 26,
+                                        padding: EdgeInsets.zero,
+                                        constraints: const BoxConstraints(
+                                          minWidth: 44,
+                                          minHeight: 44,
+                                        ),
+                                        onPressed: () =>
+                                            _showStageDetails(stage),
                                         tooltip: 'Детали',
                                       ),
                                       onTap: () => _showStageDetails(stage),
