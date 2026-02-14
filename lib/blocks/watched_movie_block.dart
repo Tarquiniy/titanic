@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:titanic/widgets/art_deco_button.dart';
+import 'package:titanic/services/enterprise_service.dart'; // ИМПОРТ НОВОГО СЕРВИСА
 
 class WatchedMovieBlock extends StatefulWidget {
   final String currentUserId;
@@ -51,7 +52,8 @@ class _WatchedMovieBlockState extends State<WatchedMovieBlock> {
 
       if (row is Map<String, dynamic>) {
         final usedFlag = row['used_watched_movie'];
-        final bool used = (usedFlag == true) || (usedFlag?.toString().toLowerCase() == 'true');
+        final bool used = (usedFlag == true) ||
+            (usedFlag?.toString().toLowerCase() == 'true');
         final color = row['color']?.toString();
         setState(() {
           _usedAlready = used;
@@ -81,10 +83,15 @@ class _WatchedMovieBlockState extends State<WatchedMovieBlock> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Сменить цвет?'),
-        content: const Text('Вы действительно хотите сменить цвет профиля после просмотра фильма?'),
+        content: const Text(
+            'Вы действительно хотите сменить цвет профиля после просмотра фильма?'),
         actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Нет')),
-          ElevatedButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Да')),
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Нет')),
+          ElevatedButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Да')),
         ],
       ),
     );
@@ -104,10 +111,15 @@ class _WatchedMovieBlockState extends State<WatchedMovieBlock> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Подтвердите смену цвета'),
-        content: Text('Вы выбрали: $selected\nЭто действие однократно и не может быть отменено.'),
+        content: Text(
+            'Вы выбрали: $selected\nЭто действие однократно и не может быть отменено.'),
         actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Отмена')),
-          ElevatedButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Подтвердить')),
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Отмена')),
+          ElevatedButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Подтвердить')),
         ],
       ),
     );
@@ -116,18 +128,54 @@ class _WatchedMovieBlockState extends State<WatchedMovieBlock> {
 
     setState(() => _loading = true);
     try {
-      final upd = await supabase.from('user_credentials').update({
-        'color': selected,
-        'used_watched_movie': true,
-      }).eq('id', widget.currentUserId).select().maybeSingle();
+      final upd = await supabase
+          .from('user_credentials')
+          .update({
+            'color': selected,
+            'used_watched_movie': true,
+          })
+          .eq('id', widget.currentUserId)
+          .select()
+          .maybeSingle();
 
       setState(() {
         _usedAlready = true;
         _currentColor = selected;
       });
 
+      // ---- ДОПОЛНЕНИЕ: если пользователь - экономист, обновляем его предприятия ----
+      // Получаем роль пользователя
+      final userRes = await supabase
+          .from('user_credentials')
+          .select('role')
+          .eq('id', widget.currentUserId)
+          .maybeSingle();
+
+      final role = (userRes?['role'] ?? '').toString().toLowerCase();
+      final isEconomist = role == 'economist' || role == 'экономист';
+
+      if (isEconomist) {
+        try {
+          final enterpriseService = EnterpriseService(supabase);
+          await enterpriseService.updateEnterprisesColorForEconomist(
+            economistId: widget.currentUserId,
+            newColor: selected,
+          );
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                  content: Text('Цвет ваших предприятий обновлён')),
+            );
+          }
+        } catch (e) {
+          debugPrint('Ошибка обновления предприятий экономиста: $e');
+        }
+      }
+      // ----------------------------------------------------------------------------
+
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Цвет профиля обновлён: $selected')));
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Цвет профиля обновлён: $selected')));
       }
 
       if (widget.onChanged != null) {
@@ -137,7 +185,10 @@ class _WatchedMovieBlockState extends State<WatchedMovieBlock> {
       }
     } catch (e) {
       debugPrint('WatchedMovieBlock: error updating user color: $e');
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка при сохранении: $e')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Ошибка при сохранении: $e')));
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -165,8 +216,12 @@ class _WatchedMovieBlockState extends State<WatchedMovieBlock> {
               ),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.of(ctx).pop(null), child: const Text('Отмена')),
-              ElevatedButton(onPressed: () => Navigator.of(ctx).pop(selected), child: const Text('Выбрать')),
+              TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(null),
+                  child: const Text('Отмена')),
+              ElevatedButton(
+                  onPressed: () => Navigator.of(ctx).pop(selected),
+                  child: const Text('Выбрать')),
             ],
           );
         });
@@ -179,7 +234,11 @@ class _WatchedMovieBlockState extends State<WatchedMovieBlock> {
     return SizedBox(
       width: double.infinity,
       child: ArtDecoButton(
-        text: _loading ? 'Загрузка...' : (_usedAlready ? 'Я посмотрел фильм — уже использовано' : 'Я посмотрел фильм и изменился'),
+        text: _loading
+            ? 'Загрузка...'
+            : (_usedAlready
+                ? 'Я посмотрел фильм — уже использовано'
+                : 'Я посмотрел фильм и изменился'),
         onPressed: (_loading || _usedAlready) ? null : _onPressed,
         loading: _loading,
         primary: !_usedAlready,

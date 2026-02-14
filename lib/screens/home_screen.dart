@@ -39,20 +39,22 @@ class _HomeScreenState extends State<HomeScreen> {
   final SupabaseClient supabase = Supabase.instance.client;
   final GameService svc = GameService();
 
-  // Background overlay assets (optional). If missing in pubspec.yaml,
-  // the UI will skip drawing them (see errorBuilder).
   static const String _bgAsset = 'assets/art_deco_login.png';
   static const String _frameOverlayAsset = 'assets/art_deco_frame_overlay.png';
-  static const String _ornamentAsset = 'assets/art_deco_ornament.png';
 
-  // Track speech button availability transitions
+  static const List<String> _allowedRegions = [
+    'Азиатская группа',
+    'Англа-саксонская группа',
+    'Предсоциалистический блок',
+    'Пиренейская группа',
+    'Центрально-европейская группа',
+  ];
+
   bool _speechButtonPreviouslyEnabled = true;
 
-  // services
   late final DebateService debateService;
   late final SpeechService speechService;
 
-  // UI / state
   String? _userColor;
   bool _rpcLoading = false;
 
@@ -77,20 +79,14 @@ class _HomeScreenState extends State<HomeScreen> {
   Timer? _resolutionPollTimer;
   Timer? _pollTimer;
 
-  // pending client-side inventory additions
   final List<Map<String, dynamic>> _pendingInventoryItems = [];
 
-  // journal
   List<Map<String, dynamic>> _journalEntries = [];
-
-  // single journal channel (client-side filtering)
   RealtimeChannel? _journalChannel;
 
-  // honor article local state
   bool? _honorUsedLocal;
   double? _honorMBalance;
 
-  // Helper function to check if user has a specific role
   bool _isRole(String role) {
     final userRole = user.role?.toLowerCase() ?? '';
     final roleLower = role.toLowerCase();
@@ -115,13 +111,11 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadResolutionState();
     _startResolutionPolling();
 
-    // initialize previous availability so transitions are detected
     _speechButtonPreviouslyEnabled = _isSpeechButtonEnabled;
 
     _loadJournal();
     _subscribeToJournal();
 
-    // load local honor state (balance + used flag)
     _loadHonorLocalState();
   }
 
@@ -158,7 +152,6 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (_) {}
   }
 
-  /// Load honor article state (used flag + m_balance) and update local user copy.
   Future<void> _loadHonorLocalState() async {
     try {
       final st = await fetchHonorState(user.id);
@@ -168,19 +161,15 @@ class _HomeScreenState extends State<HomeScreen> {
         _honorMBalance = (st['m_balance'] as double?) ?? user.mBalance;
         user = user.copyWith(mBalance: _honorMBalance ?? user.mBalance);
       });
-    } catch (_) {
-      // ignore
-    }
+    } catch (_) {}
   }
 
-  /// Local insert to journal list (immediate UI) with dedupe, and best-effort DB insert.
   Future<void> _insertJournalEntry(
     String title,
     String message, {
     String? visibleRole,
   }) async {
     final nowIso = DateTime.now().toUtc().toIso8601String();
-    // avoid duplicates: if identical title+message already present locally, skip
     final existsLocally = _journalEntries.any((e) {
       final t = (e['title'] ?? '').toString();
       final m = (e['message'] ?? '').toString();
@@ -199,14 +188,12 @@ class _HomeScreenState extends State<HomeScreen> {
       'created_at': nowIso,
     };
 
-    // show immediately in UI
     if (mounted) {
       setState(() {
         _journalEntries.insert(0, localRow);
       });
     }
 
-    // best-effort persist to DB
     try {
       await supabase.from('user_journal').insert({
         'user_id': user.id,
@@ -217,22 +204,13 @@ class _HomeScreenState extends State<HomeScreen> {
         'metadata': null,
         'created_at': nowIso,
       });
-    } catch (_) {
-      // ignore DB write errors (we already showed local)
-    }
+    } catch (_) {}
   }
 
-  // -----------------------
-  // Journal loader & subscription
-  // -----------------------
-
-  /// Normalize server message text to Russian-friendly, compact form.
   String _normalizeJournalMessage(String msg) {
     if (msg.isEmpty) return msg;
     var out = msg;
-
     try {
-      // replace english/field names using case-insensitive regex (Dart: use caseSensitive:false)
       out = out.replaceAll(
         RegExp(r'Тип:\s*UPDATE', caseSensitive: false),
         'Изменён статус',
@@ -246,7 +224,6 @@ class _HomeScreenState extends State<HomeScreen> {
         'Удалено',
       );
 
-      // v_balance -> Войсы, m_balance -> Майнды
       out = out.replaceAll(
         RegExp(r'<b>\s*v_balance\s*<\/b>', caseSensitive: false),
         'Войсы',
@@ -264,22 +241,18 @@ class _HomeScreenState extends State<HomeScreen> {
         'Майнды',
       );
 
-      // compact verbose patterns
       out = out.replaceAll('Тип: Изменён статус', 'Изменён статус');
       out = out.replaceAll(RegExp(r'\s+'), ' ');
       return out.trim();
     } catch (_) {
-      // on any regex error or unexpected input, return original cleaned whitespace
       return msg.replaceAll(RegExp(r'\s+'), ' ').trim();
     }
   }
 
-  /// Loads journal entries visible to current user using a single OR filter (robust).
   Future<void> _loadJournal() async {
     try {
       final role = (user.role ?? '').toString();
       final userId = user.id;
-      // Build OR filter string: include user-specific, role-specific, all, non_politician and NULL visible_role
       final orFilter =
           'user_id.eq.$userId,visible_role.eq.$role,visible_role.eq.all,visible_role.eq.non_politician,visible_role.is.null';
 
@@ -293,13 +266,10 @@ class _HomeScreenState extends State<HomeScreen> {
           .limit(200);
 
       if (res is List) {
-        // transform and dedupe here similarly to subscription transform
-        final List<Map<String, dynamic>> rows = res
-            .map((e) => Map<String, dynamic>.from(e as Map))
-            .toList();
+        final List<Map<String, dynamic>> rows =
+            res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
         final Map<String, Map<String, dynamic>> uniq = {};
         for (final r in rows) {
-          // transform title/message
           String title = (r['title'] ?? '').toString();
           String message = (r['message'] ?? '').toString();
 
@@ -309,7 +279,6 @@ class _HomeScreenState extends State<HomeScreen> {
           }
           message = _normalizeJournalMessage(message);
 
-          // filter bland profile change entries (unless message mentions add)
           if (title.toLowerCase().contains('изменение профиля') &&
               !message.toLowerCase().contains('добав')) {
             continue;
@@ -348,11 +317,10 @@ class _HomeScreenState extends State<HomeScreen> {
           _journalEntries = merged;
         });
       } else {
-        // ensure not leaving list empty
-        if (!mounted) return setState(() => _journalEntries = []);
+        if (!mounted) return;
+        setState(() => _journalEntries = []);
       }
     } catch (e) {
-      // If query fails, keep previous entries; print error for debugging
       // ignore: avoid_print
       print('loadJournal error: $e');
     }
@@ -366,7 +334,6 @@ class _HomeScreenState extends State<HomeScreen> {
             event: PostgresChangeEvent.insert,
             schema: 'public',
             table: 'user_journal',
-            // no server-side filter to avoid missing any rows; do client-side visibility filtering below
             callback: (payload) {
               final rec = payload.newRecord ?? payload.oldRecord;
               if (rec == null) return;
@@ -374,19 +341,17 @@ class _HomeScreenState extends State<HomeScreen> {
                 rec as Map,
               );
 
-              // client-side visibility check
               final String? vis = row['visible_role']?.toString();
               final String role = (user.role ?? '').toString();
               final bool visibleToUser =
                   (row['user_id']?.toString() == user.id) ||
-                  vis == null ||
-                  vis == 'all' ||
-                  vis == role ||
-                  (vis == 'non_politician' && role != 'politician');
+                      vis == null ||
+                      vis == 'all' ||
+                      vis == role ||
+                      (vis == 'non_politician' && role != 'politician');
 
               if (!visibleToUser) return;
 
-              // transform title/message same as loader
               String title = (row['title'] ?? '').toString();
               String message = (row['message'] ?? '').toString();
 
@@ -397,14 +362,13 @@ class _HomeScreenState extends State<HomeScreen> {
               message = _normalizeJournalMessage(message);
               if (title.toLowerCase().contains('изменение профиля') &&
                   !message.toLowerCase().contains('добав')) {
-                return; // ignore bland profile changes
+                return;
               }
               if (message.toLowerCase().contains('добавлен') &&
                   title.toLowerCase().contains('изменение профиля')) {
                 title = 'Добавлен предмет';
               }
 
-              // dedupe: by id or by title+message+created_at
               final exists = _journalEntries.any(
                 (e) =>
                     (e['id'] != null &&
@@ -430,15 +394,11 @@ class _HomeScreenState extends State<HomeScreen> {
           )
           .subscribe();
     } catch (e) {
-      // ignore subscription errors but print for debugging
       // ignore: avoid_print
       print('subscribeToJournal error: $e');
     }
   }
 
-  // -----------------------
-  // Profile / refresh
-  // -----------------------
   Future<void> _refreshProfile() async {
     try {
       final profileRaw = await supabase
@@ -477,13 +437,9 @@ class _HomeScreenState extends State<HomeScreen> {
         });
       }
     } catch (_) {}
-    // update honor local state after refreshing profile
     await _loadHonorLocalState();
   }
 
-  // -----------------------
-  // Debates (uses DebateService)
-  // -----------------------
   Future<void> _loadDebateState() async {
     try {
       final id = await debateService.loadActiveDebateId();
@@ -514,9 +470,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // -----------------------
-  // Resolutions
-  // -----------------------
   Future<void> _loadResolutionState() async {
     try {
       final active = await supabase
@@ -569,9 +522,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // -----------------------
-  // Speech (uses GameService)
-  // -----------------------
   Future<void> _fetchSpeechState() async {
     try {
       final res = await svc.fetchSpeechState();
@@ -586,7 +536,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
         final nowUtc = DateTime.now().toUtc();
 
-        // expired according to server -> mark inactive
         if (expires != null && nowUtc.isAfter(expires)) {
           if (!mounted) return;
           setState(() {
@@ -598,7 +547,6 @@ class _HomeScreenState extends State<HomeScreen> {
             _listenedToThisSpeech = false;
           });
 
-          // detect button availability transition -> log if previously disabled -> now enabled
           final newEnabled = _isSpeechButtonEnabled;
           if (_speechButtonPreviouslyEnabled == false && newEnabled == true) {
             await _insertJournalEntry(
@@ -611,7 +559,6 @@ class _HomeScreenState extends State<HomeScreen> {
           return;
         }
 
-        // normal branch: set server-provided values
         if (!mounted) return;
         setState(() {
           speechActive = active;
@@ -619,7 +566,6 @@ class _HomeScreenState extends State<HomeScreen> {
           speechExpiresAt = expires;
         });
 
-        // get active life speech id + listen state
         try {
           final life = await svc.getActiveLifeSpeech();
           if (life is Map<String, dynamic>) {
@@ -630,7 +576,6 @@ class _HomeScreenState extends State<HomeScreen> {
           await _checkIfListened();
         } catch (_) {}
 
-        // after applying server state, detect transition of button enabledness
         final newEnabled = _isSpeechButtonEnabled;
         if (_speechButtonPreviouslyEnabled == false && newEnabled == true) {
           await _insertJournalEntry(
@@ -641,7 +586,6 @@ class _HomeScreenState extends State<HomeScreen> {
         }
         _speechButtonPreviouslyEnabled = newEnabled;
       } else {
-        // response missing -> treat as inactive
         if (!mounted) return;
         setState(() {
           speechActive = false;
@@ -741,7 +685,6 @@ class _HomeScreenState extends State<HomeScreen> {
       _waitingForServerConfirm = true;
     });
 
-    // Immediately mark button previously disabled and publish journal entry visible to all politicians
     try {
       _speechButtonPreviouslyEnabled = false;
       await _insertJournalEntry(
@@ -810,7 +753,7 @@ class _HomeScreenState extends State<HomeScreen> {
           'expires_at': applyExpires!.toUtc().toIso8601String(),
         };
         await svc.upsertSpeechState(obj: upsertObj);
-      } catch (e) {
+      } catch (_) {
         _showMessage(
           'Не удалось сохранить состояние речи на сервере (права). Кнопка всё равно будет локально заблокирована.',
         );
@@ -849,21 +792,19 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // -----------------------
-  // Actions for buttons
+  // Навигация
   // -----------------------
   Future<void> _openTransferScreen() async {
     final res = await Navigator.of(context).push<bool>(
       MaterialPageRoute(builder: (_) => TransferVScreen(user: user)),
     );
-    if (res == true) {
-      await _refreshProfile();
-    }
+    if (res == true) await _refreshProfile();
   }
 
   Future<void> _openInventoryScreen() async {
-    await Navigator.of(
-      context,
-    ).push(MaterialPageRoute(builder: (_) => InventoryScreen(user: user)));
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => InventoryScreen(user: user)),
+    );
     if (!mounted) return;
     setState(() {
       _pendingInventoryItems.removeWhere((it) => it['owner_id'] == user.id);
@@ -918,6 +859,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _onOpenResolutionPressed() async {
     if (_activeResolutionId == null) return;
+    // логика политрешения оставлена как была — UI-кнопка теперь будет единого стиля
+    // (диалог выбора + ставка)
     final resolutionId = _activeResolutionId!;
 
     List<Map<String, dynamic>> options = [];
@@ -927,8 +870,9 @@ class _HomeScreenState extends State<HomeScreen> {
           .select('id,label')
           .eq('resolution_id', resolutionId)
           .order('id');
-      if (res is List)
+      if (res is List) {
         options = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      }
     } catch (e) {
       _showMessage('Не удалось загрузить варианты: $e');
       return;
@@ -942,19 +886,17 @@ class _HomeScreenState extends State<HomeScreen> {
     int? selectedOptionId;
     final TextEditingController amtCtrl = TextEditingController();
 
-    final resDialogResult = await showDialog<bool>(
+    await showDialog<bool>(
       context: context,
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx2, setStateDialog) {
             return AlertDialog(
-              title: const Text('Политрешение — ваш выбор'),
+              title: const Text('Политрешение'),
               content: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Text('Выберите вариант:'),
-                    const SizedBox(height: 8),
                     ...options.map((opt) {
                       final oid = (opt['id'] is int)
                           ? opt['id'] as int
@@ -973,7 +915,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       keyboardType: TextInputType.number,
                       decoration: InputDecoration(
                         labelText:
-                            'Сумма майндов (целое). Ваш баланс: ${user.mBalance.toStringAsFixed(2)}',
+                            'Майнды (целое). Баланс: ${user.mBalance.toStringAsFixed(2)}',
                       ),
                     ),
                   ],
@@ -992,8 +934,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       );
                       return;
                     }
-                    final txt = amtCtrl.text.trim();
-                    final n = int.tryParse(txt);
+                    final n = int.tryParse(amtCtrl.text.trim());
                     if (n == null || n <= 0) {
                       ScaffoldMessenger.of(ctx2).showSnackBar(
                         const SnackBar(
@@ -1006,7 +947,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ScaffoldMessenger.of(ctx2).showSnackBar(
                         SnackBar(
                           content: Text(
-                            'Недостаточно майндов: у вас ${user.mBalance.toStringAsFixed(2)}',
+                            'Недостаточно майндов: ${user.mBalance.toStringAsFixed(2)}',
                           ),
                         ),
                       );
@@ -1030,34 +971,16 @@ class _HomeScreenState extends State<HomeScreen> {
                       await _refreshProfile();
                       await _loadResolutionState();
                       if (mounted) Navigator.of(context).pop();
-                      await showDialog(
-                        context: context,
-                        builder: (_) => AlertDialog(
-                          title: const Text(
-                            'Спасибо за участие в политрешении',
-                          ),
-                          content: const Text('Ваша ставка принята.'),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.of(context).pop(),
-                              child: const Text('OK'),
-                            ),
-                          ],
-                        ),
-                      );
                       if (!mounted) return;
                       setState(() {
                         _alreadyBetInActiveResolution = true;
                       });
                     } catch (e) {
                       if (mounted) Navigator.of(context).pop();
-                      final msg = e is PostgrestException
-                          ? (e.message ?? e.toString())
-                          : e.toString();
-                      _showMessage('Ошибка при ставке: $msg');
+                      _showMessage('Ошибка при ставке: $e');
                     }
                   },
-                  child: const Text('Подтвердить ставку'),
+                  child: const Text('Подтвердить'),
                 ),
               ],
             );
@@ -1143,9 +1066,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
-        builder: (_) {
-          return const LoginScreen();
-        },
+        builder: (_) => const LoginScreen(),
       ),
     );
   }
@@ -1154,22 +1075,17 @@ class _HomeScreenState extends State<HomeScreen> {
     return Stack(
       fit: StackFit.expand,
       children: [
-        // Base background image
         const Positioned.fill(
           child: Image(
             image: AssetImage(_bgAsset),
             fit: BoxFit.cover,
           ),
         ),
-
-        // Darken layer
         Positioned.fill(
           child: Container(
             color: TitanicTheme.abyssalBlue.withOpacity(0.82),
           ),
         ),
-
-        // Vignette
         Positioned.fill(
           child: IgnorePointer(
             child: Container(
@@ -1187,8 +1103,6 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         ),
-
-        // Frame overlay (optional)
         Positioned.fill(
           child: IgnorePointer(
             child: Opacity(
@@ -1201,178 +1115,209 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         ),
-
-        // Top ornament (optional)
-        Positioned(
-          top: 8,
-          left: 0,
-          right: 0,
-          child: IgnorePointer(
-            child: Opacity(
-              opacity: 0.20,
-              child: Image.asset(
-                _ornamentAsset,
-                height: 38,
-                fit: BoxFit.contain,
-                errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-              ),
-            ),
-          ),
-        ),
-
-        // Bottom ornament (optional)
-        Positioned(
-          bottom: 8,
-          left: 0,
-          right: 0,
-          child: IgnorePointer(
-            child: Opacity(
-              opacity: 0.16,
-              child: RotatedBox(
-                quarterTurns: 2,
-                child: Image.asset(
-                  _ornamentAsset,
-                  height: 38,
-                  fit: BoxFit.contain,
-                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                ),
-              ),
-            ),
-          ),
-        ),
-
         child,
       ],
     );
   }
 
-  // Функция для получения пути к изображению в зависимости от роли
-  String _getRoleImagePath(String role) {
-    final roleLower = role.toLowerCase();
-
-    if (roleLower.contains('мафия') || roleLower.contains('mafia')) {
-      return 'assets/mafia.png';
-    } else if (roleLower.contains('голливуд') || roleLower.contains('hollywood')) {
-      return 'assets/hollywood.png';
-    } else if (roleLower.contains('экономист') || roleLower.contains('economist')) {
-      return 'assets/economist.png';
-    } else if (roleLower.contains('журналист') || roleLower.contains('journalist')) {
-      return 'assets/journalist.png';
-    } else if (roleLower.contains('общественный') || roleLower.contains('public') || roleLower.contains('деятель')) {
-      return 'assets/public_figure.png';
-    } else if (roleLower.contains('политик') || roleLower.contains('politician')) {
-      return 'assets/politic.png';
-    } else {
-      return 'assets/default_role.png'; // Запасное изображение, если нет подходящей роли
-    }
+  // -----------------------
+  // Chips (цвет + регион) — только у экономиста
+  // -----------------------
+  String? _normalizedRegion() {
+    final r = (user.region ?? '').toString().trim();
+    if (r.isEmpty) return null;
+    if (_allowedRegions.contains(r)) return r;
+    return r;
   }
 
-  // Вспомогательный виджет для отображения аватара с изображением роли
-  // УВЕЛИЧЕН РАЗМЕР АВАТАРКИ
-  Widget _buildRoleAvatar(String role) {
-    final imagePath = _getRoleImagePath(role);
-
-    return Container(
-      width: 90, // УВЕЛИЧЕНО с 60 до 90
-      height: 90, // УВЕЛИЧЕНО с 60 до 90
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: TitanicTheme.abyssalBlue, // Темно-синий фон
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.5), // Более выраженная тень
-            blurRadius: 15, // УВЕЛИЧЕН
-            offset: const Offset(0, 8), // УВЕЛИЧЕН
-          ),
-          BoxShadow(
-            color: TitanicTheme.raptureGold.withOpacity(0.3), // Золотое свечение
-            blurRadius: 10, // УВЕЛИЧЕНО
-            spreadRadius: 2, // ДОБАВЛЕНО
-          ),
-        ],
-        border: Border.all(
-          color: TitanicTheme.raptureGold.withOpacity(0.5), // Золотая граница
-          width: 2.5, // УВЕЛИЧЕНО
-        ),
-      ),
-      child: Center(
-        child: ColorFiltered(
-          colorFilter: ColorFilter.mode(
-            TitanicTheme.raptureGold, // Золотой цвет для изображения
-            BlendMode.srcIn,
-          ),
-          child: Image.asset(
-            imagePath,
-            width: 56, // УВЕЛИЧЕНО с 32 до 56
-            height: 56, // УВЕЛИЧЕНО с 32 до 56
-            errorBuilder: (context, error, stackTrace) {
-              // Если изображение не найдено, показываем иконку по умолчанию
-              return Icon(
-                Icons.person,
-                size: 56, // УВЕЛИЧЕНО с 32 до 56
-                color: TitanicTheme.raptureGold, // Золотой цвет для иконки
-              );
-            },
-          ),
-        ),
-      ),
-    );
-  }
-
-  // Вспомогательный виджет для кнопки в форме кристалла
-  Widget _buildCrystalButton({
-    required IconData icon,
-    required VoidCallback onPressed,
-    Color iconColor = TitanicTheme.raptureGold, // Золотой цвет иконки
+  Widget _buildChip({
+    required String text,
+    required Color borderColor,
+    required Color fillColor,
+    required bool isSmallScreen,
   }) {
-    return GestureDetector(
-      onTap: onPressed,
-      child: Container(
-        width: 44,
-        height: 44,
-        child: Transform.rotate(
-          angle: 45 * 3.1415926535 / 180, // Поворот на 45 градусов для ромба
-          child: Container(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  TitanicTheme.surfaceNavy.withOpacity(0.9),
-                  TitanicTheme.abyssalBlue.withOpacity(0.8),
-                ],
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.5),
-                  blurRadius: 8,
-                  offset: const Offset(3, 3),
-                ),
-                BoxShadow(
-                  color: TitanicTheme.raptureGold.withOpacity(0.3),
-                  blurRadius: 4,
-                  offset: const Offset(-2, -2),
-                ),
-              ],
-              border: Border.all(
-                color: TitanicTheme.raptureGold.withOpacity(0.3), // Золотая граница
-                width: 1.2,
-              ),
-            ),
-            child: Center(
-              child: Transform.rotate(
-                angle: -45 * 3.1415926535 / 180, // Компенсация поворота для иконки
-                child: Icon(
-                  icon,
-                  color: iconColor, // Золотой цвет иконки
-                  size: 22,
-                ),
-              ),
-            ),
-          ),
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: isSmallScreen ? 10 : 12,
+        vertical: isSmallScreen ? 5 : 6,
+      ),
+      decoration: BoxDecoration(
+        color: fillColor,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: borderColor,
+          width: 1.2,
+        ),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontFamily: 'Cinzel',
+          fontSize: isSmallScreen ? 12.5 : 13.5,
+          color: TitanicTheme.ivoryCream,
+          fontWeight: FontWeight.w600,
         ),
       ),
     );
+  }
+
+  Widget _buildColorAndRegionChips(bool isSmallScreen) {
+    if (!_isRole('economist')) return const SizedBox.shrink();
+
+    final colorName = (_userColor ?? user.color ?? '').toString().trim();
+    final regionName = _normalizedRegion();
+
+    final showColor = colorName.isNotEmpty;
+    final showRegion = regionName != null && regionName.trim().isNotEmpty;
+
+    if (!showColor && !showRegion) return const SizedBox.shrink();
+
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        if (showColor)
+          _buildChip(
+            text: colorName,
+            borderColor: _getColorFromString(colorName).withOpacity(0.55),
+            fillColor: _getColorFromString(colorName).withOpacity(0.22),
+            isSmallScreen: isSmallScreen,
+          ),
+        if (showRegion)
+          _buildChip(
+            text: regionName!,
+            borderColor: TitanicTheme.raptureGold.withOpacity(0.45),
+            fillColor: TitanicTheme.surfaceNavy.withOpacity(0.35),
+            isSmallScreen: isSmallScreen,
+          ),
+      ],
+    );
+  }
+
+  // -----------------------
+  // ЕДИНЫЙ СПИСОК КНОПОК (все в стиле ArtDecoButton)
+  // -----------------------
+  List<Widget> _buildUnifiedButtons() {
+    final List<Widget> btns = [];
+
+    // Кнопки по роли
+    if (_isRole('economist')) {
+      btns.add(
+        ArtDecoButton(
+          text: 'Купить ход',
+          icon: Icons.shopping_cart,
+          onPressed: _openBuyTurnFlow,
+          primary: true,
+          expanded: true,
+        ),
+      );
+      btns.add(const SizedBox(height: 12));
+
+      btns.add(
+        ArtDecoButton(
+          text: 'Купить предприятие',
+          icon: Icons.business,
+          onPressed: _openPurchaseEnterprise,
+          primary: false,
+          expanded: true,
+        ),
+      );
+      btns.add(const SizedBox(height: 12));
+    }
+
+    // Событийные кнопки
+    if (_hasActiveDebate && !_alreadyVotedInActiveDebate) {
+      btns.add(
+        ArtDecoButton(
+          text: 'Участвовать в дебатах',
+          icon: Icons.forum,
+          onPressed: _openDebates,
+          primary: false,
+          expanded: true,
+        ),
+      );
+      btns.add(const SizedBox(height: 12));
+    }
+
+    if (_hasActiveResolution && !_alreadyBetInActiveResolution) {
+      btns.add(
+        ArtDecoButton(
+          text: 'Политрешение',
+          icon: Icons.gavel,
+          onPressed: _onOpenResolutionPressed,
+          primary: false,
+          expanded: true,
+        ),
+      );
+      btns.add(const SizedBox(height: 12));
+    }
+
+    // Политик: речь жизни — тоже ArtDecoButton (единый стиль)
+    if (user.role == 'politician') {
+      btns.add(
+        AbsorbPointer(
+          absorbing: !_isSpeechButtonEnabled || _rpcLoading,
+          child: Opacity(
+            opacity: (_isSpeechButtonEnabled && !_rpcLoading) ? 1.0 : 0.6,
+            child: ArtDecoButton(
+              text: _isSpeechButtonEnabled
+                  ? 'Речь жизни (старт)'
+                  : 'Речь жизни (неактивна)',
+              icon: Icons.campaign,
+              onPressed: _isSpeechButtonEnabled ? _onStartSpeechPressed : () {},
+              primary: _isSpeechButtonEnabled,
+              expanded: true,
+            ),
+          ),
+        ),
+      );
+      btns.add(const SizedBox(height: 12));
+    }
+
+    // Кинематограф (внутри общего списка)
+    btns.add(
+      WatchedMovieBlock(
+        currentUserId: user.id,
+        onChanged: () async {
+          try {
+            await _refreshProfile();
+            await _loadJournal();
+          } catch (_) {}
+        },
+      ),
+    );
+    btns.add(const SizedBox(height: 12));
+
+    btns.add(
+      MovieVoteBlock(
+        currentUserId: user.id,
+        currentUserRole: user.role,
+        onVoted: () async {
+          try {
+            await _refreshProfile();
+            await _loadJournal();
+          } catch (_) {}
+        },
+      ),
+    );
+    btns.add(const SizedBox(height: 12));
+
+    btns.add(
+      HollywoodPayBlock(
+        currentUserId: user.id,
+        currentUserRole: user.role,
+        onPaid: () async {
+          try {
+            await _refreshProfile();
+            await _loadJournal();
+          } catch (_) {}
+        },
+      ),
+    );
+    btns.add(const SizedBox(height: 16));
+
+    // если вдруг последние элементы — лишний SizedBox, можно оставить (не мешает)
+    return btns;
   }
 
   // -----------------------
@@ -1389,7 +1334,7 @@ class _HomeScreenState extends State<HomeScreen> {
         child: SafeArea(
           child: Column(
             children: [
-              // ВЕРХНЯЯ ПАНЕЛЬ С КНОПКАМИ
+              // TOP BAR
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 decoration: BoxDecoration(
@@ -1417,14 +1362,11 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 child: Row(
                   children: [
-                    // КНОПКА КОРАБЛИКА В ФОРМЕ КРИСТАЛЛА С ТЕМНО-СИНЕЙ ЗАЛИВКОЙ И ЗОЛОТОЙ ИКОНКОЙ
                     _buildCrystalButton(
                       icon: Icons.sailing,
-                      onPressed: () {}, // Обработчик пока не назначен
-                      iconColor: TitanicTheme.raptureGold, // Золотой цвет иконки
+                      onPressed: () {},
+                      iconColor: TitanicTheme.raptureGold,
                     ),
-
-                    // РАСТЯНУТОЕ ИЗОБРАЖЕНИЕ NAVBAR.PNG
                     Expanded(
                       child: Container(
                         margin: const EdgeInsets.symmetric(horizontal: 12),
@@ -1435,18 +1377,15 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ),
                     ),
-
-                    // КНОПКА ВЫХОДА В ФОРМЕ КРИСТАЛЛА С ТЕМНО-СИНЕЙ ЗАЛИВКОЙ И ЗОЛОТОЙ ИКОНКОЙ
                     _buildCrystalButton(
                       icon: Icons.exit_to_app,
                       onPressed: _logout,
-                      iconColor: TitanicTheme.raptureGold, // Золотой цвет иконки
+                      iconColor: TitanicTheme.raptureGold,
                     ),
                   ],
                 ),
               ),
 
-              // ОСНОВНОЙ КОНТЕНТ
               Expanded(
                 child: SingleChildScrollView(
                   physics: const BouncingScrollPhysics(),
@@ -1454,7 +1393,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      // КАРТОЧКА ПРОФИЛЯ
+                      // PROFILE CARD
                       Container(
                         decoration: BoxDecoration(
                           color: TitanicTheme.panelDark.withOpacity(0.9),
@@ -1476,92 +1415,47 @@ class _HomeScreenState extends State<HomeScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              // ИНФОРМАЦИЯ О ПОЛЬЗОВАТЕЛЕ
                               Row(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  // АВАТАР С ИЗОБРАЖЕНИЕМ РОЛИ - ТЕПЕРЬ БОЛЬШЕ
                                   _buildRoleAvatar(user.role),
-
-                                  const SizedBox(width: 20), // УВЕЛИЧЕН ОТСТУП с 16 до 20
+                                  const SizedBox(width: 20),
                                   Expanded(
                                     child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
+                                      crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
                                         Text(
                                           '${user.firstName} ${user.lastName}',
                                           style: TextStyle(
                                             fontFamily: 'CormorantGaramond',
-                                            fontSize: isSmallScreen ? 22 : 26, // УВЕЛИЧЕН
+                                            fontSize: isSmallScreen ? 22 : 26,
                                             fontWeight: FontWeight.w700,
                                             color: TitanicTheme.ivoryCream,
                                             letterSpacing: 0.5,
                                           ),
                                         ),
-                                        const SizedBox(height: 4), // УВЕЛИЧЕН
-                                        Text(
-                                          '@${user.username}',
-                                          style: TextStyle(
-                                            fontFamily: 'Cinzel',
-                                            fontSize: 15, // УВЕЛИЧЕН
-                                            color: TitanicTheme.ivoryCream
-                                                .withOpacity(0.7),
-                                            letterSpacing: 0.3,
-                                          ),
-                                        ),
-                                        if (_userColor != null) ...[
-                                          const SizedBox(height: 12), // УВЕЛИЧЕН
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(
-                                                horizontal: 12, vertical: 6), // УВЕЛИЧЕН
-                                            decoration: BoxDecoration(
-                                              color: _getColorFromString(
-                                                      _userColor!)
-                                                  .withOpacity(0.25), // БОЛЬШЕ НЕПРОЗРАЧНОСТИ
-                                              borderRadius:
-                                                  BorderRadius.circular(14), // УВЕЛИЧЕН
-                                              border: Border.all(
-                                                color: _getColorFromString(
-                                                        _userColor!)
-                                                    .withOpacity(0.5), // БОЛЬШЕ НЕПРОЗРАЧНОСТИ
-                                                width: 1.5, // УВЕЛИЧЕН
-                                              ),
-                                            ),
-                                            child: Text(
-                                              _userColor!,
-                                              style: TextStyle(
-                                                fontFamily: 'Cinzel',
-                                                fontSize: 14, // УВЕЛИЧЕН
-                                                color: TitanicTheme.ivoryCream,
-                                                fontWeight: FontWeight.w600, // УВЕЛИЧЕН
-                                              ),
-                                            ),
-                                          ),
-                                        ],
+                                        const SizedBox(height: 10),
+                                        _buildColorAndRegionChips(isSmallScreen),
                                       ],
                                     ),
                                   ),
                                 ],
                               ),
-                              const SizedBox(height: 24), // УВЕЛИЧЕН
+                              const SizedBox(height: 24),
 
-                              // БАЛАНСЫ
+                              // BALANCES
                               Container(
-                                padding: const EdgeInsets.all(18), // УВЕЛИЧЕН
+                                padding: const EdgeInsets.all(18),
                                 decoration: BoxDecoration(
-                                  color: TitanicTheme.surfaceNavy
-                                      .withOpacity(0.35), // БОЛЬШЕ НЕПРОЗРАЧНОСТИ
-                                  borderRadius: BorderRadius.circular(18), // УВЕЛИЧЕН
+                                  color: TitanicTheme.surfaceNavy.withOpacity(0.35),
+                                  borderRadius: BorderRadius.circular(18),
                                   border: Border.all(
-                                    color: TitanicTheme.raptureGold
-                                        .withOpacity(0.25), // БОЛЬШЕ НЕПРОЗРАЧНОСТИ
+                                    color: TitanicTheme.raptureGold.withOpacity(0.25),
                                     width: 1.5,
                                   ),
                                 ),
                                 child: Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceAround,
+                                  mainAxisAlignment: MainAxisAlignment.spaceAround,
                                   children: [
                                     Column(
                                       children: [
@@ -1569,18 +1463,17 @@ class _HomeScreenState extends State<HomeScreen> {
                                           'Войсы',
                                           style: TextStyle(
                                             fontFamily: 'Cinzel',
-                                            fontSize: 13, // УВЕЛИЧЕН
-                                            color: TitanicTheme.ivoryCream
-                                                .withOpacity(0.7),
+                                            fontSize: 13,
+                                            color: TitanicTheme.ivoryCream.withOpacity(0.7),
                                             letterSpacing: 1.0,
                                           ),
                                         ),
-                                        const SizedBox(height: 6), // УВЕЛИЧЕН
+                                        const SizedBox(height: 6),
                                         Text(
                                           user.vBalance.toStringAsFixed(2),
                                           style: TextStyle(
                                             fontFamily: 'CormorantGaramond',
-                                            fontSize: isSmallScreen ? 24 : 28, // УВЕЛИЧЕН
+                                            fontSize: isSmallScreen ? 24 : 28,
                                             fontWeight: FontWeight.w700,
                                             color: TitanicTheme.raptureGold,
                                             letterSpacing: 1.0,
@@ -1589,10 +1482,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                       ],
                                     ),
                                     Container(
-                                      width: 1.5, // УВЕЛИЧЕН
-                                      height: 45, // УВЕЛИЧЕН
-                                      color: TitanicTheme.raptureGold
-                                          .withOpacity(0.25), // БОЛЬШЕ НЕПРОЗРАЧНОСТИ
+                                      width: 1.5,
+                                      height: 45,
+                                      color: TitanicTheme.raptureGold.withOpacity(0.25),
                                     ),
                                     Column(
                                       children: [
@@ -1600,18 +1492,17 @@ class _HomeScreenState extends State<HomeScreen> {
                                           'Майнды',
                                           style: TextStyle(
                                             fontFamily: 'Cinzel',
-                                            fontSize: 13, // УВЕЛИЧЕН
-                                            color: TitanicTheme.ivoryCream
-                                                .withOpacity(0.7),
+                                            fontSize: 13,
+                                            color: TitanicTheme.ivoryCream.withOpacity(0.7),
                                             letterSpacing: 1.0,
                                           ),
                                         ),
-                                        const SizedBox(height: 6), // УВЕЛИЧЕН
+                                        const SizedBox(height: 6),
                                         Text(
                                           user.mBalance.toStringAsFixed(2),
                                           style: TextStyle(
                                             fontFamily: 'CormorantGaramond',
-                                            fontSize: isSmallScreen ? 24 : 28, // УВЕЛИЧЕН
+                                            fontSize: isSmallScreen ? 24 : 28,
                                             fontWeight: FontWeight.w700,
                                             color: TitanicTheme.seaFoamGreen,
                                             letterSpacing: 1.0,
@@ -1622,9 +1513,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                   ],
                                 ),
                               ),
-                              const SizedBox(height: 24), // УВЕЛИЧЕН
+                              const SizedBox(height: 24),
 
-                              // КНОПКИ ДЕЙСТВИЙ
+                              // BASIC NAV BUTTONS
                               Row(
                                 children: [
                                   Expanded(
@@ -1636,7 +1527,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                       expanded: true,
                                     ),
                                   ),
-                                  const SizedBox(width: 16), // УВЕЛИЧЕН
+                                  const SizedBox(width: 16),
                                   Expanded(
                                     child: ArtDecoButton(
                                       text: 'Инвентарь',
@@ -1652,9 +1543,9 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                         ),
                       ),
-                      const SizedBox(height: 24), // УВЕЛИЧЕН
+                      const SizedBox(height: 24),
 
-                      // СЕКЦИЯ ВОЗМОЖНОСТЕЙ РОЛИ
+                      // ONE BLOCK: only buttons (no headings)
                       Container(
                         decoration: BoxDecoration(
                           color: TitanicTheme.panelDark.withOpacity(0.9),
@@ -1674,256 +1565,15 @@ class _HomeScreenState extends State<HomeScreen> {
                         child: Padding(
                           padding: const EdgeInsets.all(20),
                           child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Возможности вашей роли',
-                                style: TextStyle(
-                                  fontFamily: 'CormorantGaramond',
-                                  fontSize: isSmallScreen ? 22 : 24, // УВЕЛИЧЕН
-                                  fontWeight: FontWeight.w700,
-                                  color: TitanicTheme.ivoryCream,
-                                  letterSpacing: 0.5,
-                                ),
-                              ),
-                              const SizedBox(height: 12), // УВЕЛИЧЕН
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 14, vertical: 8), // УВЕЛИЧЕН
-                                decoration: BoxDecoration(
-                                  color: TitanicTheme.raptureGold
-                                      .withOpacity(0.15), // БОЛЬШЕ НЕПРОЗРАЧНОСТИ
-                                  borderRadius: BorderRadius.circular(12), // УВЕЛИЧЕН
-                                  border: Border.all(
-                                    color: TitanicTheme.raptureGold
-                                        .withOpacity(0.4), // БОЛЬШЕ НЕПРОЗРАЧНОСТИ
-                                  ),
-                                ),
-                                child: Text(
-                                  user.role,
-                                  style: TextStyle(
-                                    fontFamily: 'Cinzel',
-                                    fontSize: 15, // УВЕЛИЧЕН
-                                    fontWeight: FontWeight.w600,
-                                    color: TitanicTheme.raptureGold,
-                                    letterSpacing: 0.5,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(height: 24), // УВЕЛИЧЕН
-
-                              // КНОПКИ ДЛЯ РОЛЕЙ
-                              if (_isRole('economist')) ...[
-                                ArtDecoButton(
-                                  text: 'Купить ход',
-                                  icon: Icons.shopping_cart,
-                                  onPressed: _openBuyTurnFlow,
-                                  primary: true,
-                                  expanded: true,
-                                ),
-                                const SizedBox(height: 16), // УВЕЛИЧЕН
-                              ],
-
-                              if (_hasActiveDebate &&
-                                  !_alreadyVotedInActiveDebate) ...[
-                                ArtDecoButton(
-                                  text: 'Участвовать в дебатах',
-                                  icon: Icons.forum,
-                                  onPressed: _openDebates,
-                                  primary: false,
-                                  expanded: true,
-                                ),
-                                const SizedBox(height: 16), // УВЕЛИЧЕН
-                              ],
-
-                              if (_hasActiveResolution &&
-                                  !_alreadyBetInActiveResolution) ...[
-                                Container(
-                                  decoration: TitanicTheme.outlineGildedButton(
-                                      highlighted: true),
-                                  child: Material(
-                                    color: Colors.transparent,
-                                    child: InkWell(
-                                      onTap: _onOpenResolutionPressed,
-                                      borderRadius: BorderRadius.circular(12),
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(
-                                            vertical: 16, horizontal: 18), // УВЕЛИЧЕН
-                                        child: Row(
-                                          mainAxisAlignment:
-                                              MainAxisAlignment.center,
-                                          children: [
-                                            Icon(Icons.gavel,
-                                                color: TitanicTheme.seaFoamGreen,
-                                                size: 22), // УВЕЛИЧЕН
-                                            const SizedBox(width: 12), // УВЕЛИЧЕН
-                                            Text(
-                                              'Политрешение',
-                                              style: TextStyle(
-                                                fontFamily: 'Cinzel',
-                                                fontSize: 17, // УВЕЛИЧЕН
-                                                fontWeight: FontWeight.w600,
-                                                color: TitanicTheme.ivoryCream,
-                                                letterSpacing: 0.8,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 16), // УВЕЛИЧЕН
-                              ],
-
-                              if (user.role == 'politician') ...[
-                                Container(
-                                  decoration: _isSpeechButtonEnabled
-                                      ? TitanicTheme
-                                          .primaryAccentButtonDecoration
-                                      : TitanicTheme.outlineGildedButton(),
-                                  child: Material(
-                                    color: Colors.transparent,
-                                    child: InkWell(
-                                      onTap: _isSpeechButtonEnabled
-                                          ? _onStartSpeechPressed
-                                          : null,
-                                      borderRadius: BorderRadius.circular(12),
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(
-                                            vertical: 16, horizontal: 18), // УВЕЛИЧЕН
-                                        child: Row(
-                                          mainAxisAlignment:
-                                              MainAxisAlignment.center,
-                                          children: [
-                                            if (_rpcLoading)
-                                              SizedBox(
-                                                width: 22, // УВЕЛИЧЕН
-                                                height: 22, // УВЕЛИЧЕН
-                                                child:
-                                                    CircularProgressIndicator(
-                                                  strokeWidth: 2.5, // УВЕЛИЧЕН
-                                                  color: _isSpeechButtonEnabled
-                                                      ? Colors.black
-                                                      : TitanicTheme.raptureGold,
-                                                ),
-                                              )
-                                            else
-                                              Icon(
-                                                Icons.campaign,
-                                                color: _isSpeechButtonEnabled
-                                                    ? Colors.black
-                                                    : TitanicTheme.raptureGold,
-                                                size: 22, // УВЕЛИЧЕН
-                                              ),
-                                            const SizedBox(width: 12), // УВЕЛИЧЕН
-                                            Expanded(
-                                              child: Text(
-                                                _isSpeechButtonEnabled
-                                                    ? 'Речь жизни (старт)'
-                                                    : 'Речь жизни (неактивна)',
-                                                style: TextStyle(
-                                                  fontFamily: 'Cinzel',
-                                                  fontSize: 17, // УВЕЛИЧЕН
-                                                  fontWeight: FontWeight.w600,
-                                                  color: _isSpeechButtonEnabled
-                                                      ? Colors.black
-                                                      : TitanicTheme.ivoryCream,
-                                                  letterSpacing: 0.8,
-                                                ),
-                                                textAlign: TextAlign.center,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 16), // УВЕЛИЧЕН
-                              ],
-                            ],
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: _buildUnifiedButtons(),
                           ),
                         ),
                       ),
-                      const SizedBox(height: 24), // УВЕЛИЧЕН
 
-                      // БЛОК ФИЛЬМОВ
-                      Container(
-                        decoration: BoxDecoration(
-                          color: TitanicTheme.panelDark.withOpacity(0.9),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: TitanicTheme.copperDetail.withOpacity(0.3),
-                            width: 1.5,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.4),
-                              blurRadius: 20,
-                              offset: const Offset(0, 8),
-                            ),
-                          ],
-                        ),
-                        padding: const EdgeInsets.all(20),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Кинематограф',
-                              style: TextStyle(
-                                fontFamily: 'CormorantGaramond',
-                                fontSize: isSmallScreen ? 22 : 24, // УВЕЛИЧЕН
-                                fontWeight: FontWeight.w700,
-                                color: TitanicTheme.ivoryCream,
-                                letterSpacing: 0.5,
-                              ),
-                            ),
-                            const SizedBox(height: 20), // УВЕЛИЧЕН
-
-                            // Кнопка "Я посмотрел фильм"
-                            WatchedMovieBlock(
-                              currentUserId: user.id,
-                              onChanged: () async {
-                                try {
-                                  await _refreshProfile();
-                                  await _loadJournal();
-                                } catch (_) {}
-                              },
-                            ),
-                            const SizedBox(height: 16), // УВЕЛИЧЕН
-
-                            // Голосование за фильм
-                            MovieVoteBlock(
-                              currentUserId: user.id,
-                              currentUserRole: user.role,
-                              onVoted: () async {
-                                try {
-                                  await _refreshProfile();
-                                  await _loadJournal();
-                                } catch (_) {}
-                              },
-                            ),
-                            const SizedBox(height: 16), // УВЕЛИЧЕН
-
-                            // Hollywood кнопки
-                            HollywoodPayBlock(
-                              currentUserId: user.id,
-                              currentUserRole: user.role,
-                              onPaid: () async {
-                                try {
-                                  await _refreshProfile();
-                                  await _loadJournal();
-                                } catch (_) {}
-                              },
-                            ),
-                          ],
-                        ),
-                      ),
-
-                      // БЛОКИ ДЛЯ МАФИИ
+                      // Mafia block stays separate (это не просто кнопки)
                       if (_isRole('мафия')) ...[
-                        const SizedBox(height: 24), // УВЕЛИЧЕН
+                        const SizedBox(height: 24),
                         Container(
                           decoration: BoxDecoration(
                             color: TitanicTheme.panelDark.withOpacity(0.9),
@@ -1944,18 +1594,18 @@ class _HomeScreenState extends State<HomeScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
+                              // заголовок оставлен (это отдельный блок-игра)
                               Text(
                                 'Особые возможности',
                                 style: TextStyle(
                                   fontFamily: 'CormorantGaramond',
-                                  fontSize: isSmallScreen ? 22 : 24, // УВЕЛИЧЕН
+                                  fontSize: isSmallScreen ? 22 : 24,
                                   fontWeight: FontWeight.w700,
                                   color: TitanicTheme.ivoryCream,
                                   letterSpacing: 0.5,
                                 ),
                               ),
-                              const SizedBox(height: 20), // УВЕЛИЧЕН
-
+                              const SizedBox(height: 20),
                               mafia_blocks.MafiaBlock(
                                 currentUserId: user.id,
                                 currentUserRole: user.role,
@@ -1968,8 +1618,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 onDebtCollected: _onDebtCollected,
                                 onEnterpriseBought: _onMafiaEnterpriseBought,
                               ),
-                              const SizedBox(height: 20), // УВЕЛИЧЕН
-
+                              const SizedBox(height: 20),
                               BloodPokerBlock(
                                 currentUserId: user.id,
                                 onBetPlaced: _onBloodPokerBetPlaced,
@@ -1979,150 +1628,10 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ],
 
-                      // ЖУРНАЛ СОБЫТИЙ
-                      const SizedBox(height: 24), // УВЕЛИЧЕН
-                      Container(
-                        decoration: BoxDecoration(
-                          color: TitanicTheme.panelDark.withOpacity(0.9),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: TitanicTheme.raptureGold.withOpacity(0.3),
-                            width: 1.5,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.4),
-                              blurRadius: 20,
-                              offset: const Offset(0, 8),
-                            ),
-                          ],
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.all(20),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Журнал событий',
-                                style: TextStyle(
-                                  fontFamily: 'CormorantGaramond',
-                                  fontSize: isSmallScreen ? 22 : 24, // УВЕЛИЧЕН
-                                  fontWeight: FontWeight.w700,
-                                  color: TitanicTheme.ivoryCream,
-                                  letterSpacing: 0.5,
-                                ),
-                              ),
-                              const SizedBox(height: 20), // УВЕЛИЧЕН
+                      const SizedBox(height: 24),
+                      _buildJournalBlock(isSmallScreen),
 
-                              if (_journalEntries.isEmpty)
-                                Padding(
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 40), // УВЕЛИЧЕН
-                                  child: Column(
-                                    children: [
-                                      Icon(
-                                        Icons.history_toggle_off,
-                                        size: 60, // УВЕЛИЧЕН
-                                        color: TitanicTheme.ivoryCream
-                                            .withOpacity(0.2),
-                                      ),
-                                      const SizedBox(height: 16), // УВЕЛИЧЕН
-                                      Text(
-                                        'История событий пуста',
-                                        style: TextStyle(
-                                          fontFamily: 'Cinzel',
-                                          fontSize: 15, // УВЕЛИЧЕН
-                                          color: TitanicTheme.ivoryCream
-                                              .withOpacity(0.5),
-                                          letterSpacing: 0.5,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                )
-                              else
-                                ..._journalEntries.take(5).map((entry) {
-                                  return Container(
-                                    margin: const EdgeInsets.only(bottom: 16), // УВЕЛИЧЕН
-                                    decoration: BoxDecoration(
-                                      color: TitanicTheme.surfaceNavy
-                                          .withOpacity(0.35), // БОЛЬШЕ НЕПРОЗРАЧНОСТИ
-                                      borderRadius: BorderRadius.circular(14), // УВЕЛИЧЕН
-                                      border: Border.all(
-                                        color: TitanicTheme.raptureGold
-                                            .withOpacity(0.15), // БОЛЬШЕ НЕПРОЗРАЧНОСТИ
-                                        width: 1.5, // УВЕЛИЧЕН
-                                      ),
-                                    ),
-                                    child: Padding(
-                                      padding: const EdgeInsets.all(14), // УВЕЛИЧЕН
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            entry['title']?.toString() ??
-                                                'Событие',
-                                            style: TextStyle(
-                                              fontFamily: 'Cinzel',
-                                              fontSize: 15, // УВЕЛИЧЕН
-                                              fontWeight: FontWeight.w600,
-                                              color: TitanicTheme.ivoryCream,
-                                              letterSpacing: 0.3,
-                                            ),
-                                            maxLines: 2,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                          const SizedBox(height: 10), // УВЕЛИЧЕН
-                                          Text(
-                                            entry['message']?.toString() ?? '',
-                                            style: TextStyle(
-                                              fontFamily: 'Cinzel',
-                                              fontSize: 14, // УВЕЛИЧЕН
-                                              color: TitanicTheme.ivoryCream
-                                                  .withOpacity(0.85),
-                                              letterSpacing: 0.3,
-                                              height: 1.4,
-                                            ),
-                                            maxLines: 3,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                          const SizedBox(height: 10), // УВЕЛИЧЕН
-                                          Row(
-                                            mainAxisAlignment:
-                                                MainAxisAlignment.end,
-                                            children: [
-                                              Icon(
-                                                Icons.access_time,
-                                                size: 14, // УВЕЛИЧЕН
-                                                color: TitanicTheme.ivoryCream
-                                                    .withOpacity(0.5),
-                                              ),
-                                              const SizedBox(width: 8), // УВЕЛИЧЕН
-                                              Text(
-                                                _formatJournalDate(entry[
-                                                        'created_at']
-                                                    ?.toString()),
-                                                style: TextStyle(
-                                                  fontFamily: 'Cinzel',
-                                                  fontSize: 12, // УВЕЛИЧЕН
-                                                  color: TitanicTheme.ivoryCream
-                                                      .withOpacity(0.5),
-                                                  letterSpacing: 0.3,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  );
-                                }).toList(),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 50), // УВЕЛИЧЕН
+                      const SizedBox(height: 50),
                     ],
                   ),
                 ),
@@ -2134,7 +1643,278 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Вспомогательные методы для форматирования
+  // -----------------------
+  // Верхние кристальные кнопки
+  // -----------------------
+  Widget _buildCrystalButton({
+    required IconData icon,
+    required VoidCallback onPressed,
+    Color iconColor = TitanicTheme.raptureGold,
+  }) {
+    return GestureDetector(
+      onTap: onPressed,
+      child: SizedBox(
+        width: 44,
+        height: 44,
+        child: Transform.rotate(
+          angle: 45 * 3.1415926535 / 180,
+          child: Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  TitanicTheme.surfaceNavy.withOpacity(0.9),
+                  TitanicTheme.abyssalBlue.withOpacity(0.8),
+                ],
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.5),
+                  blurRadius: 8,
+                  offset: const Offset(3, 3),
+                ),
+                BoxShadow(
+                  color: TitanicTheme.raptureGold.withOpacity(0.3),
+                  blurRadius: 4,
+                  offset: const Offset(-2, -2),
+                ),
+              ],
+              border: Border.all(
+                color: TitanicTheme.raptureGold.withOpacity(0.3),
+                width: 1.2,
+              ),
+            ),
+            child: Center(
+              child: Transform.rotate(
+                angle: -45 * 3.1415926535 / 180,
+                child: Icon(
+                  icon,
+                  color: iconColor,
+                  size: 22,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // -----------------------
+  // Avatar
+  // -----------------------
+  String _getRoleImagePath(String role) {
+    final roleLower = role.toLowerCase();
+
+    if (roleLower.contains('мафия') || roleLower.contains('mafia')) {
+      return 'assets/mafia.png';
+    } else if (roleLower.contains('голливуд') ||
+        roleLower.contains('hollywood')) {
+      return 'assets/hollywood.png';
+    } else if (roleLower.contains('экономист') ||
+        roleLower.contains('economist')) {
+      return 'assets/economist.png';
+    } else if (roleLower.contains('журналист') ||
+        roleLower.contains('journalist')) {
+      return 'assets/journalist.png';
+    } else if (roleLower.contains('общественный') ||
+        roleLower.contains('public') ||
+        roleLower.contains('деятель')) {
+      return 'assets/public_figure.png';
+    } else if (roleLower.contains('политик') ||
+        roleLower.contains('politician')) {
+      return 'assets/politic.png';
+    } else {
+      return 'assets/default_role.png';
+    }
+  }
+
+  Widget _buildRoleAvatar(String role) {
+    final imagePath = _getRoleImagePath(role);
+
+    return Container(
+      width: 90,
+      height: 90,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: TitanicTheme.abyssalBlue,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.5),
+            blurRadius: 15,
+            offset: const Offset(0, 8),
+          ),
+          BoxShadow(
+            color: TitanicTheme.raptureGold.withOpacity(0.3),
+            blurRadius: 10,
+            spreadRadius: 2,
+          ),
+        ],
+        border: Border.all(
+          color: TitanicTheme.raptureGold.withOpacity(0.5),
+          width: 2.5,
+        ),
+      ),
+      child: Center(
+        child: ColorFiltered(
+          colorFilter: ColorFilter.mode(
+            TitanicTheme.raptureGold,
+            BlendMode.srcIn,
+          ),
+          child: Image.asset(
+            imagePath,
+            width: 56,
+            height: 56,
+            errorBuilder: (context, error, stackTrace) {
+              return Icon(
+                Icons.person,
+                size: 56,
+                color: TitanicTheme.raptureGold,
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  // -----------------------
+  // Journal block
+  // -----------------------
+  Widget _buildJournalBlock(bool isSmallScreen) {
+    return Container(
+      decoration: BoxDecoration(
+        color: TitanicTheme.panelDark.withOpacity(0.9),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: TitanicTheme.raptureGold.withOpacity(0.3),
+          width: 1.5,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.4),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Журнал событий',
+              style: TextStyle(
+                fontFamily: 'CormorantGaramond',
+                fontSize: isSmallScreen ? 22 : 24,
+                fontWeight: FontWeight.w700,
+                color: TitanicTheme.ivoryCream,
+                letterSpacing: 0.5,
+              ),
+            ),
+            const SizedBox(height: 20),
+            if (_journalEntries.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 40),
+                child: Column(
+                  children: [
+                    Icon(
+                      Icons.history_toggle_off,
+                      size: 60,
+                      color: TitanicTheme.ivoryCream.withOpacity(0.2),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'История событий пуста',
+                      style: TextStyle(
+                        fontFamily: 'Cinzel',
+                        fontSize: 15,
+                        color: TitanicTheme.ivoryCream.withOpacity(0.5),
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            else
+              ..._journalEntries.take(5).map((entry) {
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: TitanicTheme.surfaceNavy.withOpacity(0.35),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: TitanicTheme.raptureGold.withOpacity(0.15),
+                      width: 1.5,
+                    ),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          entry['title']?.toString() ?? 'Событие',
+                          style: TextStyle(
+                            fontFamily: 'Cinzel',
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: TitanicTheme.ivoryCream,
+                            letterSpacing: 0.3,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          entry['message']?.toString() ?? '',
+                          style: TextStyle(
+                            fontFamily: 'Cinzel',
+                            fontSize: 14,
+                            color: TitanicTheme.ivoryCream.withOpacity(0.85),
+                            letterSpacing: 0.3,
+                            height: 1.4,
+                          ),
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 10),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            Icon(
+                              Icons.access_time,
+                              size: 14,
+                              color: TitanicTheme.ivoryCream.withOpacity(0.5),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              _formatJournalDate(entry['created_at']?.toString()),
+                              style: TextStyle(
+                                fontFamily: 'Cinzel',
+                                fontSize: 12,
+                                color: TitanicTheme.ivoryCream.withOpacity(0.5),
+                                letterSpacing: 0.3,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }).toList(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // -----------------------
+  // Color helpers + date
+  // -----------------------
   Color _getColorFromString(String colorName) {
     switch (colorName.toLowerCase()) {
       case 'красный':
@@ -2192,4 +1972,5 @@ Future<void> openBuyTurnFlow({
   required Future<void> Function() onRefreshProfile,
   required Function(String) showMessage,
 }) async {
+  // Заглушка — оставлено как было в исходнике пользователя
 }

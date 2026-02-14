@@ -3,7 +3,9 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:titanic/services/game_service.dart';
+import 'package:titanic/services/enterprise_service.dart'; // ИМПОРТ НОВОГО СЕРВИСА
 
 typedef ListenCompleteCallback = Future<void> Function(Map<String, dynamic>? rpcResult);
 
@@ -80,7 +82,8 @@ class _ListenButtonState extends State<ListenButton> {
       _dbg('no speech id available');
       if (mounted) {
         setState(() => _loading = false);
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Нет активной речи (id). Попробуйте чуть позже.')));
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Нет активной речи (id). Попробуйте чуть позже.')));
       }
       return;
     }
@@ -90,10 +93,13 @@ class _ListenButtonState extends State<ListenButton> {
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
         title: const Text('Прослушал речь жизни'),
-        content: const Text('Вы прослушали речь жизни и она произвела на вас впечатление?\n\nЕсли Да — учтите, ваш цвет изменится!'),
+        content: const Text(
+            'Вы прослушали речь жизни и она произвела на вас впечатление?\n\nЕсли Да — учтите, ваш цвет изменится!'),
         actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Нет')),
-          ElevatedButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Да')),
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Нет')),
+          ElevatedButton(
+              onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Да')),
         ],
       ),
     );
@@ -105,13 +111,51 @@ class _ListenButtonState extends State<ListenButton> {
     }
 
     _dbg('calling rpcListenSpeech with sid=$sid user=${widget.userId} agree=$agree n=$_fixedN');
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Отправка запроса...')));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('Отправка запроса...')));
 
     try {
-      final parsed = await _svc.rpcListenSpeech(speechId: sid, userId: widget.userId, agree: agree, n: _fixedN);
+      final parsed = await _svc.rpcListenSpeech(
+        speechId: sid,
+        userId: widget.userId,
+        agree: agree,
+        n: _fixedN,
+      );
       _dbg('rpcListenSpeech parsed -> $parsed');
 
       final status = parsed['status']?.toString() ?? '';
+
+      // ---- ЕСЛИ ЦВЕТ БЫЛ ИЗМЕНЁН И ПОЛЬЗОВАТЕЛЬ - ЭКОНОМИСТ - ОБНОВЛЯЕМ ПРЕДПРИЯТИЯ ----
+      if (agree && status == 'changed_color') {
+        final newColor = parsed['new_color']?.toString() ?? widget.speechActorId ?? '';
+        if (newColor.isNotEmpty) {
+          try {
+            final supabase = Supabase.instance.client;
+            final userRes = await supabase
+                .from('user_credentials')
+                .select('role')
+                .eq('id', widget.userId)
+                .maybeSingle();
+            final role = (userRes?['role'] ?? '').toString().toLowerCase();
+            final isEconomist = role == 'economist' || role == 'экономист';
+            if (isEconomist) {
+              final enterpriseService = EnterpriseService(supabase);
+              await enterpriseService.updateEnterprisesColorForEconomist(
+                economistId: widget.userId,
+                newColor: newColor,
+              );
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Цвет ваших предприятий обновлён')),
+                );
+              }
+            }
+          } catch (e) {
+            debugPrint('ListenButton: ошибка обновления предприятий экономиста: $e');
+          }
+        }
+      }
+      // ------------------------------------------------------------------------------------
 
       if (agree && status == 'changed_color') {
         final newColor = parsed['new_color']?.toString() ?? widget.speechActorId ?? '(новый цвет)';
@@ -120,8 +164,12 @@ class _ListenButtonState extends State<ListenButton> {
           context: context,
           builder: (_) => AlertDialog(
             title: const Text('Цвет изменён'),
-            content: Text('Ваш цвет изменён на $newColor.\nВ банк цвета добавлено ${addedM.toString()} майндов.'),
-            actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('ОК'))],
+            content: Text(
+                'Ваш цвет изменён на $newColor.\nВ банк цвета добавлено ${addedM.toString()} майндов.'),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.of(context).pop(), child: const Text('ОК'))
+            ],
           ),
         );
       } else if (!agree && status == 'kept_color') {
@@ -130,23 +178,28 @@ class _ListenButtonState extends State<ListenButton> {
           context: context,
           builder: (_) => AlertDialog(
             title: const Text('Спасибо'),
-            content: Text('Вы остались верны себе, это достойно!\nВам начислено ${addedV.toString()} войсов.'),
-            actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('ОК'))],
+            content: Text(
+                'Вы остались верны себе, это достойно!\nВам начислено ${addedV.toString()} войсов.'),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.of(context).pop(), child: const Text('ОК'))
+            ],
           ),
         );
       } else {
-        // Unexpected but show raw
         await showDialog<void>(
           context: context,
           builder: (_) => AlertDialog(
             title: const Text('Результат'),
             content: Text(parsed.toString()),
-            actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('ОК'))],
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.of(context).pop(), child: const Text('ОК'))
+            ],
           ),
         );
       }
 
-      // success -> mark session listened and notify parent
       setState(() => _sessionListened = true);
       if (widget.onListenComplete != null) {
         try {
@@ -155,12 +208,13 @@ class _ListenButtonState extends State<ListenButton> {
           _dbg('onListenComplete error: $e\n$st');
         }
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Прослушивание зафиксировано.')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Прослушивание зафиксировано.')));
       }
     } catch (e, st) {
       _dbg('rpcListenSpeech failed: $e\n$st');
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка: ${e.toString()}')));
-      // Do not mark as listened
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Ошибка: ${e.toString()}')));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -168,13 +222,18 @@ class _ListenButtonState extends State<ListenButton> {
 
   @override
   Widget build(BuildContext context) {
-    final label = (_sessionListened || widget.alreadyListened) ? 'Уже прослушал' : 'Прослушал речь жизни';
+    final label = (_sessionListened || widget.alreadyListened)
+        ? 'Уже прослушал'
+        : 'Прослушал речь жизни';
     return SizedBox(
       width: double.infinity,
       child: ElevatedButton(
         onPressed: _isEnabled ? _handlePress : null,
-        style: ElevatedButton.styleFrom(backgroundColor: _isEnabled ? Colors.blueAccent : Colors.grey),
-        child: _loading ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : Text(label),
+        style: ElevatedButton.styleFrom(
+            backgroundColor: _isEnabled ? Colors.blueAccent : Colors.grey),
+        child: _loading
+            ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+            : Text(label),
       ),
     );
   }

@@ -25,6 +25,35 @@ class _InventoryScreenState extends State<InventoryScreen> {
   List<Map<String, dynamic>> _incomingOffers = [];
   bool _loadingOffers = false;
 
+  // ✅ NEW: enterprises from user_credentials.enterprises (json/jsonb)
+  List<Map<String, dynamic>> _enterprises = [];
+
+  // ✅ Цвета (СЛОВА) -> реальные цвета (для кружка)
+  static const List<String> _allowedColorWords = [
+    'красный',
+    'жёлтый',
+    'синий',
+    'малиновый',
+    'зелёный',
+  ];
+
+  static final Map<String, Color> _wordToColor = {
+    'красный': Colors.red,
+    'жёлтый': Colors.amber,
+    'синий': Colors.blue,
+    'малиновый': Colors.pink,
+    'зелёный': Colors.green,
+  };
+
+  // ✅ Backward compatibility: hex -> слово (если старые предприятия сохранены hex’ом)
+  static final Map<String, String> _hexToWord = {
+    '#F44336': 'красный',
+    '#FFC107': 'жёлтый',
+    '#2196F3': 'синий',
+    '#E91E63': 'малиновый',
+    '#4CAF50': 'зелёный',
+  };
+
   @override
   void initState() {
     super.initState();
@@ -39,34 +68,45 @@ class _InventoryScreenState extends State<InventoryScreen> {
     });
 
     try {
+      // ✅ NEW: select enterprises too
       final dynamic res = await supabase
           .from('user_credentials')
-          .select('inventory')
+          .select('inventory, enterprises')
           .eq('id', widget.user.id)
           .maybeSingle();
 
       dynamic inv;
+      dynamic enterprises;
+
       if (res == null) {
         inv = null;
+        enterprises = null;
       } else if (res is Map<String, dynamic>) {
         inv = res['inventory'];
+        enterprises = res['enterprises'];
       } else {
         inv = null;
+        enterprises = null;
       }
 
-      final parsed = _parseInventoryToList(inv);
+      final parsedInv = _parseInventoryToList(inv);
+      final parsedEnt = _parseEnterprisesToList(enterprises);
+
       setState(() {
-        _itemsList = parsed;
+        _itemsList = parsedInv;
+        _enterprises = parsedEnt;
       });
     } on PostgrestException catch (e) {
       setState(() {
         _error = 'Ошибка загрузки инвентаря: ${e.message}';
         _itemsList = [];
+        _enterprises = [];
       });
     } catch (e) {
       setState(() {
         _error = 'Ошибка загрузки инвентаря: ${e.toString()}';
         _itemsList = [];
+        _enterprises = [];
       });
     } finally {
       setState(() {
@@ -143,6 +183,37 @@ class _InventoryScreenState extends State<InventoryScreen> {
     return out;
   }
 
+  // ✅ NEW: enterprises parser (json/jsonb or string)
+  List<Map<String, dynamic>> _parseEnterprisesToList(dynamic enterprises) {
+    final List<Map<String, dynamic>> out = [];
+    if (enterprises == null) return out;
+
+    dynamic decoded = enterprises;
+    if (enterprises is String) {
+      try {
+        decoded = jsonDecode(enterprises);
+      } catch (_) {
+        decoded = null;
+      }
+    }
+
+    if (decoded == null) return out;
+
+    if (decoded is List) {
+      for (final el in decoded) {
+        if (el is Map) out.add(Map<String, dynamic>.from(el as Map));
+      }
+      return out;
+    }
+
+    if (decoded is Map) {
+      out.add(Map<String, dynamic>.from(decoded as Map));
+      return out;
+    }
+
+    return out;
+  }
+
   int _totalVoicesSum() {
     int s = 0;
     for (final it in _itemsList) {
@@ -150,6 +221,28 @@ class _InventoryScreenState extends State<InventoryScreen> {
       s += v;
     }
     return s;
+  }
+
+  // ✅ Нормализуем цвет предприятия в "слово"
+  String _normalizeEnterpriseColorWord(dynamic rawColor) {
+    final c = (rawColor ?? '').toString().trim().toLowerCase();
+
+    // Уже слово
+    if (_allowedColorWords.contains(c)) return c;
+
+    // Старый hex
+    final hex = c.toUpperCase();
+    if (_hexToWord.containsKey(hex)) return _hexToWord[hex]!;
+    final hex2 = c.startsWith('#') ? c.toUpperCase() : '#${c.toUpperCase()}';
+    if (_hexToWord.containsKey(hex2)) return _hexToWord[hex2]!;
+
+    // fallback
+    return '—';
+  }
+
+  Color? _colorFromWord(String word) {
+    final w = word.trim().toLowerCase();
+    return _wordToColor[w];
   }
 
   Future<void> _openSellToPlayer(Map<String, dynamic> item) async {
@@ -1229,6 +1322,104 @@ class _InventoryScreenState extends State<InventoryScreen> {
     );
   }
 
+  // ✅ NEW: Enterprises block (shows color WORD)
+  Widget _buildEnterprisesBlock() {
+    if (_enterprises.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: TitanicTheme.artDecoPanelDecoration(),
+      child: ExpansionTile(
+        tilePadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+        leading: Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            gradient: TitanicTheme.goldGradient,
+            shape: BoxShape.circle,
+          ),
+          child: Icon(
+            Icons.business_center,
+            color: Colors.black,
+            size: 20,
+          ),
+        ),
+        title: Text(
+          'Предприятия',
+          style: TextStyle(
+            fontFamily: 'CormorantGaramond',
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+            color: TitanicTheme.ivoryCream,
+          ),
+        ),
+        subtitle: Text(
+          '${_enterprises.length} шт.',
+          style: TextStyle(
+            fontFamily: 'Cinzel',
+            color: TitanicTheme.ivoryCream.withOpacity(0.7),
+          ),
+        ),
+        children: _enterprises.map((e) {
+          final name = (e['name'] ?? 'Предприятие').toString();
+          final region = (e['region'] ?? '').toString();
+          final colorWord = _normalizeEnterpriseColorWord(e['color']);
+          final investors = (e['investors'] is List) ? (e['investors'] as List) : const [];
+          final c = _colorFromWord(colorWord);
+
+          return Container(
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            decoration: BoxDecoration(
+              color: TitanicTheme.surfaceNavy.withOpacity(0.5),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: TitanicTheme.raptureGold.withOpacity(0.2)),
+            ),
+            child: ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              leading: Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: (c ?? TitanicTheme.surfaceNavy).withOpacity(0.25),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: TitanicTheme.raptureGold.withOpacity(0.25)),
+                ),
+                child: Icon(
+                  Icons.apartment,
+                  color: c ?? TitanicTheme.raptureGold,
+                  size: 20,
+                ),
+              ),
+              title: Text(
+                name,
+                style: TextStyle(
+                  fontFamily: 'Cinzel',
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: TitanicTheme.ivoryCream,
+                ),
+              ),
+              subtitle: Text(
+                [
+                  if (region.isNotEmpty) region,
+                  if (colorWord != '—') 'Цвет: $colorWord',
+                  'Инвесторов: ${investors.length}',
+                ].join(' • '),
+                style: TextStyle(
+                  fontFamily: 'Cinzel',
+                  fontSize: 12,
+                  color: TitanicTheme.ivoryCream.withOpacity(0.7),
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
   Widget _buildOffersList() {
     if (_loadingOffers) {
       return Center(
@@ -1397,6 +1588,8 @@ class _InventoryScreenState extends State<InventoryScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final bool isCompletelyEmpty = _itemsList.isEmpty && _enterprises.isEmpty;
+
     return Scaffold(
       appBar: AppBar(
         title: Row(
@@ -1477,10 +1670,11 @@ class _InventoryScreenState extends State<InventoryScreen> {
                           ),
                         ),
                       )
-                    : _itemsList.isEmpty
+                    : isCompletelyEmpty
                         ? Column(
                             children: [
                               _buildOffersList(),
+                              _buildEnterprisesBlock(),
                               Expanded(
                                 child: Center(
                                   child: Container(
@@ -1511,6 +1705,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                                             fontFamily: 'Cinzel',
                                             color: TitanicTheme.ivoryCream.withOpacity(0.7),
                                           ),
+                                          textAlign: TextAlign.center,
                                         ),
                                       ],
                                     ),
@@ -1522,6 +1717,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                         : Column(
                             children: [
                               _buildOffersList(),
+                              _buildEnterprisesBlock(),
                               Expanded(
                                 child: ListView(
                                   children: [

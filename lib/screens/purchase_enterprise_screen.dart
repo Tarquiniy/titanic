@@ -47,6 +47,14 @@ class _PurchaseEnterpriseScreenState extends State<PurchaseEnterpriseScreen> {
   @override
   void initState() {
     super.initState();
+
+    // Цвет предприятия = цвет покупающего пользователя (экономиста).
+    // В user.color хранится название ("синий", "красный"...).
+    // Здесь переводим название в hex из _colorOptions только для отображения кружка в UI.
+    final userColorName = (widget.currentUser.color ?? '').toString().toLowerCase().trim();
+    final hex = _colorOptions[userColorName];
+    _selectedColor = hex ?? _colorOptions.values.first;
+
     _investors.add(_InvestorRow());
     _loadPlayers();
   }
@@ -88,7 +96,6 @@ class _PurchaseEnterpriseScreenState extends State<PurchaseEnterpriseScreen> {
     });
 
     final name = _nameCtrl.text.trim();
-    final colorHex = _selectedColor ?? '';
     final region = _selectedRegion ?? widget.currentUser.region ?? '';
 
     final List<Map<String, dynamic>> investorsLog = [];
@@ -104,7 +111,7 @@ class _PurchaseEnterpriseScreenState extends State<PurchaseEnterpriseScreen> {
     }
 
     try {
-      final fresh = await supabase.from('user_credentials').select('v_balance, inventory').eq('id', widget.currentUser.id).maybeSingle();
+      final fresh = await supabase.from('user_credentials').select('v_balance, enterprises').eq('id', widget.currentUser.id).maybeSingle();
       if (fresh is! Map<String, dynamic>) throw 'Не удалось получить профиль';
       final vbalRaw = fresh['v_balance'];
       final currentBalance = (vbalRaw is num) ? vbalRaw.toDouble() : double.tryParse(vbalRaw?.toString() ?? '') ?? 0.0;
@@ -114,35 +121,46 @@ class _PurchaseEnterpriseScreenState extends State<PurchaseEnterpriseScreen> {
         return;
       }
 
-      dynamic inv = fresh['inventory'];
-      List<dynamic> invList = [];
-      if (inv == null) invList = [];
-      else if (inv is String) {
+      dynamic enterprises = fresh['enterprises'];
+      List<dynamic> entList = [];
+      if (enterprises == null) {
+        entList = [];
+      } else if (enterprises is String) {
         try {
-          final d = jsonDecode(inv);
-          if (d is List) invList = List.from(d);
-          else if (d is Map) invList = [d];
+          final d = jsonDecode(enterprises);
+          if (d is List) entList = List.from(d);
+          else if (d is Map) entList = [d];
         } catch (_) {
-          invList = [];
+          entList = [];
         }
-      } else if (inv is List) invList = List.from(inv);
-      else if (inv is Map) invList = [inv];
-      else invList = [];
+      } else if (enterprises is List) {
+        entList = List.from(enterprises);
+      } else if (enterprises is Map) {
+        entList = [enterprises];
+      } else {
+        entList = [];
+      }
 
-      final Map<String, dynamic> enterpriseItem = {
-        'name': 'Предприятие: $name',
-        'count': 0,
-        'meta': {
-          'color': colorHex,
-          'region': region,
-          'investors': investorsLog,
-          'created_at': DateTime.now().toIso8601String(),
-        },
+      // ✅ Объект предприятия, который хранится в user_credentials.enterprises (json)
+      // Важно: color хранится словом (widget.currentUser.color)
+      // ✅ NEW: добавляем p_payout = 200
+      final Map<String, dynamic> enterprise = {
+        'id': DateTime.now().microsecondsSinceEpoch.toString(),
+        'name': name,
+        'region': region,
+        'color': widget.currentUser.color,
+        'investors': investorsLog,
+        'created_at': DateTime.now().toIso8601String(),
+        'p_payout': 200,
       };
 
-      invList.add(enterpriseItem);
+      entList.add(enterprise);
+
       final newBalance = currentBalance - 200.0;
-      final updateObj = {'v_balance': newBalance, 'inventory': invList};
+      final updateObj = {
+        'v_balance': newBalance,
+        'enterprises': entList,
+      };
 
       final upd = await supabase.from('user_credentials').update(updateObj).eq('id', widget.currentUser.id).select().maybeSingle();
       if (upd == null) throw 'Не удалось сохранить предприятие (сервер вернул null)';
@@ -165,46 +183,46 @@ class _PurchaseEnterpriseScreenState extends State<PurchaseEnterpriseScreen> {
     return await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
-      builder: (ctx) {
+      builder: (context) {
         List<Map<String, dynamic>> filtered = List.from(_players);
-        return StatefulBuilder(builder: (ctx2, setStateSheet) {
-          void doFilter(String q) {
-            query = q;
-            final ql = q.trim().toLowerCase();
-            if (ql.isEmpty) filtered = List.from(_players);
-            else {
-              filtered = _players.where((p) {
-                final fn = (p['first_name'] ?? '').toString().toLowerCase();
-                final ln = (p['last_name'] ?? '').toString().toLowerCase();
-                final un = (p['telegram_username'] ?? '').toString().toLowerCase();
-                return fn.contains(ql) || ln.contains(ql) || un.contains(ql);
-              }).toList();
-            }
-            setStateSheet(() {});
-          }
-
-          return SafeArea(
-            child: FractionallySizedBox(
-              heightFactor: 0.85,
-              child: Column(
-                children: [
-                  Padding(padding: const EdgeInsets.all(12.0), child: TextField(decoration: const InputDecoration(hintText: 'Поиск игрока', prefixIcon: Icon(Icons.search)), onChanged: (s) => doFilter(s))),
-                  const Divider(height: 0),
-                  Expanded(
-                    child: ListView.separated(
-                      itemCount: filtered.length + 1,
-                      separatorBuilder: (_, __) => const Divider(height: 0),
-                      itemBuilder: (context, idx) {
-                        if (idx == 0) return ListTile(title: const Text('— выбрать пустым —'), onTap: () => Navigator.of(ctx).pop(null));
-                        final p = filtered[idx - 1];
-                        final id = p['id']?.toString();
-                        final name = ((p['first_name'] ?? '') as String).toString().trim().isEmpty ? (p['telegram_username'] ?? '').toString() : '${p['first_name'] ?? ''} ${p['last_name'] ?? ''}';
-                        return ListTile(title: Text(name), onTap: () => Navigator.of(ctx).pop(id));
-                      },
-                    ),
+        return StatefulBuilder(builder: (context, setModal) {
+          filtered = _players.where((p) {
+            final n = '${p['first_name'] ?? ''} ${p['last_name'] ?? ''} ${p['telegram_username'] ?? ''}'.toLowerCase();
+            return n.contains(query.toLowerCase());
+          }).toList();
+          return Padding(
+            padding: EdgeInsets.only(
+              left: 12,
+              right: 12,
+              top: 12,
+              bottom: MediaQuery.of(context).viewInsets.bottom + 12,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Поиск игрока'),
+                  onChanged: (v) => setModal(() => query = v),
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  height: 320,
+                  child: ListView.builder(
+                    itemCount: filtered.length,
+                    itemBuilder: (_, i) {
+                      final p = filtered[i];
+                      final label = (((p['first_name'] ?? '').toString().trim().isEmpty)
+                              ? (p['telegram_username'] ?? '')
+                              : '${p['first_name'] ?? ''} ${p['last_name'] ?? ''}')
+                          .toString();
+                      return ListTile(
+                        title: Text(label),
+                        onTap: () => Navigator.pop(context, p['id']?.toString()),
+                      );
+                    },
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           );
         });
@@ -214,100 +232,151 @@ class _PurchaseEnterpriseScreenState extends State<PurchaseEnterpriseScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final colorHex = _selectedColor ?? '';
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Купить предприятие'),
-      ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
-              padding: const EdgeInsets.all(12),
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  children: [
-                    TextFormField(controller: _nameCtrl, decoration: const InputDecoration(labelText: 'Название предприятия'), validator: (v) => (v == null || v.trim().isEmpty) ? 'Введите название' : null),
-                    const SizedBox(height: 12),
-                    Row(children: [
-                      const Text('Цвет:'),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: DropdownButtonFormField<String>(
-                          value: _selectedColor,
-                          items: _colorOptions.entries.map((e) => DropdownMenuItem(value: e.value, child: Row(children: [Container(width: 18, height: 18, color: Color(int.parse(e.value.substring(1), radix: 16) | 0xFF000000)), const SizedBox(width: 8), Text(e.key)])) ).toList(),
-                          onChanged: (v) => setState(() => _selectedColor = v),
-                          decoration: const InputDecoration(hintText: 'Выберите цвет'),
-                          validator: (v) => (v == null || v.isEmpty) ? 'Выберите цвет' : null,
-                        ),
-                      ),
-                    ]),
-                    const SizedBox(height: 12),
-                    Row(children: [
-                      const Text('Регион:'),
-                      const SizedBox(width: 12),
-                      Expanded(child: DropdownButtonFormField<String>(value: _selectedRegion ?? widget.currentUser.region, items: _fixedRegions.map((r) => DropdownMenuItem(value: r, child: Text(r))).toList(), onChanged: (v) => setState(() => _selectedRegion = v), decoration: const InputDecoration(hintText: 'Выберите регион'), validator: (v) => (v == null || v.isEmpty) ? 'Выберите регион' : null)),
-                    ]),
-                    const SizedBox(height: 16),
-                    Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('Инвесторы (до 10)', style: TextStyle(fontWeight: FontWeight.w600)), TextButton(onPressed: _investors.length >= 10 ? null : _addInvestorRow, child: const Text('Добавить инвестора'))]),
-                    const SizedBox(height: 8),
-                    ..._buildInvestorRows(),
-                    const SizedBox(height: 20),
-                    ElevatedButton(onPressed: _onSubmit, child: const Text('Купить (200 V)')),
-                    const SizedBox(height: 12),
-                    if (_error != null) Text(_error!, style: const TextStyle(color: Colors.red)),
-                  ],
+      appBar: AppBar(title: const Text('Купить предприятие')),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            children: [
+              if (_error != null) ...[
+                Text(_error!, style: const TextStyle(color: Colors.red)),
+                const SizedBox(height: 12),
+              ],
+              TextFormField(
+                controller: _nameCtrl,
+                decoration: const InputDecoration(labelText: 'Название предприятия'),
+                validator: (v) => (v == null || v.trim().isEmpty) ? 'Введите название' : null,
+              ),
+              const SizedBox(height: 12),
+
+              // Цвет фиксируется автоматически по пользователю
+              Row(
+                children: [
+                  const Text('Цвет:'),
+                  const SizedBox(width: 12),
+                  Container(
+                    width: 14,
+                    height: 14,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: _hexToColor(colorHex) ?? Colors.grey,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(widget.currentUser.color ?? '—'),
+                ],
+              ),
+
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                value: (_selectedRegion != null && _fixedRegions.contains(_selectedRegion))
+                    ? _selectedRegion
+                    : (_fixedRegions.contains(widget.currentUser.region) ? widget.currentUser.region : null),
+                decoration: const InputDecoration(labelText: 'Регион'),
+                items: _fixedRegions.toSet().map((r) => DropdownMenuItem(value: r, child: Text(r))).toList(),
+                onChanged: (v) => setState(() => _selectedRegion = v),
+                validator: (v) => (v == null || v.isEmpty) ? 'Выберите регион' : null,
+              ),
+              const SizedBox(height: 14),
+
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text('Инвесторы (до 10)', style: Theme.of(context).textTheme.titleMedium),
+              ),
+              const SizedBox(height: 8),
+
+              for (int i = 0; i < _investors.length; i++) _buildInvestorRow(i),
+
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: _investors.length >= 10 ? null : _addInvestorRow,
+                  icon: const Icon(Icons.add),
+                  label: const Text('Добавить инвестора'),
                 ),
               ),
-            ),
+
+              const SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: _loading ? null : _onSubmit,
+                child: _loading ? const CircularProgressIndicator() : const Text('Купить (200 V)'),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
-  List<Widget> _buildInvestorRows() {
-    final List<Widget> rows = [];
-    for (var i = 0; i < _investors.length; i++) {
-      final r = _investors[i];
-      final selectedName = _players.firstWhere((p) => p['id']?.toString() == r.selectedPlayerId, orElse: () => {}).isNotEmpty
-          ? (_players.firstWhere((p) => p['id']?.toString() == r.selectedPlayerId)['first_name']?.toString().trim().isEmpty ?? true
-              ? (_players.firstWhere((p) => p['id']?.toString() == r.selectedPlayerId)['telegram_username'] ?? '')
-              : '${_players.firstWhere((p) => p['id']?.toString() == r.selectedPlayerId)['first_name'] ?? ''} ${_players.firstWhere((p) => p['id']?.toString() == r.selectedPlayerId)['last_name'] ?? ''}')
-          : null;
-      rows.add(Card(
-        margin: const EdgeInsets.symmetric(vertical: 6),
-        child: Padding(
-          padding: const EdgeInsets.all(8.0),
-          child: Column(children: [
-            Row(children: [
-              Expanded(
-                child: GestureDetector(
-                  onTap: () async {
-                    final selected = await _showPlayerPicker(i);
-                    setState(() {
-                      r.selectedPlayerId = selected;
-                    });
-                  },
-                  child: AbsorbPointer(
-                    child: TextFormField(
-                      decoration: InputDecoration(labelText: 'Игрок', hintText: '— выбрать игрока —', suffixIcon: const Icon(Icons.search)),
-                      controller: TextEditingController(text: selectedName ?? ''),
-                      readOnly: true,
-                    ),
-                  ),
-                ),
+  Widget _buildInvestorRow(int index) {
+    final row = _investors[index];
+    final selectedId = row.selectedPlayerId;
+    final selectedPlayer = _players.firstWhere(
+      (p) => p['id']?.toString() == selectedId,
+      orElse: () => {},
+    );
+    final selectedLabel = selectedPlayer.isEmpty
+        ? (selectedId == null ? 'Выберите игрока' : 'Игрок')
+        : (((selectedPlayer['first_name'] ?? '').toString().trim().isEmpty)
+                ? (selectedPlayer['telegram_username'] ?? '')
+                : '${selectedPlayer['first_name'] ?? ''} ${selectedPlayer['last_name'] ?? ''}')
+            .toString();
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.grey.shade300),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(child: Text(selectedLabel)),
+              TextButton(
+                onPressed: () async {
+                  final picked = await _showPlayerPicker(index);
+                  if (picked == null) return;
+                  setState(() => row.selectedPlayerId = picked);
+                },
+                child: const Text('Выбрать'),
               ),
-              const SizedBox(width: 12),
-              SizedBox(width: 120, child: TextFormField(controller: r.controllerAmount, decoration: const InputDecoration(labelText: 'Майндов'), keyboardType: TextInputType.text)),
-              IconButton(icon: const Icon(Icons.delete_outline), onPressed: () => _removeInvestorRow(i)),
-            ]),
-          ]),
-        ),
-      ));
+              if (_investors.length > 1)
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => _removeInvestorRow(index),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: row.controllerAmount,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(labelText: 'Сумма (M)'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Color? _hexToColor(String hex) {
+    if (!hex.startsWith('#')) return null;
+    try {
+      final h = hex.substring(1);
+      final v = int.parse(h, radix: 16);
+      return Color(h.length == 6 ? (0xFF000000 | v) : v);
+    } catch (_) {
+      return null;
     }
-    return rows;
   }
 }
 
 class _InvestorRow {
   String? selectedPlayerId;
   final TextEditingController controllerAmount = TextEditingController();
-  _InvestorRow({this.selectedPlayerId});
 }

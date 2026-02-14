@@ -9,6 +9,8 @@ import 'package:titanic/screens/movie_poll_admin_screen.dart';
 import 'package:titanic/screens/admin/blood_poker_tab.dart';
 import 'package:titanic/theme/app_theme.dart';
 import 'package:titanic/widgets/art_deco_button.dart';
+import 'package:titanic/services/enterprise_service.dart';
+
 
 // Перечисление пунктов бокового меню
 enum AdminDrawerItem {
@@ -486,13 +488,45 @@ class _UsersTabState extends State<UsersTab> {
   }
 
   Future<void> _editUser(Map<String, dynamic> user) async {
+    // Сохраняем старые данные пользователя для сравнения
+    final oldUser = Map<String, dynamic>.from(user);
+    
     final updated = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (_) => _UserEditDialog(user: Map<String, dynamic>.from(user)),
     );
+    
     if (updated != null) {
       try {
         await supabase.from('user_credentials').update(updated).eq('id', user['id']);
+        
+        // ---- ДОПОЛНЕНИЕ: если экономист изменил цвет - обновляем его предприятия ----
+        final oldRole = (oldUser['role'] ?? '').toString().toLowerCase();
+        final oldColor = (oldUser['color'] ?? '').toString();
+        final newRole = (updated['role'] ?? oldUser['role'] ?? '').toString().toLowerCase();
+        final newColor = (updated['color'] ?? oldUser['color'] ?? '').toString();
+        
+        final isEconomist = newRole == 'economist' || newRole == 'экономист';
+        final colorChanged = oldColor != newColor && newColor.isNotEmpty;
+        
+        if (isEconomist && colorChanged) {
+          try {
+            final enterpriseService = EnterpriseService(supabase);
+            await enterpriseService.updateEnterprisesColorForEconomist(
+              economistId: user['id'].toString(),
+              newColor: newColor,
+            );
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Цвет предприятий экономиста обновлён')),
+              );
+            }
+          } catch (e) {
+            debugPrint('Ошибка обновления предприятий экономиста: $e');
+          }
+        }
+        // -----------------------------------------------------------------------------
+        
         await _loadUsers();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -568,8 +602,7 @@ class _UsersTabState extends State<UsersTab> {
                   separatorBuilder: (_, __) => const SizedBox(height: 8),
                   itemBuilder: (context, i) {
                     final u = visible[i];
-                    final name =
-                        ((u['first_name'] ?? '') + ' ' + (u['last_name'] ?? '')).trim();
+                    final name = ((u['first_name'] ?? '') + ' ' + (u['last_name'] ?? '')).trim();
                     final displayName = name.isEmpty
                         ? (u['telegram_username'] ?? 'Без имени')
                         : name;
@@ -885,6 +918,7 @@ class _UserEditDialogState extends State<_UserEditDialog> {
             const SizedBox(height: 12),
 
             // Флаг ростовщика
+            
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
@@ -1171,53 +1205,76 @@ class _InventoryEditorState extends State<_InventoryEditor> {
 
   // Отображение предприятия
   Widget _buildEnterpriseItem(Map<String, dynamic> item, int index) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                item['name'] ?? 'Предприятие',
-                style: const TextStyle(
-                  color: TitanicTheme.raptureGold,
-                  fontWeight: FontWeight.w700,
-                ),
+  // Извлекаем данные – поддерживаем старый и новый формат
+  final String name = item['name']?.toString() ?? 'Предприятие';
+  
+  String color = '';
+  String region = '';
+  String description = '';
+  List<dynamic> investors = [];
+
+  if (item.containsKey('meta') && item['meta'] is Map) {
+    // Новый формат
+    final meta = item['meta'] as Map;
+    color = meta['color']?.toString() ?? '';
+    region = meta['region']?.toString() ?? '';
+    description = meta['description']?.toString() ?? '';
+    investors = meta['investors'] as List? ?? [];
+  } else {
+    // Старый формат
+    color = item['color']?.toString() ?? '';
+    region = item['region']?.toString() ?? '';
+    description = item['description']?.toString() ?? '';
+    investors = item['investors'] as List? ?? [];
+  }
+
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Row(
+        children: [
+          Expanded(
+            child: Text(
+              name,
+              style: const TextStyle(
+                color: TitanicTheme.raptureGold,
+                fontWeight: FontWeight.w700,
               ),
             ),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.edit, size: 20),
-                  color: TitanicTheme.seaFoamGreen,
-                  onPressed: () => _editItem(index),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.delete, size: 20),
-                  color: Colors.redAccent,
-                  onPressed: () => _deleteItem(index),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
-                ),
-              ],
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        if (item['color'] != null)
-          _buildInfoRow('Цвет', item['color'].toString()),
-        if (item['region'] != null)
-          _buildInfoRow('Регион', item['region'].toString()),
-        if (item['investors'] != null)
-          _buildInfoRow('Инвесторы', _formatInvestors(item['investors'])),
-        if (item['description'] != null)
-          _buildInfoRow('Описание', item['description'].toString()),
-      ],
-    );
-  }
+          ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.edit, size: 20),
+                color: TitanicTheme.seaFoamGreen,
+                onPressed: () => _editItem(index),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+              ),
+              IconButton(
+                icon: const Icon(Icons.delete, size: 20),
+                color: Colors.redAccent,
+                onPressed: () => _deleteItem(index),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+              ),
+            ],
+          ),
+        ],
+      ),
+      const SizedBox(height: 8),
+      if (color.isNotEmpty)
+        _buildInfoRow('Цвет', color),
+      if (region.isNotEmpty)
+        _buildInfoRow('Регион', region),
+      if (investors.isNotEmpty)
+        _buildInfoRow('Инвесторы', _formatInvestors(investors)),
+      if (description.isNotEmpty)
+        _buildInfoRow('Описание', description),
+    ],
+  );
+}
 
   Widget _buildInfoRow(String label, String value) {
     return Padding(
@@ -1373,9 +1430,14 @@ class _InventoryItemDialogState extends State<_InventoryItemDialog> {
 class _EnterpriseDialog extends StatefulWidget {
   final Map<String, dynamic>? initialData;
   final Function(Map<String, dynamic>) onSave;
+  final String? ownerId; // ID владельца инвентаря (для новых предприятий)
 
-  const _EnterpriseDialog({this.initialData, required this.onSave, Key? key})
-      : super(key: key);
+  const _EnterpriseDialog({
+    this.initialData,
+    required this.onSave,
+    this.ownerId,
+    Key? key,
+  }) : super(key: key);
 
   @override
   State<_EnterpriseDialog> createState() => _EnterpriseDialogState();
@@ -1387,6 +1449,12 @@ class _EnterpriseDialogState extends State<_EnterpriseDialog> {
   late TextEditingController _regionCtrl;
   late TextEditingController _descCtrl;
   final List<Map<String, dynamic>> _investors = [];
+
+  // Информация о владельце (для новых предприятий)
+  String? _ownerRole;
+  String? _ownerColor;
+  bool _loadingOwner = false;
+  bool get _isEconomist => _ownerRole == 'economist' || _ownerRole == 'экономист';
 
   final List<String> _colorOptions = [
     'красный',
@@ -1407,14 +1475,72 @@ class _EnterpriseDialogState extends State<_EnterpriseDialog> {
   void initState() {
     super.initState();
     final initial = widget.initialData ?? {};
-    _nameCtrl = TextEditingController(text: initial['name']?.toString() ?? '');
-    _colorCtrl = TextEditingController(text: initial['color']?.toString() ?? '');
-    _regionCtrl = TextEditingController(text: initial['region']?.toString() ?? '');
-    _descCtrl = TextEditingController(text: initial['description']?.toString() ?? '');
 
-    if (initial['investors'] != null && initial['investors'] is List) {
-      _investors.addAll(
-          List<Map<String, dynamic>>.from(initial['investors'] as List));
+    // Для нового предприятия – извлекаем имя и т.д. из initial (пусто)
+    // Для существующего – поддерживаем оба формата (meta и плоский)
+    String initialName = '';
+    String initialColor = '';
+    String initialRegion = '';
+    String initialDesc = '';
+
+    if (widget.initialData != null) {
+      // Существующее предприятие
+      if (widget.initialData!.containsKey('meta')) {
+        // Новый формат
+        final meta = widget.initialData!['meta'] as Map? ?? {};
+        initialName = widget.initialData!['name']?.toString() ?? '';
+        initialColor = meta['color']?.toString() ?? '';
+        initialRegion = meta['region']?.toString() ?? '';
+        initialDesc = meta['description']?.toString() ?? '';
+        if (meta['investors'] != null) {
+          _investors.addAll(List<Map<String, dynamic>>.from(meta['investors'] as List));
+        }
+      } else {
+        // Старый формат (цвет на верхнем уровне)
+        initialName = widget.initialData!['name']?.toString() ?? '';
+        initialColor = widget.initialData!['color']?.toString() ?? '';
+        initialRegion = widget.initialData!['region']?.toString() ?? '';
+        initialDesc = widget.initialData!['description']?.toString() ?? '';
+        if (widget.initialData!['investors'] != null) {
+          _investors.addAll(List<Map<String, dynamic>>.from(widget.initialData!['investors'] as List));
+        }
+      }
+    }
+
+    _nameCtrl = TextEditingController(text: initialName);
+    _colorCtrl = TextEditingController(text: initialColor);
+    _regionCtrl = TextEditingController(text: initialRegion);
+    _descCtrl = TextEditingController(text: initialDesc);
+
+    // Если это НОВОЕ предприятие и передан ownerId – загружаем информацию о владельце
+    if (widget.initialData == null && widget.ownerId != null) {
+      _loadOwnerInfo();
+    }
+  }
+
+  Future<void> _loadOwnerInfo() async {
+    setState(() => _loadingOwner = true);
+    try {
+      final supabase = Supabase.instance.client;
+      final res = await supabase
+          .from('user_credentials')
+          .select('role, color')
+          .eq('id', widget.ownerId!)
+          .maybeSingle();
+
+      if (res != null) {
+        _ownerRole = (res['role'] ?? '').toString().toLowerCase();
+        _ownerColor = res['color']?.toString();
+
+        // Если владелец – экономист, автоматически устанавливаем его цвет
+        if (_isEconomist && _ownerColor != null && _ownerColor!.isNotEmpty) {
+          _colorCtrl.text = _ownerColor!;
+        }
+      }
+    } catch (e) {
+      debugPrint('_EnterpriseDialog._loadOwnerInfo error: $e');
+    } finally {
+      setState(() => _loadingOwner = false);
     }
   }
 
@@ -1490,6 +1616,9 @@ class _EnterpriseDialogState extends State<_EnterpriseDialog> {
 
   @override
   Widget build(BuildContext context) {
+    // Определяем, нужно ли блокировать поле цвета
+    final bool disableColorSelection = _isEconomist && widget.initialData == null;
+
     return AlertDialog(
       title: Text(
         widget.initialData == null ? 'Добавить предприятие' : 'Редактировать предприятие',
@@ -1505,6 +1634,11 @@ class _EnterpriseDialogState extends State<_EnterpriseDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Индикатор загрузки информации о владельце
+            if (_loadingOwner)
+              const Center(child: CircularProgressIndicator()),
+
+            // Название
             TextField(
               controller: _nameCtrl,
               style: const TextStyle(color: Colors.white),
@@ -1516,6 +1650,7 @@ class _EnterpriseDialogState extends State<_EnterpriseDialog> {
             ),
             const SizedBox(height: 12),
 
+            // Цвет (автоматически подставляется для экономистов, поле блокируется)
             DropdownButtonFormField<String>(
               value: _colorCtrl.text.isEmpty ? null : _colorCtrl.text,
               items: _colorOptions.map((c) {
@@ -1524,9 +1659,11 @@ class _EnterpriseDialogState extends State<_EnterpriseDialog> {
                   child: Text(c, style: const TextStyle(color: Colors.white)),
                 );
               }).toList(),
-              onChanged: (value) => _colorCtrl.text = value ?? '',
+              onChanged: disableColorSelection ? null : (value) => _colorCtrl.text = value ?? '',
               decoration: TitanicTheme.inputDecoration.copyWith(
-                labelText: 'Цвет',
+                labelText: _isEconomist && widget.initialData == null
+                    ? 'Цвет (авто, установлен из профиля)'
+                    : 'Цвет',
                 labelStyle: const TextStyle(color: Colors.white70),
               ),
               style: const TextStyle(color: Colors.white),
@@ -1534,6 +1671,7 @@ class _EnterpriseDialogState extends State<_EnterpriseDialog> {
             ),
             const SizedBox(height: 12),
 
+            // Регион
             DropdownButtonFormField<String>(
               value: _regionCtrl.text.isEmpty ? null : _regionCtrl.text,
               items: _regionOptions.map((r) {
@@ -1552,6 +1690,7 @@ class _EnterpriseDialogState extends State<_EnterpriseDialog> {
             ),
             const SizedBox(height: 12),
 
+            // Описание
             TextField(
               controller: _descCtrl,
               style: const TextStyle(color: Colors.white),
@@ -1564,6 +1703,7 @@ class _EnterpriseDialogState extends State<_EnterpriseDialog> {
             ),
             const SizedBox(height: 16),
 
+            // Инвесторы
             Text(
               'Инвесторы',
               style: TitanicTheme.subtitle.copyWith(color: Colors.white),
@@ -1665,16 +1805,52 @@ class _EnterpriseDialogState extends State<_EnterpriseDialog> {
               );
               return;
             }
-            final enterprise = {
-              'type': 'enterprise',
-              'name': name,
-              'color': _colorCtrl.text.trim(),
+
+            final color = _colorCtrl.text.trim();
+            if (color.isEmpty) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Выберите цвет')),
+              );
+              return;
+            }
+
+            // --- ФОРМИРУЕМ ПРЕДПРИЯТИЕ В ЕДИНОМ ФОРМАТЕ С META ---
+            final Map<String, dynamic> meta = {
+              'color': color,
               'region': _regionCtrl.text.trim(),
               'description': _descCtrl.text.trim(),
               'investors': List.from(_investors),
-              'created_at': widget.initialData?['created_at'] ??
+              'created_at': widget.initialData?['meta']?['created_at'] ??
+                  widget.initialData?['created_at'] ??
                   DateTime.now().toUtc().toIso8601String(),
             };
+
+            // Если это НОВОЕ предприятие и владелец – экономист – добавляем привязку
+            if (widget.initialData == null && _isEconomist) {
+              meta['builder_id'] = widget.ownerId;
+              meta['builder_color_at_creation'] = _ownerColor;
+            }
+
+            // Если у существующего предприятия уже был builder_id – сохраняем его
+            if (widget.initialData != null) {
+              if (widget.initialData!.containsKey('meta') &&
+                  widget.initialData!['meta'] is Map &&
+                  widget.initialData!['meta'].containsKey('builder_id')) {
+                meta['builder_id'] = widget.initialData!['meta']['builder_id'];
+                meta['builder_color_at_creation'] =
+                    widget.initialData!['meta']['builder_color_at_creation'];
+              } else if (widget.initialData!.containsKey('builder_id')) {
+                meta['builder_id'] = widget.initialData!['builder_id'];
+                meta['builder_color_at_creation'] = widget.initialData!['builder_color_at_creation'];
+              }
+            }
+
+            final enterprise = {
+              'type': 'enterprise',
+              'name': name,
+              'meta': meta,
+            };
+
             widget.onSave(enterprise);
             Navigator.of(context).pop();
           },
