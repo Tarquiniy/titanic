@@ -33,9 +33,15 @@ JournalViewEntry? formatJournalEvent(Map<String, dynamic> raw) {
 
   // ====== 2. Речь ======
   if (table == 'speech_state') {
+    final actorName =
+        (payload['actor_name'] ?? payload['initiator_name'] ?? '').toString();
+    var msg = 'Активирована речь жизни';
+    if (actorName.isNotEmpty) {
+      msg = '$msg (инициатор: $actorName)';
+    }
     return JournalViewEntry(
       title: 'Речь жизни',
-      message: 'Изменён статус',
+      message: msg,
       time: time,
     );
   }

@@ -859,8 +859,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _onOpenResolutionPressed() async {
     if (_activeResolutionId == null) return;
-    // логика политрешения оставлена как была — UI-кнопка теперь будет единого стиля
-    // (диалог выбора + ставка)
     final resolutionId = _activeResolutionId!;
 
     List<Map<String, dynamic>> options = [];
@@ -1121,7 +1119,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // -----------------------
-  // Chips (цвет + регион) — только у экономиста
+  // Chips (цвет — у всех, регион — только у экономиста)
   // -----------------------
   String? _normalizedRegion() {
     final r = (user.region ?? '').toString().trim();
@@ -1162,12 +1160,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildColorAndRegionChips(bool isSmallScreen) {
-    if (!_isRole('economist')) return const SizedBox.shrink();
-
     final colorName = (_userColor ?? user.color ?? '').toString().trim();
-    final regionName = _normalizedRegion();
-
     final showColor = colorName.isNotEmpty;
+
+    final regionName = _isRole('economist') ? _normalizedRegion() : null;
     final showRegion = regionName != null && regionName.trim().isNotEmpty;
 
     if (!showColor && !showRegion) return const SizedBox.shrink();
@@ -1195,14 +1191,15 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // -----------------------
-  // ЕДИНЫЙ СПИСОК КНОПОК (все в стиле ArtDecoButton)
+  // ЕДИНЫЙ БЛОК КНОПОК/ДЕЙСТВИЙ (для всех ролей)
+  // Порядок: 1) роли 2) общие 3) динамические 4) прочие общие блоки (кино)
   // -----------------------
   List<Widget> _buildUnifiedButtons() {
-    final List<Widget> btns = [];
+    final List<Widget> out = [];
 
-    // Кнопки по роли
+    // 1) РОЛЕВЫЕ (всегда первые)
     if (_isRole('economist')) {
-      btns.add(
+      out.add(
         ArtDecoButton(
           text: 'Купить ход',
           icon: Icons.shopping_cart,
@@ -1211,9 +1208,8 @@ class _HomeScreenState extends State<HomeScreen> {
           expanded: true,
         ),
       );
-      btns.add(const SizedBox(height: 12));
-
-      btns.add(
+      out.add(const SizedBox(height: 12));
+      out.add(
         ArtDecoButton(
           text: 'Купить предприятие',
           icon: Icons.business,
@@ -1222,39 +1218,38 @@ class _HomeScreenState extends State<HomeScreen> {
           expanded: true,
         ),
       );
-      btns.add(const SizedBox(height: 12));
+      out.add(const SizedBox(height: 12));
     }
 
-    // Событийные кнопки
-    if (_hasActiveDebate && !_alreadyVotedInActiveDebate) {
-      btns.add(
-        ArtDecoButton(
-          text: 'Участвовать в дебатах',
-          icon: Icons.forum,
-          onPressed: _openDebates,
-          primary: false,
-          expanded: true,
+    if (_isRole('мафия')) {
+      // ВАЖНО: отдельного блока "Особые возможности" больше нет — встроено сюда
+      out.add(
+        mafia_blocks.MafiaBlock(
+          currentUserId: user.id,
+          currentUserRole: user.role,
+          onProposalUsed: () async {
+            try {
+              await _refreshProfile();
+              await _loadJournal();
+            } catch (_) {}
+          },
+          onDebtCollected: _onDebtCollected,
+          onEnterpriseBought: _onMafiaEnterpriseBought,
         ),
       );
-      btns.add(const SizedBox(height: 12));
-    }
-
-    if (_hasActiveResolution && !_alreadyBetInActiveResolution) {
-      btns.add(
-        ArtDecoButton(
-          text: 'Политрешение',
-          icon: Icons.gavel,
-          onPressed: _onOpenResolutionPressed,
-          primary: false,
-          expanded: true,
+      out.add(const SizedBox(height: 12));
+      out.add(
+        BloodPokerBlock(
+          currentUserId: user.id,
+          onBetPlaced: _onBloodPokerBetPlaced,
         ),
       );
-      btns.add(const SizedBox(height: 12));
+      out.add(const SizedBox(height: 12));
     }
 
-    // Политик: речь жизни — тоже ArtDecoButton (единый стиль)
     if (user.role == 'politician') {
-      btns.add(
+      // Речь жизни — роль-политик (кнопка всегда на месте, может быть неактивна)
+      out.add(
         AbsorbPointer(
           absorbing: !_isSpeechButtonEnabled || _rpcLoading,
           child: Opacity(
@@ -1271,11 +1266,60 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
       );
-      btns.add(const SizedBox(height: 12));
+      out.add(const SizedBox(height: 12));
     }
 
-    // Кинематограф (внутри общего списка)
-    btns.add(
+    // 2) ОБЩИЕ (после роли)
+    out.add(
+      ArtDecoButton(
+        text: 'Перевод V',
+        icon: Icons.swap_horiz,
+        onPressed: _openTransferScreen,
+        primary: false,
+        expanded: true,
+      ),
+    );
+    out.add(const SizedBox(height: 12));
+    out.add(
+      ArtDecoButton(
+        text: 'Инвентарь',
+        icon: Icons.inventory_2,
+        onPressed: _openInventoryScreen,
+        primary: true,
+        expanded: true,
+      ),
+    );
+    out.add(const SizedBox(height: 12));
+
+    // 3) ДИНАМИЧЕСКИЕ (появляются только при событиях)
+    if (_hasActiveDebate && !_alreadyVotedInActiveDebate) {
+      out.add(
+        ArtDecoButton(
+          text: 'Дебаты',
+          icon: Icons.forum,
+          onPressed: _openDebates,
+          primary: false,
+          expanded: true,
+        ),
+      );
+      out.add(const SizedBox(height: 12));
+    }
+
+    if (_hasActiveResolution && !_alreadyBetInActiveResolution) {
+      out.add(
+        ArtDecoButton(
+          text: 'Политрешение',
+          icon: Icons.gavel,
+          onPressed: _onOpenResolutionPressed,
+          primary: false,
+          expanded: true,
+        ),
+      );
+      out.add(const SizedBox(height: 12));
+    }
+
+    // 4) ПРОЧИЕ ОБЩИЕ (всегда доступны) — кино
+    out.add(
       WatchedMovieBlock(
         currentUserId: user.id,
         onChanged: () async {
@@ -1286,9 +1330,9 @@ class _HomeScreenState extends State<HomeScreen> {
         },
       ),
     );
-    btns.add(const SizedBox(height: 12));
+    out.add(const SizedBox(height: 12));
 
-    btns.add(
+    out.add(
       MovieVoteBlock(
         currentUserId: user.id,
         currentUserRole: user.role,
@@ -1300,9 +1344,9 @@ class _HomeScreenState extends State<HomeScreen> {
         },
       ),
     );
-    btns.add(const SizedBox(height: 12));
+    out.add(const SizedBox(height: 12));
 
-    btns.add(
+    out.add(
       HollywoodPayBlock(
         currentUserId: user.id,
         currentUserRole: user.role,
@@ -1314,10 +1358,8 @@ class _HomeScreenState extends State<HomeScreen> {
         },
       ),
     );
-    btns.add(const SizedBox(height: 16));
 
-    // если вдруг последние элементы — лишний SizedBox, можно оставить (не мешает)
-    return btns;
+    return out;
   }
 
   // -----------------------
@@ -1336,7 +1378,8 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               // TOP BAR
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
@@ -1422,19 +1465,23 @@ class _HomeScreenState extends State<HomeScreen> {
                                   const SizedBox(width: 20),
                                   Expanded(
                                     child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
                                         Text(
                                           '${user.firstName} ${user.lastName}',
                                           style: TextStyle(
                                             fontFamily: 'CormorantGaramond',
-                                            fontSize: isSmallScreen ? 22 : 26,
+                                            fontSize:
+                                                isSmallScreen ? 22 : 26,
                                             fontWeight: FontWeight.w700,
                                             color: TitanicTheme.ivoryCream,
                                             letterSpacing: 0.5,
                                           ),
                                         ),
                                         const SizedBox(height: 10),
+                                        // ✅ Цвет снова отображается у ВСЕХ ролей,
+                                        // ✅ Регион — только у экономистов
                                         _buildColorAndRegionChips(isSmallScreen),
                                       ],
                                     ),
@@ -1447,15 +1494,18 @@ class _HomeScreenState extends State<HomeScreen> {
                               Container(
                                 padding: const EdgeInsets.all(18),
                                 decoration: BoxDecoration(
-                                  color: TitanicTheme.surfaceNavy.withOpacity(0.35),
+                                  color: TitanicTheme.surfaceNavy
+                                      .withOpacity(0.35),
                                   borderRadius: BorderRadius.circular(18),
                                   border: Border.all(
-                                    color: TitanicTheme.raptureGold.withOpacity(0.25),
+                                    color: TitanicTheme.raptureGold
+                                        .withOpacity(0.25),
                                     width: 1.5,
                                   ),
                                 ),
                                 child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceAround,
                                   children: [
                                     Column(
                                       children: [
@@ -1464,7 +1514,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                           style: TextStyle(
                                             fontFamily: 'Cinzel',
                                             fontSize: 13,
-                                            color: TitanicTheme.ivoryCream.withOpacity(0.7),
+                                            color: TitanicTheme.ivoryCream
+                                                .withOpacity(0.7),
                                             letterSpacing: 1.0,
                                           ),
                                         ),
@@ -1473,7 +1524,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                           user.vBalance.toStringAsFixed(2),
                                           style: TextStyle(
                                             fontFamily: 'CormorantGaramond',
-                                            fontSize: isSmallScreen ? 24 : 28,
+                                            fontSize:
+                                                isSmallScreen ? 24 : 28,
                                             fontWeight: FontWeight.w700,
                                             color: TitanicTheme.raptureGold,
                                             letterSpacing: 1.0,
@@ -1484,7 +1536,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                     Container(
                                       width: 1.5,
                                       height: 45,
-                                      color: TitanicTheme.raptureGold.withOpacity(0.25),
+                                      color: TitanicTheme.raptureGold
+                                          .withOpacity(0.25),
                                     ),
                                     Column(
                                       children: [
@@ -1493,7 +1546,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                           style: TextStyle(
                                             fontFamily: 'Cinzel',
                                             fontSize: 13,
-                                            color: TitanicTheme.ivoryCream.withOpacity(0.7),
+                                            color: TitanicTheme.ivoryCream
+                                                .withOpacity(0.7),
                                             letterSpacing: 1.0,
                                           ),
                                         ),
@@ -1502,7 +1556,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                           user.mBalance.toStringAsFixed(2),
                                           style: TextStyle(
                                             fontFamily: 'CormorantGaramond',
-                                            fontSize: isSmallScreen ? 24 : 28,
+                                            fontSize:
+                                                isSmallScreen ? 24 : 28,
                                             fontWeight: FontWeight.w700,
                                             color: TitanicTheme.seaFoamGreen,
                                             letterSpacing: 1.0,
@@ -1513,39 +1568,13 @@ class _HomeScreenState extends State<HomeScreen> {
                                   ],
                                 ),
                               ),
-                              const SizedBox(height: 24),
-
-                              // BASIC NAV BUTTONS
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: ArtDecoButton(
-                                      text: 'Перевод V',
-                                      icon: Icons.swap_horiz,
-                                      onPressed: _openTransferScreen,
-                                      primary: false,
-                                      expanded: true,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 16),
-                                  Expanded(
-                                    child: ArtDecoButton(
-                                      text: 'Инвентарь',
-                                      icon: Icons.inventory_2,
-                                      onPressed: _openInventoryScreen,
-                                      primary: true,
-                                      expanded: true,
-                                    ),
-                                  ),
-                                ],
-                              ),
                             ],
                           ),
                         ),
                       ),
                       const SizedBox(height: 24),
 
-                      // ONE BLOCK: only buttons (no headings)
+                      // ✅ ONE BLOCK: ВСЕ роли + общие + динамические (без отдельных блоков)
                       Container(
                         decoration: BoxDecoration(
                           color: TitanicTheme.panelDark.withOpacity(0.9),
@@ -1570,63 +1599,6 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                         ),
                       ),
-
-                      // Mafia block stays separate (это не просто кнопки)
-                      if (_isRole('мафия')) ...[
-                        const SizedBox(height: 24),
-                        Container(
-                          decoration: BoxDecoration(
-                            color: TitanicTheme.panelDark.withOpacity(0.9),
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(
-                              color: Colors.redAccent.withOpacity(0.3),
-                              width: 1.5,
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.4),
-                                blurRadius: 20,
-                                offset: const Offset(0, 8),
-                              ),
-                            ],
-                          ),
-                          padding: const EdgeInsets.all(20),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              // заголовок оставлен (это отдельный блок-игра)
-                              Text(
-                                'Особые возможности',
-                                style: TextStyle(
-                                  fontFamily: 'CormorantGaramond',
-                                  fontSize: isSmallScreen ? 22 : 24,
-                                  fontWeight: FontWeight.w700,
-                                  color: TitanicTheme.ivoryCream,
-                                  letterSpacing: 0.5,
-                                ),
-                              ),
-                              const SizedBox(height: 20),
-                              mafia_blocks.MafiaBlock(
-                                currentUserId: user.id,
-                                currentUserRole: user.role,
-                                onProposalUsed: () async {
-                                  try {
-                                    await _refreshProfile();
-                                    await _loadJournal();
-                                  } catch (_) {}
-                                },
-                                onDebtCollected: _onDebtCollected,
-                                onEnterpriseBought: _onMafiaEnterpriseBought,
-                              ),
-                              const SizedBox(height: 20),
-                              BloodPokerBlock(
-                                currentUserId: user.id,
-                                onBetPlaced: _onBloodPokerBetPlaced,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
 
                       const SizedBox(height: 24),
                       _buildJournalBlock(isSmallScreen),
@@ -1891,7 +1863,8 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                             const SizedBox(width: 8),
                             Text(
-                              _formatJournalDate(entry['created_at']?.toString()),
+                              _formatJournalDate(
+                                  entry['created_at']?.toString()),
                               style: TextStyle(
                                 fontFamily: 'Cinzel',
                                 fontSize: 12,
