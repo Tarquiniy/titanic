@@ -568,7 +568,7 @@ class _JournalWidgetState extends State<JournalWidget> {
                       child: Stack(
                         children: [
                           ArtDecoCard(
-                            title: title.isEmpty ? 'Без заголовка' : title,
+                            title: title.isEmpty ? 'Заголовка нет' : title,
                             subtitle: created,
                             leading: Stack(
                               children: [
