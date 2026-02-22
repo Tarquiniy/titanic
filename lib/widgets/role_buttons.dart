@@ -1,11 +1,14 @@
 // lib/widgets/role_buttons.dart
 import 'package:flutter/material.dart';
 import 'package:titanic/models/app_user.dart';
+import 'package:titanic/widgets/art_deco_button.dart';
 
 typedef VoidCallbackAsync = Future<void> Function();
 
 class RoleButtons extends StatelessWidget {
   final AppUser user;
+
+  // state flags
   final bool hasActiveDebate;
   final bool alreadyVotedInActiveDebate;
   final bool hasActiveResolution;
@@ -13,29 +16,32 @@ class RoleButtons extends StatelessWidget {
 
   // callbacks
   final VoidCallback onTransfer;
+  final VoidCallback onOpenInventory;
   final VoidCallbackAsync onBuyTurn;
   final VoidCallback onPurchaseEnterprise;
   final VoidCallbackAsync onOpenDebates;
-  final VoidCallback onOpenResolution;
+  final VoidCallbackAsync onOpenResolution;
   final VoidCallback onStartSpeech;
+
+  // listen widget (already styled as ArtDecoButton inside ListenButton)
   final Widget listenWidget;
 
-  /// Callback для "Статья Чести"
+  /// "Статья Чести"
   final VoidCallbackAsync? onHonorArticle;
   final bool honorAlreadyUsed;
 
-  /// Callback для "Вложиться в цвет"
+  /// "Вложиться в цвет"
   final VoidCallbackAsync? onInvestInColor;
 
-  /// Callback для силы мафии: одноразовая принудительная передача V/M
+  /// Mafia offer
   final VoidCallbackAsync? onMafiaOffer;
-  /// Флаг — уже использована ли сила мафии (если известно)
   final bool mafiaOfferUsed;
 
   const RoleButtons({
     Key? key,
     required this.user,
     required this.onTransfer,
+    required this.onOpenInventory,
     required this.onBuyTurn,
     required this.onPurchaseEnterprise,
     required this.onOpenDebates,
@@ -53,138 +59,255 @@ class RoleButtons extends StatelessWidget {
     this.alreadyBetInActiveResolution = false,
   }) : super(key: key);
 
-  Widget _btn(String title, VoidCallback? onTap, {Color? color}) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6.0),
-        child: SizedBox(
-          width: double.infinity,
-          child: ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: color),
-            onPressed: onTap,
-            child: Text(title),
-          ),
+  Widget _btn({
+    required String text,
+    required IconData icon,
+    required VoidCallback? onPressed,
+    bool primary = false,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: SizedBox(
+        width: double.infinity,
+        child: ArtDecoButton(
+          text: text,
+          icon: icon,
+          onPressed: onPressed,
+          primary: primary,
+          expanded: true,
         ),
-      );
+      ),
+    );
+  }
+
+  bool _roleContains(String needle) {
+    final r = (user.role ?? '').toString().toLowerCase().trim();
+    final n = needle.toLowerCase().trim();
+    if (r == n) return true;
+    return r.contains(n);
+  }
 
   @override
   Widget build(BuildContext context) {
-    final role = (user.role ?? '').toString().toLowerCase();
+    final role = (user.role ?? '').toString().toLowerCase().trim();
     final List<Widget> buttons = [];
 
-    // Основные общие кнопки
-    buttons.add(_btn('Перевести Войсы', onTransfer));
-    buttons.add(_btn('Купить ход экономисту', () => onBuyTurn()));
+    // ✅ Общие кнопки (видны всем)
+    buttons.add(
+      _btn(
+        text: 'Купить ход экономисту',
+        icon: Icons.shopping_cart,
+        onPressed: () => onBuyTurn(),
+        primary: true,
+      ),
+    );
 
-    if (role == 'economist') {
-      buttons.add(_btn('Купить предприятие', onPurchaseEnterprise));
-    }
+    buttons.add(
+      _btn(
+        text: 'Перевод V',
+        icon: Icons.swap_horiz,
+        onPressed: onTransfer,
+        primary: false,
+      ),
+    );
 
-    // Дебаты (для не-политиков и не-журналистов)
-    if (role != 'politician' && role != 'journalist' && hasActiveDebate && !alreadyVotedInActiveDebate) {
-      buttons.add(_btn('Дебаты', () => onOpenDebates()));
-    }
+    buttons.add(
+      _btn(
+        text: 'Инвентарь',
+        icon: Icons.inventory_2,
+        onPressed: onOpenInventory,
+        primary: true,
+      ),
+    );
 
-    // Политические решения (для политиков)
-    if (role == 'politician' && hasActiveResolution && !alreadyBetInActiveResolution) {
-      buttons.add(_btn('Выбрать политрешение', onOpenResolution, color: Colors.blueAccent));
-    }
-
-    if (role == 'politician') {
-      buttons.add(Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6.0),
-        child: ElevatedButton(onPressed: onStartSpeech, child: const Text('Речь жизни (старт)')),
-      ));
-    }
-
-    // Listen widget (delegated)
-    buttons.add(Padding(padding: const EdgeInsets.symmetric(vertical: 6.0), child: listenWidget));
-
-    // Role-specific extras
-    if (role == 'mafia') {
-      // Новая кнопка: Предложение от которого нельзя отказаться
+    // ✅ Купить предприятие — только экономист
+    if (_roleContains('economist') || _roleContains('экономист')) {
       buttons.add(
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6.0),
-          child: SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: mafiaOfferUsed ? Colors.grey : Colors.redAccent),
-              onPressed: (mafiaOfferUsed || onMafiaOffer == null)
-                  ? null
-                  : () async {
-                      try {
-                        await onMafiaOffer!();
-                      } catch (e) {
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
-                      }
-                    },
-              child: Text(mafiaOfferUsed ? 'Предложение — использовано' : 'Предложение от которого нельзя отказаться'),
-            ),
-          ),
+        _btn(
+          text: 'Купить предприятие',
+          icon: Icons.business,
+          onPressed: onPurchaseEnterprise,
+          primary: false,
         ),
       );
-    } else if (role == 'journalist') {
-      // Статья Чести
-      final disabled = honorAlreadyUsed;
+    }
+
+    // ✅ Дебаты (для не-политиков и не-журналистов)
+    final isPolitician = _roleContains('politician') || _roleContains('политик');
+    final isJournalist = _roleContains('journalist') || _roleContains('журналист');
+
+    if (!isPolitician &&
+        !isJournalist &&
+        hasActiveDebate &&
+        !alreadyVotedInActiveDebate) {
       buttons.add(
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6.0),
-          child: SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: disabled ? Colors.grey : Colors.purple),
-              onPressed: disabled
-                  ? null
-                  : () async {
-                      if (onHonorArticle != null) {
-                        try {
-                          await onHonorArticle!();
-                        } catch (e) {
-                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
-                        }
-                      } else {
-                        await onOpenDebates();
-                      }
-                    },
-              child: Text(disabled ? 'Статья Чести — использовано' : 'Статья Чести'),
-            ),
-          ),
+        _btn(
+          text: 'Дебаты',
+          icon: Icons.forum,
+          onPressed: () => onOpenDebates(),
+          primary: false,
         ),
       );
-    } else if (role == 'public_figure') {
-      // Вложиться в цвет
+    }
+
+    // ✅ Политрешение — ТОЛЬКО для политиков (фикс бага “видно у экономистов”)
+    if (isPolitician && hasActiveResolution && !alreadyBetInActiveResolution) {
       buttons.add(
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6.0),
-          child: SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
-              onPressed: () async {
-                if (onInvestInColor != null) {
+        _btn(
+          text: 'Политрешение',
+          icon: Icons.gavel,
+          onPressed: () => onOpenResolution(),
+          primary: false,
+        ),
+      );
+    }
+
+    // ✅ Речь жизни — только политик
+    if (isPolitician) {
+      buttons.add(
+        _btn(
+          text: 'Речь жизни (старт)',
+          icon: Icons.campaign,
+          onPressed: onStartSpeech,
+          primary: true,
+        ),
+      );
+    }
+
+    // ✅ Listen widget (уже ArtDecoButton внутри listen_button.dart)
+    buttons.add(Padding(padding: const EdgeInsets.only(bottom: 12), child: listenWidget));
+
+    // Role extras
+    if (_roleContains('mafia') || _roleContains('мафия')) {
+      buttons.add(
+        _btn(
+          text: mafiaOfferUsed
+              ? 'Предложение — использовано'
+              : 'Предложение от которого нельзя отказаться',
+          icon: Icons.local_fire_department,
+          onPressed: (mafiaOfferUsed || onMafiaOffer == null)
+              ? null
+              : () async {
                   try {
-                    await onInvestInColor!();
+                    await onMafiaOffer!();
                   } catch (e) {
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Ошибка: $e')),
+                    );
                   }
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Функция не реализована')));
-                }
-              },
-              child: const Text('Вложиться в цвет'),
-            ),
-          ),
+                },
+          primary: !mafiaOfferUsed,
+        ),
+      );
+    } else if (isJournalist) {
+      buttons.add(
+        _btn(
+          text: honorAlreadyUsed ? 'Статья Чести — использовано' : 'Статья Чести',
+          icon: Icons.article,
+          onPressed: honorAlreadyUsed
+              ? null
+              : () async {
+                  try {
+                    if (onHonorArticle != null) {
+                      await onHonorArticle!();
+                    } else {
+                      await onOpenDebates();
+                    }
+                  } catch (e) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Ошибка: $e')),
+                    );
+                  }
+                },
+          primary: !honorAlreadyUsed,
+        ),
+      );
+    } else if (_roleContains('public_figure') || _roleContains('общественный')) {
+      buttons.add(
+        _btn(
+          text: 'Вложиться в цвет',
+          icon: Icons.savings,
+          onPressed: () async {
+            if (onInvestInColor != null) {
+              try {
+                await onInvestInColor!();
+              } catch (e) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Ошибка: $e')),
+                );
+              }
+            } else {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Функция не реализована')),
+              );
+            }
+          },
+          primary: false,
         ),
       );
     }
 
-    // Отдельный набор для админов (не вложенный внутрь public_figure)
-    if (role == 'admin') {
-      buttons.add(_btn('Админ-панель', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Админ-панель'))),
-          color: Colors.black87));
-      buttons.add(_btn('Пополнить V/M', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Пополнение')))));
-      buttons.add(_btn('Создать опрос', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Создать опрос')))));
-      buttons.add(_btn('Создать аукцион', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Создание аукциона')))));
-      buttons.add(_btn('Статистика цветов', () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Статистика')))));
+    // Admin (оставил заглушки, но теперь тоже в ArtDecoButton-стиле)
+    if (_roleContains('admin')) {
+      buttons.add(
+        _btn(
+          text: 'Админ-панель',
+          icon: Icons.admin_panel_settings,
+          onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Админ-панель')),
+          ),
+          primary: false,
+        ),
+      );
+      buttons.add(
+        _btn(
+          text: 'Пополнить V/M',
+          icon: Icons.add_circle,
+          onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Пополнение')),
+          ),
+          primary: false,
+        ),
+      );
+      buttons.add(
+        _btn(
+          text: 'Создать опрос',
+          icon: Icons.poll,
+          onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Создать опрос')),
+          ),
+          primary: false,
+        ),
+      );
+      buttons.add(
+        _btn(
+          text: 'Создать аукцион',
+          icon: Icons.gavel,
+          onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Создание аукциона')),
+          ),
+          primary: false,
+        ),
+      );
+      buttons.add(
+        _btn(
+          text: 'Статистика цветов',
+          icon: Icons.bar_chart,
+          onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Статистика')),
+          ),
+          primary: false,
+        ),
+      );
+    }
+
+    // убираем последний отступ, чтобы блок выглядел аккуратно
+    if (buttons.isNotEmpty) {
+      final last = buttons.removeLast();
+      buttons.add(Padding(
+        padding: const EdgeInsets.only(bottom: 0),
+        child: (last is Padding) ? last.child ?? last : last,
+      ));
     }
 
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: buttons);

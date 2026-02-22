@@ -533,38 +533,27 @@ class GameService {
   }
 
   Future<void> rpcCloseDebate({required int debateId}) async {
-    debugPrint('GameService.rpcCloseDebate try RPC close_debate for id=$debateId');
-    try {
-      final raw =
-          await client.rpc('close_debate', params: {'p_debate_id': debateId});
-      debugPrint('GameService.rpcCloseDebate RPC raw result: $raw');
-      return;
-    } on PostgrestException catch (e, st) {
-      _logPostgrestException(e);
-      debugPrint('GameService.rpcCloseDebate PostgrestException stack:\n$st');
+  debugPrint('GameService.rpcCloseDebate try RPC close_debates for id=$debateId');
+  try {
+    final raw = await client.rpc('close_debates', params: {'p_debate_id': debateId});
+    debugPrint('GameService.rpcCloseDebate RPC raw result: $raw');
 
-      final msg = (e.message ?? '').toString();
-      if (msg.contains('operator does not exist') && msg.contains('uuid = text')) {
-        debugPrint(
-            'GameService.rpcCloseDebate detected uuid=text operator error. Likely cause: SQL compares uuid column with text parameter. Check close_debate implementation for proper casting (id::text or p_user_id::uuid).');
-      }
-      debugPrint(
-          'GameService.rpcCloseDebate RPC failed: ${e.message} | details: ${e.details} | hint: ${e.hint} | code: ${e.code}');
-    } catch (e, st) {
-      debugPrint('GameService.rpcCloseDebate RPC failed (non-Postgrest): $e\n$st');
-    }
+    // (необязательно) если хочешь отлавливать статус из jsonb:
+    // if (raw is Map && raw['status'] != 'ok') throw raw['message'] ?? 'close_debates failed';
 
-    debugPrint(
-        'GameService.rpcCloseDebate falling back to marking debate closed (best-effort).');
-    try {
-      await client.from('debates').update({'is_closed': true}).eq('id', debateId);
-      debugPrint(
-          'GameService.rpcCloseDebate fallback: marked debate is_closed=true for id=$debateId');
-    } catch (e, st) {
-      debugPrint('GameService.rpcCloseDebate update error: $e\n$st');
-      rethrow;
-    }
+    return;
+  } on PostgrestException catch (e, st) {
+    _logPostgrestException(e);
+    debugPrint('GameService.rpcCloseDebate PostgrestException stack:\n$st');
+    debugPrint('GameService.rpcCloseDebate RPC failed: ${e.message} | details: ${e.details} | hint: ${e.hint} | code: ${e.code}');
+  } catch (e, st) {
+    debugPrint('GameService.rpcCloseDebate RPC failed (non-Postgrest): $e\n$st');
   }
+
+  // fallback оставь как есть (но учти: распределения в fallback не будет)
+  debugPrint('GameService.rpcCloseDebate falling back to marking debate closed (best-effort).');
+  await client.from('debates').update({'is_closed': true}).eq('id', debateId);
+}
 
   Future<Map<String, dynamic>> rpcPlacePoliticalBid({
     required int decisionId,

@@ -125,20 +125,21 @@ Future<void> openBuyTurnFlow({
   required void Function(String) showMessage,
 }) async {
   List<Map<String, dynamic>> econs = [];
-  try {
-    final res = await supabase
-        .from('user_credentials')
-        .select('id, first_name, last_name, telegram_username')
-        .eq('role', 'economist')
-        .neq('id', currentUser.id)
-        .order('first_name');
-    if (res is List) {
-      econs = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
-    }
-  } catch (e) {
-    showMessage('Не удалось загрузить список экономистов: $e');
-    return;
+try {
+  final res = await supabase
+      .from('user_credentials')
+      .select('id, first_name, last_name, telegram_username, role')
+      // ловим и англ, и рус, и смешанные варианты
+      .or('role.ilike.%economist%,role.ilike.%экономист%')
+      .order('first_name');
+
+  if (res is List) {
+    econs = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
+} catch (e) {
+  showMessage('Не удалось загрузить список экономистов: $e');
+  return;
+}
 
   if (econs.isEmpty) {
     showMessage('Нет доступных экономистов для покупки хода.');

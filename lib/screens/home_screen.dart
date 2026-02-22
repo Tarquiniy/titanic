@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:titanic/blocks/blood_poker_block.dart';
+import 'package:titanic/blocks/journalist_block.dart' as journalist_block;
 
 import 'package:titanic/models/app_user.dart';
 import 'package:titanic/services/game_service.dart';
@@ -16,6 +17,9 @@ import 'package:titanic/screens/debates_screen.dart';
 import 'package:titanic/screens/purchase_enterprise_screen.dart';
 import 'login_screen.dart';
 
+// ✅ Listen button (уже в ArtDecoButton-стиле)
+import 'package:titanic/widgets/listen_button.dart';
+
 // Блоки
 import 'package:titanic/blocks/movie_vote_block.dart';
 import 'package:titanic/blocks/watched_movie_block.dart';
@@ -24,7 +28,9 @@ import 'package:titanic/blocks/mafia_block.dart' as mafia_blocks;
 
 // Тема
 import 'package:titanic/theme/app_theme.dart';
-import 'package:titanic/widgets/art_deco_button.dart';
+
+// ✅ Все “кнопки” вынесены сюда
+import 'package:titanic/widgets/role_buttons.dart';
 
 class HomeScreen extends StatefulWidget {
   final AppUser currentUser;
@@ -86,6 +92,55 @@ class _HomeScreenState extends State<HomeScreen> {
 
   bool? _honorUsedLocal;
   double? _honorMBalance;
+
+  // ✅ Цена запуска "Речь жизни"
+  static const int _lifeSpeechCostM = 100;
+
+  // -----------------------
+  // ✅ ONLY DISPLAY OF BALANCES: helpers + streams
+  // -----------------------
+  double _parseNumericToDouble(dynamic v, {double fallback = 0.0}) {
+    if (v == null) return fallback;
+    if (v is num) return v.toDouble();
+    if (v is String) return double.tryParse(v) ?? fallback;
+    return fallback;
+  }
+
+  // ✅ Войсы — всегда целым числом
+  String _formatVoices(double v) => v.round().toString();
+
+  // ✅ Майнды — целое без .00 (если реально целое), иначе 2 знака
+  String _formatMinds(double m) {
+    final rounded = m.roundToDouble();
+    if ((m - rounded).abs() < 0.00001) return rounded.toStringAsFixed(0);
+    return m.toStringAsFixed(2);
+  }
+
+  Stream<double> _voicesBalanceStream() {
+    return supabase
+        .from('user_credentials')
+        .stream(primaryKey: ['id'])
+        .eq('id', user.id)
+        .limit(1)
+        .map((rows) {
+          if (rows.isEmpty) return user.vBalance;
+          final vRaw = rows.first['v_balance'];
+          return _parseNumericToDouble(vRaw, fallback: user.vBalance);
+        });
+  }
+
+  Stream<double> _mindsBalanceStream() {
+    return supabase
+        .from('user_credentials')
+        .stream(primaryKey: ['id'])
+        .eq('id', user.id)
+        .limit(1)
+        .map((rows) {
+          if (rows.isEmpty) return user.mBalance;
+          final mRaw = rows.first['m_balance'];
+          return _parseNumericToDouble(mRaw, fallback: user.mBalance);
+        });
+  }
 
   bool _isRole(String role) {
     final userRole = user.role?.toLowerCase() ?? '';
@@ -154,7 +209,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _loadHonorLocalState() async {
     try {
-      final st = await fetchHonorState(user.id);
+      final st = await journalist_block.fetchHonorState(user.id);
       if (!mounted) return;
       setState(() {
         _honorUsedLocal = (st['used'] as bool?) ?? false;
@@ -663,9 +718,82 @@ class _HomeScreenState extends State<HomeScreen> {
     return true;
   }
 
+  // ✅ Надёжное сообщение (через post-frame), чтобы точно показывалось
+  void _showMessageSafe(String m) {
+    if (!mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(m),
+          backgroundColor: TitanicTheme.surfaceNavy.withOpacity(0.95),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: TitanicTheme.raptureGold.withOpacity(0.3)),
+          ),
+        ),
+      );
+    });
+  }
+
+  // ✅ Текущее значение m_balance (с сервера)
+  Future<double> _fetchCurrentMBalance() async {
+    final row = await supabase
+        .from('user_credentials')
+        .select('m_balance')
+        .eq('id', user.id)
+        .maybeSingle();
+
+    final raw = row?['m_balance'];
+    if (raw is num) return raw.toDouble();
+    if (raw is String) return double.tryParse(raw) ?? user.mBalance;
+    return user.mBalance;
+  }
+
+  // ✅ Записать новый m_balance
+  Future<void> _setMBalance(double newVal) async {
+    await supabase
+        .from('user_credentials')
+        .update({'m_balance': newVal})
+        .eq('id', user.id);
+  }
+
   Future<void> _onStartSpeechPressed() async {
     if (user.role != 'politician') return;
-    if (!_isSpeechButtonEnabled) return;
+    if (_rpcLoading) return;
+
+    if (!_isSpeechButtonEnabled) {
+      _showMessageSafe('Речь жизни сейчас недоступна.');
+      return;
+    }
+
+    // ✅ 1) Проверка баланса и сообщение, если не хватает
+    double currentM;
+    try {
+      currentM = await _fetchCurrentMBalance();
+    } catch (_) {
+      _showMessageSafe('Не удалось получить баланс майндов. Попробуйте ещё раз.');
+      return;
+    }
+
+    if (currentM < _lifeSpeechCostM) {
+      _showMessageSafe(
+        'Недостаточно майндов для запуска "Речь жизни". Нужно $_lifeSpeechCostM, у вас ${_formatMinds(currentM)}.',
+      );
+      return;
+    }
+
+    // ✅ 2) Списываем майнды ДО RPC
+    try {
+      await _setMBalance(currentM - _lifeSpeechCostM);
+      if (mounted) {
+        setState(() => user = user.copyWith(mBalance: currentM - _lifeSpeechCostM));
+      }
+    } catch (_) {
+      _showMessageSafe('Не удалось списать майнды. Попробуйте ещё раз.');
+      return;
+    }
 
     final target20Utc = _nextYekaterinburg20Utc();
     final secondsForRpc = _secondsUntilUtc(target20Utc);
@@ -683,6 +811,7 @@ class _HomeScreenState extends State<HomeScreen> {
       speechActorId = user.id;
       speechExpiresAt = clientNextSlotUtc;
       _waitingForServerConfirm = true;
+      _listenedToThisSpeech = false;
     });
 
     try {
@@ -861,11 +990,29 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_activeResolutionId == null) return;
     final resolutionId = _activeResolutionId!;
 
+    int freshMBalance = 0;
+    try {
+      final profile = await supabase
+          .from('user_credentials')
+          .select('m_balance')
+          .eq('id', user.id)
+          .maybeSingle();
+
+      final raw = (profile is Map<String, dynamic>) ? profile['m_balance'] : null;
+      if (raw is num) {
+        freshMBalance = raw.toInt();
+      } else {
+        freshMBalance = int.tryParse((raw ?? '0').toString()) ?? 0;
+      }
+    } catch (e) {
+      freshMBalance = user.mBalance as int;
+    }
+
     List<Map<String, dynamic>> options = [];
     try {
       final res = await supabase
           .from('resolution_options')
-          .select('id,label')
+          .select('id,label,color')
           .eq('resolution_id', resolutionId)
           .order('id');
       if (res is List) {
@@ -899,12 +1046,20 @@ class _HomeScreenState extends State<HomeScreen> {
                       final oid = (opt['id'] is int)
                           ? opt['id'] as int
                           : int.parse(opt['id'].toString());
+
                       return RadioListTile<int>(
                         value: oid,
                         groupValue: selectedOptionId,
                         onChanged: (v) =>
                             setStateDialog(() => selectedOptionId = v),
-                        title: Text(opt['label'] ?? '-'),
+                        title: Text(
+                          (opt['label'] ?? '-').toString(),
+                          style: const TextStyle(
+                            color: TitanicTheme.raptureGold,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        activeColor: TitanicTheme.raptureGold,
                       );
                     }).toList(),
                     const SizedBox(height: 8),
@@ -913,7 +1068,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       keyboardType: TextInputType.number,
                       decoration: InputDecoration(
                         labelText:
-                            'Майнды (целое). Баланс: ${user.mBalance.toStringAsFixed(2)}',
+                            'Майнды (целое). Баланс: ${_formatMinds(freshMBalance as double)}',
                       ),
                     ),
                   ],
@@ -936,21 +1091,21 @@ class _HomeScreenState extends State<HomeScreen> {
                     if (n == null || n <= 0) {
                       ScaffoldMessenger.of(ctx2).showSnackBar(
                         const SnackBar(
-                          content: Text('Введите положительное целое число'),
-                        ),
+                            content: Text('Введите положительное целое число')),
                       );
                       return;
                     }
-                    if (n > user.mBalance) {
+
+                    if (n > freshMBalance) {
                       ScaffoldMessenger.of(ctx2).showSnackBar(
                         SnackBar(
                           content: Text(
-                            'Недостаточно майндов: ${user.mBalance.toStringAsFixed(2)}',
-                          ),
+                              'Недостаточно майндов: ${_formatMinds(freshMBalance as double)}'),
                         ),
                       );
                       return;
                     }
+
                     Navigator.of(ctx2).pop(true);
 
                     showDialog(
@@ -959,6 +1114,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       builder: (_) =>
                           const Center(child: CircularProgressIndicator()),
                     );
+
                     try {
                       await svc.placeBetInResolution(
                         resolutionId: resolutionId,
@@ -966,10 +1122,13 @@ class _HomeScreenState extends State<HomeScreen> {
                         userId: user.id,
                         amount: n,
                       );
+
                       await _refreshProfile();
                       await _loadResolutionState();
+
                       if (mounted) Navigator.of(context).pop();
                       if (!mounted) return;
+
                       setState(() {
                         _alreadyBetInActiveResolution = true;
                       });
@@ -1191,184 +1350,36 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // -----------------------
-  // ЕДИНЫЙ БЛОК КНОПОК/ДЕЙСТВИЙ (для всех ролей)
-  // Порядок: 1) роли 2) общие 3) динамические 4) прочие общие блоки (кино)
-  // -----------------------
-  List<Widget> _buildUnifiedButtons() {
-    final List<Widget> out = [];
-
-    // 1) РОЛЕВЫЕ (всегда первые)
-    if (_isRole('economist')) {
-      out.add(
-        ArtDecoButton(
-          text: 'Купить ход',
-          icon: Icons.shopping_cart,
-          onPressed: _openBuyTurnFlow,
-          primary: true,
-          expanded: true,
-        ),
-      );
-      out.add(const SizedBox(height: 12));
-      out.add(
-        ArtDecoButton(
-          text: 'Купить предприятие',
-          icon: Icons.business,
-          onPressed: _openPurchaseEnterprise,
-          primary: false,
-          expanded: true,
-        ),
-      );
-      out.add(const SizedBox(height: 12));
-    }
-
-    if (_isRole('мафия')) {
-      // ВАЖНО: отдельного блока "Особые возможности" больше нет — встроено сюда
-      out.add(
-        mafia_blocks.MafiaBlock(
-          currentUserId: user.id,
-          currentUserRole: user.role,
-          onProposalUsed: () async {
-            try {
-              await _refreshProfile();
-              await _loadJournal();
-            } catch (_) {}
-          },
-          onDebtCollected: _onDebtCollected,
-          onEnterpriseBought: _onMafiaEnterpriseBought,
-        ),
-      );
-      out.add(const SizedBox(height: 12));
-      out.add(
-        BloodPokerBlock(
-          currentUserId: user.id,
-          onBetPlaced: _onBloodPokerBetPlaced,
-        ),
-      );
-      out.add(const SizedBox(height: 12));
-    }
-
-    if (user.role == 'politician') {
-      // Речь жизни — роль-политик (кнопка всегда на месте, может быть неактивна)
-      out.add(
-        AbsorbPointer(
-          absorbing: !_isSpeechButtonEnabled || _rpcLoading,
-          child: Opacity(
-            opacity: (_isSpeechButtonEnabled && !_rpcLoading) ? 1.0 : 0.6,
-            child: ArtDecoButton(
-              text: _isSpeechButtonEnabled
-                  ? 'Речь жизни (старт)'
-                  : 'Речь жизни (неактивна)',
-              icon: Icons.campaign,
-              onPressed: _isSpeechButtonEnabled ? _onStartSpeechPressed : () {},
-              primary: _isSpeechButtonEnabled,
-              expanded: true,
-            ),
-          ),
-        ),
-      );
-      out.add(const SizedBox(height: 12));
-    }
-
-    // 2) ОБЩИЕ (после роли)
-    out.add(
-      ArtDecoButton(
-        text: 'Перевод V',
-        icon: Icons.swap_horiz,
-        onPressed: _openTransferScreen,
-        primary: false,
-        expanded: true,
-      ),
-    );
-    out.add(const SizedBox(height: 12));
-    out.add(
-      ArtDecoButton(
-        text: 'Инвентарь',
-        icon: Icons.inventory_2,
-        onPressed: _openInventoryScreen,
-        primary: true,
-        expanded: true,
-      ),
-    );
-    out.add(const SizedBox(height: 12));
-
-    // 3) ДИНАМИЧЕСКИЕ (появляются только при событиях)
-    if (_hasActiveDebate && !_alreadyVotedInActiveDebate) {
-      out.add(
-        ArtDecoButton(
-          text: 'Дебаты',
-          icon: Icons.forum,
-          onPressed: _openDebates,
-          primary: false,
-          expanded: true,
-        ),
-      );
-      out.add(const SizedBox(height: 12));
-    }
-
-    if (_hasActiveResolution && !_alreadyBetInActiveResolution) {
-      out.add(
-        ArtDecoButton(
-          text: 'Политрешение',
-          icon: Icons.gavel,
-          onPressed: _onOpenResolutionPressed,
-          primary: false,
-          expanded: true,
-        ),
-      );
-      out.add(const SizedBox(height: 12));
-    }
-
-    // 4) ПРОЧИЕ ОБЩИЕ (всегда доступны) — кино
-    out.add(
-      WatchedMovieBlock(
-        currentUserId: user.id,
-        onChanged: () async {
-          try {
-            await _refreshProfile();
-            await _loadJournal();
-          } catch (_) {}
-        },
-      ),
-    );
-    out.add(const SizedBox(height: 12));
-
-    out.add(
-      MovieVoteBlock(
-        currentUserId: user.id,
-        currentUserRole: user.role,
-        onVoted: () async {
-          try {
-            await _refreshProfile();
-            await _loadJournal();
-          } catch (_) {}
-        },
-      ),
-    );
-    out.add(const SizedBox(height: 12));
-
-    out.add(
-      HollywoodPayBlock(
-        currentUserId: user.id,
-        currentUserRole: user.role,
-        onPaid: () async {
-          try {
-            await _refreshProfile();
-            await _loadJournal();
-          } catch (_) {}
-        },
-      ),
-    );
-
-    return out;
-  }
-
-  // -----------------------
   // BUILD
   // -----------------------
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final isSmallScreen = screenWidth < 380;
+
+    // ✅ ПОКАЗЫВАЕМ "Прослушал речь жизни" если Речь жизни была запущена (активна сейчас).
+    final nowUtc = DateTime.now().toUtc();
+    final bool speechIsCurrentlyOn =
+        speechActive && (speechExpiresAt == null || nowUtc.isBefore(speechExpiresAt!));
+
+    final Widget listenWidget = speechIsCurrentlyOn
+        ? ListenButton(
+            userId: user.id,
+            activeSpeechId: _activeSpeechId,
+            speechActorId: speechActorId,
+            speechActive: speechActive,
+            alreadyListened: _listenedToThisSpeech,
+            onListenComplete: (rpcResult) async {
+              try {
+                if (!mounted) return;
+                setState(() => _listenedToThisSpeech = true);
+                await _refreshProfile();
+                await _loadJournal();
+                await _checkIfListened();
+              } catch (_) {}
+            },
+          )
+        : const SizedBox.shrink();
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -1378,8 +1389,7 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               // TOP BAR
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
@@ -1421,7 +1431,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
                     _buildCrystalButton(
-                      icon: Icons.exit_to_app,
+                      icon: Icons.refresh,
                       onPressed: _logout,
                       iconColor: TitanicTheme.raptureGold,
                     ),
@@ -1465,23 +1475,19 @@ class _HomeScreenState extends State<HomeScreen> {
                                   const SizedBox(width: 20),
                                   Expanded(
                                     child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
+                                      crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
                                         Text(
                                           '${user.firstName} ${user.lastName}',
                                           style: TextStyle(
                                             fontFamily: 'CormorantGaramond',
-                                            fontSize:
-                                                isSmallScreen ? 22 : 26,
+                                            fontSize: isSmallScreen ? 22 : 26,
                                             fontWeight: FontWeight.w700,
                                             color: TitanicTheme.ivoryCream,
                                             letterSpacing: 0.5,
                                           ),
                                         ),
                                         const SizedBox(height: 10),
-                                        // ✅ Цвет снова отображается у ВСЕХ ролей,
-                                        // ✅ Регион — только у экономистов
                                         _buildColorAndRegionChips(isSmallScreen),
                                       ],
                                     ),
@@ -1494,18 +1500,15 @@ class _HomeScreenState extends State<HomeScreen> {
                               Container(
                                 padding: const EdgeInsets.all(18),
                                 decoration: BoxDecoration(
-                                  color: TitanicTheme.surfaceNavy
-                                      .withOpacity(0.35),
+                                  color: TitanicTheme.surfaceNavy.withOpacity(0.35),
                                   borderRadius: BorderRadius.circular(18),
                                   border: Border.all(
-                                    color: TitanicTheme.raptureGold
-                                        .withOpacity(0.25),
+                                    color: TitanicTheme.raptureGold.withOpacity(0.25),
                                     width: 1.5,
                                   ),
                                 ),
                                 child: Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceAround,
+                                  mainAxisAlignment: MainAxisAlignment.spaceAround,
                                   children: [
                                     Column(
                                       children: [
@@ -1514,30 +1517,34 @@ class _HomeScreenState extends State<HomeScreen> {
                                           style: TextStyle(
                                             fontFamily: 'Cinzel',
                                             fontSize: 13,
-                                            color: TitanicTheme.ivoryCream
-                                                .withOpacity(0.7),
+                                            color: TitanicTheme.ivoryCream.withOpacity(0.7),
                                             letterSpacing: 1.0,
                                           ),
                                         ),
                                         const SizedBox(height: 6),
-                                        Text(
-                                          user.vBalance.toStringAsFixed(2),
-                                          style: TextStyle(
-                                            fontFamily: 'CormorantGaramond',
-                                            fontSize:
-                                                isSmallScreen ? 24 : 28,
-                                            fontWeight: FontWeight.w700,
-                                            color: TitanicTheme.raptureGold,
-                                            letterSpacing: 1.0,
-                                          ),
+                                        StreamBuilder<double>(
+                                          stream: _voicesBalanceStream(),
+                                          initialData: user.vBalance,
+                                          builder: (context, snap) {
+                                            final val = snap.data ?? user.vBalance;
+                                            return Text(
+                                              _formatVoices(val),
+                                              style: TextStyle(
+                                                fontFamily: 'CormorantGaramond',
+                                                fontSize: isSmallScreen ? 24 : 28,
+                                                fontWeight: FontWeight.w700,
+                                                color: TitanicTheme.raptureGold,
+                                                letterSpacing: 1.0,
+                                              ),
+                                            );
+                                          },
                                         ),
                                       ],
                                     ),
                                     Container(
                                       width: 1.5,
                                       height: 45,
-                                      color: TitanicTheme.raptureGold
-                                          .withOpacity(0.25),
+                                      color: TitanicTheme.raptureGold.withOpacity(0.25),
                                     ),
                                     Column(
                                       children: [
@@ -1546,22 +1553,27 @@ class _HomeScreenState extends State<HomeScreen> {
                                           style: TextStyle(
                                             fontFamily: 'Cinzel',
                                             fontSize: 13,
-                                            color: TitanicTheme.ivoryCream
-                                                .withOpacity(0.7),
+                                            color: TitanicTheme.ivoryCream.withOpacity(0.7),
                                             letterSpacing: 1.0,
                                           ),
                                         ),
                                         const SizedBox(height: 6),
-                                        Text(
-                                          user.mBalance.toStringAsFixed(2),
-                                          style: TextStyle(
-                                            fontFamily: 'CormorantGaramond',
-                                            fontSize:
-                                                isSmallScreen ? 24 : 28,
-                                            fontWeight: FontWeight.w700,
-                                            color: TitanicTheme.seaFoamGreen,
-                                            letterSpacing: 1.0,
-                                          ),
+                                        StreamBuilder<double>(
+                                          stream: _mindsBalanceStream(),
+                                          initialData: user.mBalance,
+                                          builder: (context, snap) {
+                                            final val = snap.data ?? user.mBalance;
+                                            return Text(
+                                              _formatMinds(val),
+                                              style: TextStyle(
+                                                fontFamily: 'CormorantGaramond',
+                                                fontSize: isSmallScreen ? 24 : 28,
+                                                fontWeight: FontWeight.w700,
+                                                color: TitanicTheme.seaFoamGreen,
+                                                letterSpacing: 1.0,
+                                              ),
+                                            );
+                                          },
                                         ),
                                       ],
                                     ),
@@ -1574,7 +1586,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       const SizedBox(height: 24),
 
-                      // ✅ ONE BLOCK: ВСЕ роли + общие + динамические (без отдельных блоков)
+                      // ✅ Блок действий: теперь кнопки только из RoleButtons, и все в ArtDecoButton-стиле
                       Container(
                         decoration: BoxDecoration(
                           color: TitanicTheme.panelDark.withOpacity(0.9),
@@ -1595,7 +1607,93 @@ class _HomeScreenState extends State<HomeScreen> {
                           padding: const EdgeInsets.all(20),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: _buildUnifiedButtons(),
+                            children: [
+                              RoleButtons(
+                                user: user,
+                                onTransfer: _openTransferScreen,
+                                onOpenInventory: _openInventoryScreen,
+                                onBuyTurn: _openBuyTurnFlow,
+                                onPurchaseEnterprise: _openPurchaseEnterprise,
+                                onOpenDebates: _openDebates,
+                                onOpenResolution: _onOpenResolutionPressed,
+                                onStartSpeech: _onStartSpeechPressed,
+                                listenWidget: listenWidget,
+                                hasActiveDebate: _hasActiveDebate,
+                                alreadyVotedInActiveDebate: _alreadyVotedInActiveDebate,
+                                hasActiveResolution: _hasActiveResolution,
+                                alreadyBetInActiveResolution: _alreadyBetInActiveResolution,
+                                honorAlreadyUsed: _honorUsedLocal ?? false,
+                                onHonorArticle: () async {
+    await journalist_block.showHonorArticleDialog(
+      context,
+      user.id,
+      onPublished: () async {
+        await _refreshProfile();
+        await _loadJournal();
+        await _loadHonorLocalState();
+      },
+    );
+  },
+
+                              ),
+
+
+
+                              // ниже — блоки (они уже используют ArtDecoButton внутри)
+                              if (_isRole('мафия')) ...[
+                                const SizedBox(height: 12),
+                                mafia_blocks.MafiaBlock(
+                                  currentUserId: user.id,
+                                  currentUserRole: user.role,
+                                  onProposalUsed: () async {
+                                    try {
+                                      await _refreshProfile();
+                                      await _loadJournal();
+                                    } catch (_) {}
+                                  },
+                                  onDebtCollected: _onDebtCollected,
+                                  onEnterpriseBought: _onMafiaEnterpriseBought,
+                                ),
+                                const SizedBox(height: 12),
+                                BloodPokerBlock(
+                                  currentUserId: user.id,
+                                  onBetPlaced: _onBloodPokerBetPlaced,
+                                ),
+                              ],
+
+                              const SizedBox(height: 12),
+                              WatchedMovieBlock(
+                                currentUserId: user.id,
+                                onChanged: () async {
+                                  try {
+                                    await _refreshProfile();
+                                    await _loadJournal();
+                                  } catch (_) {}
+                                },
+                              ),
+                              const SizedBox(height: 12),
+                              MovieVoteBlock(
+                                currentUserId: user.id,
+                                currentUserRole: user.role,
+                                onVoted: () async {
+                                  try {
+                                    await _refreshProfile();
+                                    await _loadJournal();
+                                  } catch (_) {}
+                                },
+                              ),
+                              const SizedBox(height: 12),
+                              HollywoodPayBlock(
+                                currentUserId: user.id,
+                                currentUserRole: user.role,
+                                onPaid: () async {
+                                  try {
+                                    await _refreshProfile();
+                                    await _loadJournal();
+                                  } catch (_) {}
+                                },
+                              ),
+                            ],
                           ),
                         ),
                       ),
@@ -1681,21 +1779,17 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (roleLower.contains('мафия') || roleLower.contains('mafia')) {
       return 'assets/mafia.png';
-    } else if (roleLower.contains('голливуд') ||
-        roleLower.contains('hollywood')) {
+    } else if (roleLower.contains('голливуд') || roleLower.contains('hollywood')) {
       return 'assets/hollywood.png';
-    } else if (roleLower.contains('экономист') ||
-        roleLower.contains('economist')) {
+    } else if (roleLower.contains('экономист') || roleLower.contains('economist')) {
       return 'assets/economist.png';
-    } else if (roleLower.contains('журналист') ||
-        roleLower.contains('journalist')) {
+    } else if (roleLower.contains('журналист') || roleLower.contains('journalist')) {
       return 'assets/journalist.png';
     } else if (roleLower.contains('общественный') ||
         roleLower.contains('public') ||
         roleLower.contains('деятель')) {
       return 'assets/public_figure.png';
-    } else if (roleLower.contains('политик') ||
-        roleLower.contains('politician')) {
+    } else if (roleLower.contains('политик') || roleLower.contains('politician')) {
       return 'assets/politic.png';
     } else {
       return 'assets/default_role.png';
@@ -1863,8 +1957,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                             const SizedBox(width: 8),
                             Text(
-                              _formatJournalDate(
-                                  entry['created_at']?.toString()),
+                              _formatJournalDate(entry['created_at']?.toString()),
                               style: TextStyle(
                                 fontFamily: 'Cinzel',
                                 fontSize: 12,
@@ -1931,19 +2024,167 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-// Вспомогательные функции
-Future<Map<String, dynamic>> fetchHonorState(String userId) async {
-  // Заглушка - замените на реальную реализацию
-  return {'used': false, 'm_balance': 0.0};
-}
-
 Future<void> openBuyTurnFlow({
   required BuildContext context,
   required SupabaseClient supabase,
   required GameService svc,
   required AppUser currentUser,
   required Future<void> Function() onRefreshProfile,
-  required Function(String) showMessage,
+  required void Function(String) showMessage,
 }) async {
-  // Заглушка — оставлено как было в исходнике пользователя
+  List<Map<String, dynamic>> econs = [];
+  try {
+    final res = await supabase
+        .from('user_credentials')
+        .select('id, first_name, last_name, telegram_username')
+        .eq('role', 'economist')
+        .order('first_name');
+    if (res is List) {
+      econs = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    }
+  } catch (e) {
+    showMessage('Не удалось загрузить список экономистов: $e');
+    return;
+  }
+
+  if (econs.isEmpty) {
+    showMessage('Нет доступных экономистов для покупки хода.');
+    return;
+  }
+
+  final Map<String, dynamic>? chosen =
+      await showModalBottomSheet<Map<String, dynamic>>(
+    context: context,
+    isScrollControlled: true,
+    builder: (ctx) {
+      return SafeArea(
+        child: FractionallySizedBox(
+          heightFactor: 0.85,
+          child: Column(
+            children: [
+              Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        decoration: const InputDecoration(
+                          hintText: 'Поиск экономиста',
+                          prefixIcon: Icon(Icons.search),
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                        onChanged: (q) {},
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    TextButton(
+                        onPressed: () => Navigator.of(ctx).pop(),
+                        child: const Text('Отмена')),
+                  ],
+                ),
+              ),
+              const Divider(height: 0),
+              Expanded(
+                child: ListView.separated(
+                  itemCount: econs.length,
+                  separatorBuilder: (_, __) => const Divider(height: 0),
+                  itemBuilder: (context, index) {
+                    final row = econs[index];
+                    final first = (row['first_name'] ?? '').toString();
+                    final last = (row['last_name'] ?? '').toString();
+                    final displayName = ('$first $last').trim().isEmpty
+                        ? (row['telegram_username'] ?? 'Без имени')
+                        : '$first $last';
+                    return ListTile(
+                      title: Text(displayName),
+                      onTap: () => Navigator.of(context).pop(row),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    },
+  );
+
+  if (chosen == null) return;
+
+  final first = (chosen['first_name'] ?? '').toString();
+  final last = (chosen['last_name'] ?? '').toString();
+  final displayName = ('$first $last').trim().isEmpty
+      ? (chosen['telegram_username'] ?? 'Без имени')
+      : '$first $last';
+
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Купить ход экономисту'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text('Стоимость: 10 войсов'),
+          const SizedBox(height: 8),
+          Text('Получатель: $displayName'),
+        ],
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Отмена')),
+        ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Купить')),
+      ],
+    ),
+  );
+
+  if (confirmed != true) return;
+
+  try {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+
+    final rpcRes = await svc.rpcBuyEconomistTurn(
+      fromUser: currentUser.id,
+      toUser: chosen['id'].toString(),
+      cost: 10,
+    );
+
+    Navigator.of(context).pop();
+
+    if (rpcRes == null) {
+      showMessage('Неожиданный ответ сервера');
+      return;
+    }
+
+    final status =
+        (rpcRes['status'] ?? rpcRes['result'] ?? '').toString().toLowerCase();
+    if (status.contains('ok') || status.contains('success') || status == 'ok') {
+      showMessage('Покупка успешна: у экономиста добавлен предмет "Дополнительный ход"');
+
+      try {
+        await onRefreshProfile();
+      } catch (_) {}
+    } else {
+      final msg = rpcRes['message']?.toString() ?? rpcRes.toString();
+      showMessage('Ошибка: $msg');
+    }
+  } catch (e) {
+    try {
+      Navigator.of(context).pop();
+    } 
+    catch (_) {}
+    if('$e' == "PostgrestException(message: insufficient_balance, code: P0001, details: Bad Request, hint: null)") {
+      showMessage('Ошибка при покупке: недостаточно войсов');
+    } else {
+      showMessage('Ошибка при покупке: $e');
+    }
+  }
 }

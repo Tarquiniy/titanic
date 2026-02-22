@@ -817,16 +817,24 @@ class TitanicTheme {
           borderRadius: BorderRadius.vertical(bottom: Radius.circular(20)),
         ),
       ),
-      textTheme: TextTheme(
-        headlineSmall: heading,
-        titleLarge: titleLarge,
-        bodyLarge: body,
-        bodyMedium: body.copyWith(fontSize: 14),
-        labelLarge: buttonText,
-      ),
+      textTheme: base.textTheme.copyWith(
+  headlineSmall: heading,
+  titleLarge: titleLarge,
+  titleMedium: body.copyWith( // ✅ это важно для TextField/EditableText
+    fontSize: 16,
+    color: const Color.fromARGB(255, 254, 247, 50).withOpacity(0.9),
+    fontFamily: 'Cinzel',
+  ),
+  bodyLarge: body,
+  bodyMedium: body.copyWith(fontSize: 14),
+  labelLarge: buttonText,
+),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: panelDark.withOpacity(0.2),
+        labelStyle: TextStyle(color: ivoryCream.withOpacity(0.85)),
+        hintStyle: TextStyle(color: ivoryCream.withOpacity(0.55)),
+        floatingLabelStyle: TextStyle(color: raptureGold.withOpacity(0.9)),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide(color: raptureGold.withOpacity(0.2)),

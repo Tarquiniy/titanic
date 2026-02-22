@@ -1915,22 +1915,24 @@ class _DebatesTabState extends State<DebatesTab> {
   }
 
   Future<void> _loadPoliticians() async {
-    try {
-      final res = await supabase
-          .from('user_credentials')
-          .select('id, first_name, last_name, telegram_username')
-          .eq('role', 'politician')
-          .order('first_name');
-      if (res is List) {
-        _politicians = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
-      } else {
-        _politicians = <Map<String, dynamic>>[];
-      }
-    } catch (_) {
+  try {
+    final res = await supabase
+        .from('user_credentials')
+        .select('id, first_name, last_name, telegram_username, color') // <-- + color
+        .eq('role', 'politician')
+        .order('first_name');
+
+    if (res is List) {
+      _politicians =
+          res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    } else {
       _politicians = <Map<String, dynamic>>[];
     }
-    if (mounted) setState(() {});
+  } catch (_) {
+    _politicians = <Map<String, dynamic>>[];
   }
+  if (mounted) setState(() {});
+}
 
   Future<void> _loadActiveDebate() async {
     try {
@@ -2083,47 +2085,80 @@ class _DebatesTabState extends State<DebatesTab> {
   }
 
   Widget _buildSpeakerDropdown(String color, bool first) {
-    final isSmall = MediaQuery.of(context).size.width < 380;
-    final current = (first ? _speakerA[color] : _speakerB[color]);
-    final items = <DropdownMenuItem<String?>>[
-      const DropdownMenuItem<String?>(value: null, child: Text('- нет -')),
-    ];
-    for (final p in _politicians) {
-      final id = p['id']?.toString();
-      final name = ((p['first_name'] ?? '') as String).toString().trim().isEmpty
-          ? (p['telegram_username'] ?? p['last_name'] ?? id ?? '—').toString()
-          : '${p['first_name'] ?? ''} ${p['last_name'] ?? ''}'.trim();
-      items.add(DropdownMenuItem<String?>(value: id, child: Text(name)));
-    }
-    return Container(
-      padding: EdgeInsets.symmetric(vertical: isSmall ? 4 : 6),
-      child: DropdownButton<String?>(
-        value: current,
-        isExpanded: true,
-        items: items,
-        onChanged: (v) {
-          setState(() {
-            if (first) {
-              _speakerA[color] = v;
-              if (_speakerB[color] == v) _speakerB[color] = null;
-            } else {
-              _speakerB[color] = v;
-              if (_speakerA[color] == v) _speakerA[color] = null;
-            }
-          });
-        },
-        underline: Container(
-          height: 1,
-          color: TitanicTheme.raptureGold.withOpacity(0.3),
-        ),
-        icon: Icon(
-          Icons.arrow_drop_down,
-          color: TitanicTheme.raptureGold,
-        ),
-        style: TitanicTheme.body.copyWith(fontSize: 14),
-      ),
-    );
+  final isSmall = MediaQuery.of(context).size.width < 380;
+
+  // текущий выбранный id
+  final current = (first ? _speakerA[color] : _speakerB[color]);
+
+  // ✅ оставляем только политиков цвета текущего варианта
+  final filtered = _politicians.where((p) {
+    final pc = (p['color'] ?? '').toString().trim().toLowerCase();
+    return pc == color.trim().toLowerCase();
+  }).toList();
+
+  // ids доступных политиков
+  final allowedIds = filtered.map((p) => p['id']?.toString()).whereType<String>().toSet();
+
+  // ✅ если раньше был выбран политик не того цвета — сбрасываем
+  String? safeCurrent = current;
+  if (safeCurrent != null && !allowedIds.contains(safeCurrent)) {
+    safeCurrent = null;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      setState(() {
+        if (first) {
+          _speakerA[color] = null;
+        } else {
+          _speakerB[color] = null;
+        }
+      });
+    });
   }
+
+  final items = <DropdownMenuItem<String?>>[
+    const DropdownMenuItem<String?>(value: null, child: Text('- нет -')),
+  ];
+
+  for (final p in filtered) {
+    final id = p['id']?.toString();
+    final fn = (p['first_name'] ?? '').toString().trim();
+    final ln = (p['last_name'] ?? '').toString().trim();
+    final tg = (p['telegram_username'] ?? '').toString().trim();
+
+    final name = (fn.isEmpty && ln.isEmpty)
+        ? (tg.isNotEmpty ? tg : (id ?? '—'))
+        : ('$fn $ln').trim();
+
+    items.add(DropdownMenuItem<String?>(value: id, child: Text(name)));
+  }
+
+  return Container(
+    padding: EdgeInsets.symmetric(vertical: isSmall ? 4 : 6),
+    child: DropdownButton<String?>(
+      value: safeCurrent,
+      isExpanded: true,
+      items: items,
+      onChanged: (v) {
+        setState(() {
+          if (first) {
+            _speakerA[color] = v;
+            if (_speakerB[color] == v) _speakerB[color] = null;
+          } else {
+            _speakerB[color] = v;
+            if (_speakerA[color] == v) _speakerA[color] = null;
+          }
+        });
+      },
+      underline: Container(
+        height: 1,
+        color: TitanicTheme.raptureGold.withOpacity(0.3),
+      ),
+      icon: Icon(Icons.arrow_drop_down, color: TitanicTheme.raptureGold),
+      style: TitanicTheme.body.copyWith(fontSize: 14),
+      dropdownColor: TitanicTheme.panelDark,
+    ),
+  );
+}
 
   Widget _buildColorRow(_ColorDef c) {
     Color parsed;
@@ -2369,9 +2404,12 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
 
   final TextEditingController _titleCtrl = TextEditingController();
   final TextEditingController _descCtrl = TextEditingController();
+
+  // Цвет по умолчанию (используется как дефолт для новых вариантов)
   String _selectedColor = 'зелёный';
 
   final List<TextEditingController> _optionCtrls = [];
+  final List<String> _optionColors = [];
 
   bool _creating = false;
   bool _loading = false;
@@ -2405,13 +2443,19 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
   }
 
   void _addOptionField() {
-    setState(() => _optionCtrls.add(TextEditingController()));
+    setState(() {
+      _optionCtrls.add(TextEditingController());
+      _optionColors.add(_selectedColor); // цвет по умолчанию для нового варианта
+    });
   }
 
   void _removeOptionField(int idx) {
     if (idx < 0 || idx >= _optionCtrls.length) return;
     _optionCtrls[idx].dispose();
-    setState(() => _optionCtrls.removeAt(idx));
+    setState(() {
+      _optionCtrls.removeAt(idx);
+      if (_optionColors.length > idx) _optionColors.removeAt(idx);
+    });
   }
 
   Future<void> _loadResolutions() async {
@@ -2424,7 +2468,8 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
                 'id, title, description, created_by, created_at, is_closed, closed_at, total_m, winning_bet_id, winning_option_id')
             .order('created_at', ascending: false);
         if (res is List) {
-          _resolutions = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+          _resolutions =
+              res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
         } else {
           _resolutions = [];
         }
@@ -2434,7 +2479,8 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
             .select('*')
             .order('created_at', ascending: false);
         if (res2 is List) {
-          _resolutions = res2.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+          _resolutions =
+              res2.map((e) => Map<String, dynamic>.from(e as Map)).toList();
         } else {
           _resolutions = [];
         }
@@ -2462,11 +2508,9 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
       return;
     }
 
-    final options = _optionCtrls
-        .map((c) => c.text.trim())
-        .where((t) => t.isNotEmpty)
-        .toList();
-    if (options.isEmpty) {
+    final hasAnyOption =
+        _optionCtrls.any((c) => c.text.trim().isNotEmpty);
+    if (!hasAnyOption) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Добавьте хотя бы один вариант ответа')),
       );
@@ -2481,23 +2525,40 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
         'created_at': DateTime.now().toUtc().toIso8601String(),
         'is_closed': false,
       };
+
       final res = await supabase
           .from('political_resolutions')
           .insert(payload)
           .select()
           .maybeSingle();
+
       if (res == null || res['id'] == null) {
         throw Exception('Не удалось создать политрешение');
       }
+
       final int resolutionId = (res['id'] is int)
           ? res['id'] as int
           : int.parse(res['id'].toString());
 
-      final optRows = options.map((label) => {
-            'resolution_id': resolutionId,
-            'label': label,
-            'color': _selectedColor,
-          }).toList();
+      // ВАЖНО: вставляем варианты с ИНДИВИДУАЛЬНЫМИ цветами
+      final optRows = <Map<String, dynamic>>[];
+      for (int i = 0; i < _optionCtrls.length; i++) {
+        final label = _optionCtrls[i].text.trim();
+        if (label.isEmpty) continue;
+
+        final color = (i < _optionColors.length) ? _optionColors[i] : _selectedColor;
+
+        optRows.add({
+          'resolution_id': resolutionId,
+          'label': label,
+          'color': color,
+        });
+      }
+
+      if (optRows.isEmpty) {
+        throw Exception('Нет заполненных вариантов для сохранения');
+      }
+
       await supabase.from('resolution_options').insert(optRows);
 
       if (mounted) {
@@ -2505,12 +2566,21 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
           const SnackBar(content: Text('Политрешение и варианты созданы')),
         );
       }
+
       _titleCtrl.clear();
       _descCtrl.clear();
+
       for (final c in _optionCtrls) c.clear();
+
+      // Оставляем 1 поле, остальные удаляем
       while (_optionCtrls.length > 1) {
         _optionCtrls.removeLast().dispose();
       }
+      while (_optionColors.length > 1) {
+        _optionColors.removeLast();
+      }
+      if (_optionColors.isEmpty) _optionColors.add(_selectedColor);
+      _optionColors[0] = _selectedColor;
 
       await _loadResolutions();
     } catch (e) {
@@ -2552,7 +2622,7 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
         await supabase.from('resolution_options').insert({
           'resolution_id': resolutionId,
           'label': added,
-          'color': _selectedColor,
+          'color': _selectedColor, // добавление в существующую резолюцию оставляем как было
         });
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -2570,7 +2640,8 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
     }
   }
 
-  Future<List<Map<String, dynamic>>> _loadOptionsForResolution(int resolutionId) async {
+  Future<List<Map<String, dynamic>>> _loadOptionsForResolution(
+      int resolutionId) async {
     try {
       final res = await supabase
           .from('resolution_options')
@@ -2586,7 +2657,8 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
     }
   }
 
-  Future<List<Map<String, dynamic>>> _loadResultsForResolution(int resolutionId) async {
+  Future<List<Map<String, dynamic>>> _loadResultsForResolution(
+      int resolutionId) async {
     try {
       final res = await supabase
           .from('resolution_results_admin')
@@ -2632,7 +2704,8 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
   Widget _buildResolutionCard(Map<String, dynamic> r) {
     final isSmall = MediaQuery.of(context).size.width < 380;
     final closed = (r['is_closed'] == true);
-    final id = (r['id'] is int) ? r['id'] as int : int.parse(r['id'].toString());
+    final id =
+        (r['id'] is int) ? r['id'] as int : int.parse(r['id'].toString());
     final int? winningOptionId = r['winning_option_id'] == null
         ? null
         : (r['winning_option_id'] is int
@@ -2649,7 +2722,8 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
       elevation: 2,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: TitanicTheme.raptureGold.withOpacity(0.2), width: 1),
+        side: BorderSide(
+            color: TitanicTheme.raptureGold.withOpacity(0.2), width: 1),
       ),
       child: Padding(
         padding: EdgeInsets.all(isSmall ? 12 : 16),
@@ -2760,7 +2834,9 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
                     });
                     final topOid = (results[0]['option_id'] is int)
                         ? results[0]['option_id'] as int
-                        : int.tryParse(results[0]['option_id']?.toString() ?? '') ?? 0;
+                        : int.tryParse(
+                                results[0]['option_id']?.toString() ?? '') ??
+                            0;
                     try {
                       winningOption = opts.firstWhere((o) {
                         final oid = (o['id'] is int)
@@ -2774,7 +2850,8 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
                   }
                 }
 
-                final totalToShow = (r['total_m'] != null) ? r['total_m'] : aggregatedTotal;
+                final totalToShow =
+                    (r['total_m'] != null) ? r['total_m'] : aggregatedTotal;
 
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -2796,18 +2873,24 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
                       final sum = resRow != null
                           ? ((resRow['votes_sum'] is num)
                               ? (resRow['votes_sum'] as num)
-                              : num.tryParse(resRow['votes_sum']?.toString() ?? '') ?? 0)
+                              : num.tryParse(
+                                      resRow['votes_sum']?.toString() ?? '') ??
+                                  0)
                           : 0;
                       final cnt = resRow != null
                           ? ((resRow['votes_count'] is num)
                               ? (resRow['votes_count'] as num).toInt()
-                              : int.tryParse(resRow['votes_count']?.toString() ?? '') ?? 0)
+                              : int.tryParse(
+                                      resRow['votes_count']?.toString() ?? '') ??
+                                  0)
                           : 0;
 
                       final isWinner = (winningOption != null) &&
-                          ((winningOption['id'] is int
-                                  ? winningOption['id']
-                                  : int.tryParse(winningOption['id']?.toString() ?? '')) ==
+                          ((winningOption!['id'] is int
+                                  ? winningOption!['id']
+                                  : int.tryParse(
+                                      winningOption!['id']?.toString() ??
+                                          '')) ==
                               oid);
 
                       return Container(
@@ -2849,7 +2932,8 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
                                       vertical: 4,
                                     ),
                                     decoration: BoxDecoration(
-                                      color: TitanicTheme.raptureGold.withOpacity(0.15),
+                                      color: TitanicTheme.raptureGold
+                                          .withOpacity(0.15),
                                       borderRadius: BorderRadius.circular(12),
                                       border: Border.all(
                                         color: TitanicTheme.raptureGold,
@@ -2877,7 +2961,8 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
                             Text(
                               'Цвет: $color  (id:$oid)',
                               style: TextStyle(
-                                color: TitanicTheme.ivoryCream.withOpacity(0.7),
+                                color:
+                                    TitanicTheme.ivoryCream.withOpacity(0.7),
                                 fontSize: 11,
                               ),
                             ),
@@ -2900,8 +2985,8 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
                           Text(
                             winningOption != null
                                 ? (closed
-                                    ? 'Победивший вариант: ${winningOption['label']} [${winningOption['color'] ?? '-'}]'
-                                    : 'Текущий лидер: ${winningOption['label']} [${winningOption['color'] ?? '-'}]')
+                                    ? 'Победивший вариант: ${winningOption!['label']} [${winningOption!['color'] ?? '-'}]'
+                                    : 'Текущий лидер: ${winningOption!['label']} [${winningOption!['color'] ?? '-'}]')
                                 : (closed
                                     ? 'Победивший вариант: —'
                                     : 'Текущий лидер: —'),
@@ -2977,9 +3062,17 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
                       style: TitanicTheme.subtitle,
                     ),
                     const SizedBox(height: 12),
+
+                    // === ВАЖНО: теперь у каждого варианта есть Dropdown выбора цвета ===
                     ..._optionCtrls.asMap().entries.map((e) {
                       final idx = e.key;
                       final ctrl = e.value;
+
+                      // На всякий случай: держим списки синхронными
+                      if (_optionColors.length <= idx) {
+                        _optionColors.add(_selectedColor);
+                      }
+
                       return Padding(
                         padding: const EdgeInsets.symmetric(vertical: 6),
                         child: Row(
@@ -2990,6 +3083,35 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
                                 decoration: TitanicTheme.inputDecoration.copyWith(
                                   labelText: 'Вариант ${idx + 1}',
                                 ),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            SizedBox(
+                              width: isSmall ? 120 : 150,
+                              child: DropdownButtonFormField<String>(
+                                value: _optionColors[idx],
+                                items: fixedColors.map((c) {
+                                  return DropdownMenuItem<String>(
+                                    value: c,
+                                    child: Text(
+                                      c,
+                                      style: const TextStyle(color: Colors.white),
+                                    ),
+                                  );
+                                }).toList(),
+                                onChanged: (v) {
+                                  if (v == null) return;
+                                  setState(() => _optionColors[idx] = v);
+                                },
+                                decoration: TitanicTheme.inputDecoration.copyWith(
+                                  labelText: 'Цвет',
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 10,
+                                  ),
+                                ),
+                                dropdownColor: TitanicTheme.panelDark,
+                                style: const TextStyle(color: Colors.white),
                               ),
                             ),
                             const SizedBox(width: 8),
@@ -3009,6 +3131,7 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
                         ),
                       );
                     }).toList(),
+
                     const SizedBox(height: 8),
                     Wrap(
                       spacing: 12,
@@ -3065,7 +3188,9 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
                       )
                     else
                       Column(
-                        children: _resolutions.map((r) => _buildResolutionCard(r)).toList(),
+                        children: _resolutions
+                            .map((r) => _buildResolutionCard(r))
+                            .toList(),
                       ),
                   ],
                 ),
@@ -3078,6 +3203,7 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
     );
   }
 }
+
 
 // ----------------- ColorBanksTab -----------------
 class ColorBanksTab extends StatefulWidget {
