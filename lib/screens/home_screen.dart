@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:titanic/blocks/blood_poker_block.dart';
 import 'package:titanic/blocks/journalist_block.dart' as journalist_block;
+import 'package:titanic/screens/home_dialogs.dart' as home_dialogs;
 
 import 'package:titanic/models/app_user.dart';
 import 'package:titanic/services/game_service.dart';
@@ -1609,21 +1610,22 @@ class _HomeScreenState extends State<HomeScreen> {
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
                               RoleButtons(
-                                user: user,
-                                onTransfer: _openTransferScreen,
-                                onOpenInventory: _openInventoryScreen,
-                                onBuyTurn: _openBuyTurnFlow,
-                                onPurchaseEnterprise: _openPurchaseEnterprise,
-                                onOpenDebates: _openDebates,
-                                onOpenResolution: _onOpenResolutionPressed,
-                                onStartSpeech: _onStartSpeechPressed,
-                                listenWidget: listenWidget,
-                                hasActiveDebate: _hasActiveDebate,
-                                alreadyVotedInActiveDebate: _alreadyVotedInActiveDebate,
-                                hasActiveResolution: _hasActiveResolution,
-                                alreadyBetInActiveResolution: _alreadyBetInActiveResolution,
-                                honorAlreadyUsed: _honorUsedLocal ?? false,
-                                onHonorArticle: () async {
+  user: user,
+  onTransfer: _openTransferScreen,
+  onOpenInventory: _openInventoryScreen,
+  onBuyTurn: _openBuyTurnFlow,
+  onPurchaseEnterprise: _openPurchaseEnterprise,
+  onOpenDebates: _openDebates,
+  onOpenResolution: _onOpenResolutionPressed,
+  onStartSpeech: _onStartSpeechPressed,
+  listenWidget: listenWidget,
+  hasActiveDebate: _hasActiveDebate,
+  alreadyVotedInActiveDebate: _alreadyVotedInActiveDebate,
+  hasActiveResolution: _hasActiveResolution,
+  alreadyBetInActiveResolution: _alreadyBetInActiveResolution,
+
+  honorAlreadyUsed: _honorUsedLocal ?? false,
+  onHonorArticle: () async {
     await journalist_block.showHonorArticleDialog(
       context,
       user.id,
@@ -1635,7 +1637,20 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   },
 
-                              ),
+  // ✅ ДОБАВЬ ВОТ ЭТО:
+  onInvestInColor: () async {
+    await home_dialogs.showInvestInColorDialog(
+      context: context,
+      supabase: supabase,
+      userId: user.id,
+      onCompleted: () async {
+        await _refreshProfile();
+        await _loadJournal();
+      },
+      showMessage: _showMessage,
+    );
+  },
+),
 
 
 

@@ -89,7 +89,7 @@ class HomeRoleSection extends StatelessWidget {
 
     final row2 = <Widget>[];
     if (_is('politician') && onStartSpeech != null) {
-      row2.add(_action('Речь жизни (старт)', Icons.record_voice_over, onTap: onStartSpeech, tooltip: 'Запустить речь жизни'));
+      row2.add(_action('Речь жизни - сказать', Icons.record_voice_over, onTap: onStartSpeech, tooltip: 'Запустить речь жизни'));
     }
     if (_is('мафия') && onMafiaEnterprise != null) {
   row2.add(_action('ПРЕДПРИЯТИЕ МАФИИ', Icons.business, 

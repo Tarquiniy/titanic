@@ -104,7 +104,7 @@ class RoleButtons extends StatelessWidget {
 
     buttons.add(
       _btn(
-        text: 'Перевод V',
+        text: 'Перевести Войсы',
         icon: Icons.swap_horiz,
         onPressed: onTransfer,
         primary: false,
@@ -166,7 +166,7 @@ class RoleButtons extends StatelessWidget {
     if (isPolitician) {
       buttons.add(
         _btn(
-          text: 'Речь жизни (старт)',
+          text: 'Речь жизни - сказать',
           icon: Icons.campaign,
           onPressed: onStartSpeech,
           primary: true,

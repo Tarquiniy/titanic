@@ -277,7 +277,7 @@ class _MafiaBlockState extends State<MafiaBlock> {
           SizedBox(
             width: double.infinity,
             child: ArtDecoButton(
-              text: 'Забрать долг (одноразово)',
+              text: 'Ростовщичество',
               onPressed: () => _openCollectDebtScreen(context),
               primary: true,
             ),

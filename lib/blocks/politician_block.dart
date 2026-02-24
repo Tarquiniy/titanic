@@ -33,7 +33,7 @@ class PoliticianBlock extends StatelessWidget {
         SizedBox(
           width: double.infinity,
           child: ArtDecoButton(
-            text: isEnabled ? 'Речь жизни (старт)' : 'Речь жизни (неактивна)',
+            text: isEnabled ? 'Речь жизни - сказать' : 'Речь жизни (неактивна)',
             onPressed: isEnabled ? onStartSpeech : null,
             primary: isEnabled,
           ),

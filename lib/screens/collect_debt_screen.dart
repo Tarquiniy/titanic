@@ -285,7 +285,7 @@ class _CollectDebtScreenState extends State<CollectDebtScreen> {
                                 ),
                               )
                             : const Text(
-                                'ЗАБРАТЬ ДОЛГ (ОДНОРАЗОВО)',
+                                'ВЗЫСКАТЬ ДОЛГ',
                                 style: TextStyle(
                                   fontSize: 18,
                                   fontWeight: FontWeight.bold,
