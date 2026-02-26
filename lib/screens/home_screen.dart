@@ -16,6 +16,7 @@ import 'package:titanic/screens/transfer_v_screen.dart';
 import 'package:titanic/screens/inventory_screen.dart';
 import 'package:titanic/screens/debates_screen.dart';
 import 'package:titanic/screens/purchase_enterprise_screen.dart';
+import 'package:titanic/screens/resolution_vote_screen.dart';
 import 'login_screen.dart';
 
 // ✅ Listen button (уже в ArtDecoButton-стиле)
@@ -990,166 +991,26 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _onOpenResolutionPressed() async {
     if (_activeResolutionId == null) return;
     final resolutionId = _activeResolutionId!;
-
-    int freshMBalance = 0;
-    try {
-      final profile = await supabase
-          .from('user_credentials')
-          .select('m_balance')
-          .eq('id', user.id)
-          .maybeSingle();
-
-      final raw = (profile is Map<String, dynamic>) ? profile['m_balance'] : null;
-      if (raw is num) {
-        freshMBalance = raw.toInt();
-      } else {
-        freshMBalance = int.tryParse((raw ?? '0').toString()) ?? 0;
-      }
-    } catch (e) {
-      freshMBalance = user.mBalance as int;
-    }
-
-    List<Map<String, dynamic>> options = [];
-    try {
-      final res = await supabase
-          .from('resolution_options')
-          .select('id,label,color')
-          .eq('resolution_id', resolutionId)
-          .order('id');
-      if (res is List) {
-        options = res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
-      }
-    } catch (e) {
-      _showMessage('Не удалось загрузить варианты: $e');
-      return;
-    }
-
-    if (options.isEmpty) {
-      _showMessage('Нет доступных вариантов для этого политрешения');
-      return;
-    }
-
-    int? selectedOptionId;
-    final TextEditingController amtCtrl = TextEditingController();
-
-    await showDialog<bool>(
-      context: context,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (ctx2, setStateDialog) {
-            return AlertDialog(
-              title: const Text('Политрешение'),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    ...options.map((opt) {
-                      final oid = (opt['id'] is int)
-                          ? opt['id'] as int
-                          : int.parse(opt['id'].toString());
-
-                      return RadioListTile<int>(
-                        value: oid,
-                        groupValue: selectedOptionId,
-                        onChanged: (v) =>
-                            setStateDialog(() => selectedOptionId = v),
-                        title: Text(
-                          (opt['label'] ?? '-').toString(),
-                          style: const TextStyle(
-                            color: TitanicTheme.raptureGold,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        activeColor: TitanicTheme.raptureGold,
-                      );
-                    }).toList(),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: amtCtrl,
-                      keyboardType: TextInputType.number,
-                      decoration: InputDecoration(
-                        labelText:
-                            'Майнды (целое). Баланс: ${_formatMinds(freshMBalance as double)}',
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(ctx2).pop(false),
-                  child: const Text('Отмена'),
-                ),
-                ElevatedButton(
-                  onPressed: () async {
-                    if (selectedOptionId == null) {
-                      ScaffoldMessenger.of(ctx2).showSnackBar(
-                        const SnackBar(content: Text('Выберите вариант')),
-                      );
-                      return;
-                    }
-                    final n = int.tryParse(amtCtrl.text.trim());
-                    if (n == null || n <= 0) {
-                      ScaffoldMessenger.of(ctx2).showSnackBar(
-                        const SnackBar(
-                            content: Text('Введите положительное целое число')),
-                      );
-                      return;
-                    }
-
-                    if (n > freshMBalance) {
-                      ScaffoldMessenger.of(ctx2).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                              'Недостаточно майндов: ${_formatMinds(freshMBalance as double)}'),
-                        ),
-                      );
-                      return;
-                    }
-
-                    Navigator.of(ctx2).pop(true);
-
-                    showDialog(
-                      context: context,
-                      barrierDismissible: false,
-                      builder: (_) =>
-                          const Center(child: CircularProgressIndicator()),
-                    );
-
-                    try {
-                      await svc.placeBetInResolution(
-                        resolutionId: resolutionId,
-                        optionId: selectedOptionId!,
-                        userId: user.id,
-                        amount: n,
-                      );
-
-                      await _refreshProfile();
-                      await _loadResolutionState();
-
-                      if (mounted) Navigator.of(context).pop();
-                      if (!mounted) return;
-
-                      setState(() {
-                        _alreadyBetInActiveResolution = true;
-                      });
-                    } catch (e) {
-                      if (mounted) Navigator.of(context).pop();
-                      _showMessage('Ошибка при ставке: $e');
-                    }
-                  },
-                  child: const Text('Подтвердить'),
-                ),
-              ],
-            );
-          },
-        );
-      },
+    final bool? res = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => ResolutionVoteScreen(
+          resolutionId: resolutionId,
+          userId: user.id,
+          service: svc,
+        ),
+      ),
     );
 
-    try {
-      amtCtrl.dispose();
-    } catch (_) {}
+    if (res == true) {
+      await _refreshProfile();
+      await _loadResolutionState();
+      if (!mounted) return;
+      setState(() {
+        _alreadyBetInActiveResolution = true;
+      });
+    } else {
+      await _loadResolutionState();
+    }
   }
 
   // -----------------------
@@ -1362,6 +1223,11 @@ class _HomeScreenState extends State<HomeScreen> {
     final nowUtc = DateTime.now().toUtc();
     final bool speechIsCurrentlyOn =
         speechActive && (speechExpiresAt == null || nowUtc.isBefore(speechExpiresAt!));
+    final bool isPoliticianUser = _isRole('politician');
+    final bool isCurrentUserSpeechActor =
+        speechActorId != null && speechActorId == user.id;
+    final bool replaceSpeechButtonWithListen =
+        isPoliticianUser && speechIsCurrentlyOn && isCurrentUserSpeechActor;
 
     final Widget listenWidget = speechIsCurrentlyOn
         ? ListenButton(
@@ -1618,6 +1484,8 @@ class _HomeScreenState extends State<HomeScreen> {
   onOpenDebates: _openDebates,
   onOpenResolution: _onOpenResolutionPressed,
   onStartSpeech: _onStartSpeechPressed,
+  speechButtonEnabled: _isSpeechButtonEnabled,
+  replaceSpeechButtonWithListen: replaceSpeechButtonWithListen,
   listenWidget: listenWidget,
   hasActiveDebate: _hasActiveDebate,
   alreadyVotedInActiveDebate: _alreadyVotedInActiveDebate,

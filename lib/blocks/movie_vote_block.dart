@@ -77,10 +77,15 @@ class _MovieVoteBlockState extends State<MovieVoteBlock> {
             .from('movie_poll_options')
             .select()
             .eq('poll_id', pollId)
-            .order('position');
+            .order('position', ascending: true);
         
         if (opts is List) {
-          _options = opts.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+          _options = opts.map((e) => Map<String, dynamic>.from(e as Map)).toList()
+            ..sort((a, b) {
+              final ap = int.tryParse((a['position'] ?? 0).toString()) ?? 0;
+              final bp = int.tryParse((b['position'] ?? 0).toString()) ?? 0;
+              return ap.compareTo(bp);
+            });
         }
 
         final voted = await supabase
@@ -136,6 +141,7 @@ class _MovieVoteBlockState extends State<MovieVoteBlock> {
         : int.parse(_activePoll!['id'].toString());
 
     final List<Map<String, dynamic>> inserts = [];
+    final List<String> selectedMovieLabels = [];
     int totalV = 0;
     
     for (final entry in result.entries) {
@@ -152,6 +158,7 @@ class _MovieVoteBlockState extends State<MovieVoteBlock> {
       final optId = (opt['id'] is int) 
           ? opt['id'] as int 
           : int.parse(opt['id'].toString());
+      final label = (opt['label'] ?? '').toString().trim();
       
       inserts.add({
         'poll_id': pollId,
@@ -160,6 +167,9 @@ class _MovieVoteBlockState extends State<MovieVoteBlock> {
         'votes': votes,
         'created_at': DateTime.now().toUtc().toIso8601String(),
       });
+      if (label.isNotEmpty) {
+        selectedMovieLabels.add(label);
+      }
       totalV += votes;
     }
 
@@ -232,11 +242,16 @@ class _MovieVoteBlockState extends State<MovieVoteBlock> {
       await supabase.from('movie_poll_votes').insert(inserts);
 
       if (mounted) {
+        final moviesText = selectedMovieLabels.isEmpty
+            ? 'фильм'
+            : selectedMovieLabels.join(', ');
         await showDialog<void>(
           context: context,
           builder: (ctx) => AlertDialog(
-            title: const Text('Спасибо'),
-            content: Text('Спасибо за участие в голосовании. Списано войсов: $needed'),
+            title: const Text('Вы успешно проголосовали!'),
+            content: Text(
+              'Вы проголосовали за: $moviesText.\nЭто стоило: $needed войсов.',
+            ),
             actions: [
               ArtDecoButton(
                 text: 'OK', 

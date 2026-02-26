@@ -22,6 +22,8 @@ class RoleButtons extends StatelessWidget {
   final VoidCallbackAsync onOpenDebates;
   final VoidCallbackAsync onOpenResolution;
   final VoidCallback onStartSpeech;
+  final bool speechButtonEnabled;
+  final bool replaceSpeechButtonWithListen;
 
   // listen widget (already styled as ArtDecoButton inside ListenButton)
   final Widget listenWidget;
@@ -47,6 +49,8 @@ class RoleButtons extends StatelessWidget {
     required this.onOpenDebates,
     required this.onOpenResolution,
     required this.onStartSpeech,
+    this.speechButtonEnabled = true,
+    this.replaceSpeechButtonWithListen = false,
     required this.listenWidget,
     this.onHonorArticle,
     this.honorAlreadyUsed = false,
@@ -107,7 +111,7 @@ class RoleButtons extends StatelessWidget {
         text: 'Перевести Войсы',
         icon: Icons.swap_horiz,
         onPressed: onTransfer,
-        primary: false,
+        primary: true,
       ),
     );
 
@@ -127,7 +131,7 @@ class RoleButtons extends StatelessWidget {
           text: 'Купить предприятие',
           icon: Icons.business,
           onPressed: onPurchaseEnterprise,
-          primary: false,
+          primary: true,
         ),
       );
     }
@@ -145,7 +149,7 @@ class RoleButtons extends StatelessWidget {
           text: 'Дебаты',
           icon: Icons.forum,
           onPressed: () => onOpenDebates(),
-          primary: false,
+          primary: true,
         ),
       );
     }
@@ -157,25 +161,36 @@ class RoleButtons extends StatelessWidget {
           text: 'Политрешение',
           icon: Icons.gavel,
           onPressed: () => onOpenResolution(),
-          primary: false,
+          primary: true,
         ),
       );
     }
 
     // ✅ Речь жизни — только политик
     if (isPolitician) {
-      buttons.add(
-        _btn(
-          text: 'Речь жизни - сказать',
-          icon: Icons.campaign,
-          onPressed: onStartSpeech,
-          primary: true,
-        ),
-      );
+      if (replaceSpeechButtonWithListen) {
+        buttons.add(
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: listenWidget,
+          ),
+        );
+      } else {
+        buttons.add(
+          _btn(
+            text: 'Речь жизни - сказать',
+            icon: Icons.campaign,
+            onPressed: speechButtonEnabled ? onStartSpeech : null,
+            primary: true,
+          ),
+        );
+      }
     }
 
     // ✅ Listen widget (уже ArtDecoButton внутри listen_button.dart)
-    buttons.add(Padding(padding: const EdgeInsets.only(bottom: 12), child: listenWidget));
+    if (!replaceSpeechButtonWithListen) {
+      buttons.add(Padding(padding: const EdgeInsets.only(bottom: 12), child: listenWidget));
+    }
 
     // Role extras
     if (_roleContains('mafia') || _roleContains('мафия')) {
@@ -242,7 +257,7 @@ class RoleButtons extends StatelessWidget {
               );
             }
           },
-          primary: false,
+          primary: true,
         ),
       );
     }
@@ -256,7 +271,7 @@ class RoleButtons extends StatelessWidget {
           onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Админ-панель')),
           ),
-          primary: false,
+          primary: true,
         ),
       );
       buttons.add(
@@ -266,7 +281,7 @@ class RoleButtons extends StatelessWidget {
           onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Пополнение')),
           ),
-          primary: false,
+          primary: true,
         ),
       );
       buttons.add(
@@ -276,7 +291,7 @@ class RoleButtons extends StatelessWidget {
           onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Создать опрос')),
           ),
-          primary: false,
+          primary: true,
         ),
       );
       buttons.add(
@@ -286,7 +301,7 @@ class RoleButtons extends StatelessWidget {
           onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Создание аукциона')),
           ),
-          primary: false,
+          primary: true,
         ),
       );
       buttons.add(
@@ -296,7 +311,7 @@ class RoleButtons extends StatelessWidget {
           onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Статистика')),
           ),
-          primary: false,
+          primary: true,
         ),
       );
     }
@@ -313,3 +328,4 @@ class RoleButtons extends StatelessWidget {
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: buttons);
   }
 }
+
