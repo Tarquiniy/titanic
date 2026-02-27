@@ -23,7 +23,11 @@ class _InventoryScreenState extends State<InventoryScreen> {
 
   List<Map<String, dynamic>> _itemsList = [];
   List<Map<String, dynamic>> _incomingOffers = [];
+  List<Map<String, dynamic>> _outgoingOffers = [];
+  List<Map<String, dynamic>> _tradeHistory = [];
   bool _loadingOffers = false;
+  final Map<String, String> _playerNames = {};
+  RealtimeChannel? _offersChannel;
 
   // ✅ NEW: enterprises from user_credentials.enterprises (json/jsonb)
   List<Map<String, dynamic>> _enterprises = [];
@@ -58,7 +62,16 @@ class _InventoryScreenState extends State<InventoryScreen> {
   void initState() {
     super.initState();
     _loadInventory();
-    _fetchIncomingOffers();
+    _refreshTradingData();
+    _subscribeToOfferChanges();
+  }
+
+  @override
+  void dispose() {
+    try {
+      _offersChannel?.unsubscribe();
+    } catch (_) {}
+    super.dispose();
   }
 
   Future<void> _loadInventory() async {
@@ -243,6 +256,148 @@ class _InventoryScreenState extends State<InventoryScreen> {
   Color? _colorFromWord(String word) {
     final w = word.trim().toLowerCase();
     return _wordToColor[w];
+  }
+
+  String _displayNameFromProfile(Map<String, dynamic> profile) {
+    final first = (profile['first_name'] ?? '').toString().trim();
+    final last = (profile['last_name'] ?? '').toString().trim();
+    final username = (profile['telegram_username'] ?? '').toString().trim();
+    final fullName = '$first $last'.trim();
+    if (fullName.isNotEmpty) return fullName;
+    if (username.isNotEmpty) return username;
+    return 'Игрок';
+  }
+
+  String _currentUserDisplayName() {
+    final fullName = '${widget.user.firstName} ${widget.user.lastName}'.trim();
+    if (fullName.isNotEmpty) return fullName;
+    if (widget.user.username.trim().isNotEmpty) return widget.user.username.trim();
+    return 'Игрок';
+  }
+
+  String _resolvePlayerName(String? userId) {
+    if (userId == null || userId.isEmpty) return 'Игрок';
+    return _playerNames[userId] ?? userId;
+  }
+
+  String _extractItemLabel(dynamic itemJson) {
+    try {
+      if (itemJson is Map) {
+        return (itemJson['name']?.toString() ?? itemJson['id']?.toString() ?? jsonEncode(itemJson));
+      }
+      return itemJson?.toString() ?? '';
+    } catch (_) {
+      return itemJson?.toString() ?? '';
+    }
+  }
+
+  int _extractItemVoices(dynamic itemJson) {
+    try {
+      if (itemJson is! Map) return 0;
+      for (final key in ['voices', 'count', 'amount', 'v']) {
+        final value = itemJson[key];
+        if (value != null) {
+          return (value is num) ? value.toInt() : int.tryParse(value.toString()) ?? 0;
+        }
+      }
+    } catch (_) {}
+    return 0;
+  }
+
+  String _formatPrice(dynamic price) {
+    final parsed = (price is num) ? price.toDouble() : double.tryParse(price?.toString() ?? '');
+    if (parsed == null) return price?.toString() ?? '-';
+    final isInt = parsed == parsed.roundToDouble();
+    return isInt ? parsed.toInt().toString() : parsed.toStringAsFixed(2);
+  }
+
+  Future<void> _sendUserEvent({
+    required String userId,
+    required String title,
+    required String message,
+    Map<String, dynamic>? metadata,
+  }) async {
+    try {
+      await supabase.from('user_events').insert({
+        'user_id': userId,
+        'title': title,
+        'message': message,
+        'actor_id': widget.user.id,
+        'metadata': metadata,
+        'created_at': DateTime.now().toUtc().toIso8601String(),
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _loadPlayerNames(Iterable<Map<String, dynamic>> offers) async {
+    final ids = <String>{};
+    for (final offer in offers) {
+      final sellerId = offer['seller_id']?.toString();
+      final buyerId = offer['buyer_id']?.toString();
+      if (sellerId != null && sellerId.isNotEmpty && !_playerNames.containsKey(sellerId)) {
+        ids.add(sellerId);
+      }
+      if (buyerId != null && buyerId.isNotEmpty && !_playerNames.containsKey(buyerId)) {
+        ids.add(buyerId);
+      }
+    }
+    if (ids.isEmpty) return;
+    try {
+      final res = await supabase
+          .from('user_credentials')
+          .select('id, telegram_username, first_name, last_name')
+          .inFilter('id', ids.toList());
+      if (res is List) {
+        for (final row in res) {
+          final map = Map<String, dynamic>.from(row as Map);
+          final id = map['id']?.toString();
+          if (id == null || id.isEmpty) continue;
+          _playerNames[id] = _displayNameFromProfile(map);
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _refreshTradingData() async {
+    await _fetchIncomingOffers();
+    await _fetchOutgoingOffers();
+    await _fetchTradeHistory();
+  }
+
+  void _subscribeToOfferChanges() {
+    try {
+      _offersChannel = supabase.channel('inventory-item-offers-${widget.user.id}');
+      _offersChannel!
+          .onPostgresChanges(
+            event: PostgresChangeEvent.insert,
+            schema: 'public',
+            table: 'item_offers',
+            callback: (payload) async {
+              final record = payload.newRecord;
+              final sellerId = record['seller_id']?.toString();
+              final buyerId = record['buyer_id']?.toString();
+              if (sellerId != widget.user.id && buyerId != widget.user.id) return;
+              if (!mounted) return;
+              await _refreshTradingData();
+              await _loadInventory();
+            },
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.update,
+            schema: 'public',
+            table: 'item_offers',
+            callback: (payload) async {
+              final record = payload.newRecord;
+              final sellerId = record['seller_id']?.toString();
+              final buyerId = record['buyer_id']?.toString();
+              if (sellerId != widget.user.id && buyerId != widget.user.id) return;
+              if (!mounted) return;
+              await _refreshTradingData();
+              await _loadInventory();
+            },
+          )
+          .subscribe();
+    } catch (_) {}
   }
 
   Future<void> _openSellToPlayer(Map<String, dynamic> item) async {
@@ -632,7 +787,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
       );
 
       await _loadInventory();
-      await _fetchIncomingOffers();
+      await _refreshTradingData();
       final profile = await _svc.fetchUserProfile(widget.user.id);
       if (profile != null) {
         final v = profile['v_balance'];
@@ -927,6 +1082,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
         ),
       );
       await _loadInventory();
+      await _refreshTradingData();
 
       final profile = await _svc.fetchUserProfile(widget.user.id);
       if (profile != null) {
@@ -955,15 +1111,17 @@ class _InventoryScreenState extends State<InventoryScreen> {
     try {
       final res = await supabase
           .from('item_offers')
-          .select('id, seller_id, buyer_id, item_json, price, created_at')
+          .select('id, seller_id, buyer_id, item_json, price, status, created_at')
           .eq('status', 'pending')
-          .eq('buyer_id', widget.user.id);
+          .eq('buyer_id', widget.user.id)
+          .order('created_at', ascending: false);
       final List<Map<String, dynamic>> offers = [];
       if (res is List) {
         for (final r in res) {
           offers.add(Map<String, dynamic>.from(r as Map));
         }
       }
+      await _loadPlayerNames(offers);
       setState(() {
         _incomingOffers = offers;
       });
@@ -976,7 +1134,59 @@ class _InventoryScreenState extends State<InventoryScreen> {
     }
   }
 
+  Future<void> _fetchOutgoingOffers() async {
+    try {
+      final res = await supabase
+          .from('item_offers')
+          .select('id, seller_id, buyer_id, item_json, price, status, created_at')
+          .eq('status', 'pending')
+          .eq('seller_id', widget.user.id)
+          .order('created_at', ascending: false);
+      final List<Map<String, dynamic>> offers = [];
+      if (res is List) {
+        for (final r in res) {
+          offers.add(Map<String, dynamic>.from(r as Map));
+        }
+      }
+      await _loadPlayerNames(offers);
+      if (!mounted) return;
+      setState(() {
+        _outgoingOffers = offers;
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _fetchTradeHistory() async {
+    try {
+      final res = await supabase
+          .from('item_offers')
+          .select('id, seller_id, buyer_id, item_json, price, status, created_at')
+          .or('seller_id.eq.${widget.user.id},buyer_id.eq.${widget.user.id}')
+          .neq('status', 'pending')
+          .order('created_at', ascending: false)
+          .limit(20);
+      final List<Map<String, dynamic>> offers = [];
+      if (res is List) {
+        for (final r in res) {
+          offers.add(Map<String, dynamic>.from(r as Map));
+        }
+      }
+      await _loadPlayerNames(offers);
+      if (!mounted) return;
+      setState(() {
+        _tradeHistory = offers;
+      });
+    } catch (_) {}
+  }
+
   Future<void> _acceptOffer(int offerId) async {
+    Map<String, dynamic>? currentOffer;
+    for (final offer in _incomingOffers) {
+      if (offer['id']?.toString() == offerId.toString()) {
+        currentOffer = offer;
+        break;
+      }
+    }
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -1008,6 +1218,17 @@ class _InventoryScreenState extends State<InventoryScreen> {
 
     try {
       await supabase.rpc('accept_item_offer', params: {'p_offer_id': offerId, 'p_buyer_id': widget.user.id});
+      if (currentOffer != null) {
+        final sellerId = currentOffer['seller_id']?.toString();
+        if (sellerId != null && sellerId.isNotEmpty) {
+          await _sendUserEvent(
+            userId: sellerId,
+            title: 'Оффер принят',
+            message: '${_currentUserDisplayName()} принял(а) ваш оффер "${_extractItemLabel(currentOffer['item_json'])}" за ${_formatPrice(currentOffer['price'])} V',
+            metadata: {'type': 'item_offer_accepted', 'offer_id': offerId},
+          );
+        }
+      }
       if (!mounted) return;
       Navigator.of(context).pop();
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1017,7 +1238,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
         ),
       );
       await _loadInventory();
-      await _fetchIncomingOffers();
+      await _refreshTradingData();
       final profile = await _svc.fetchUserProfile(widget.user.id);
       if (profile != null) {
         final v = profile['v_balance'];
@@ -1039,6 +1260,13 @@ class _InventoryScreenState extends State<InventoryScreen> {
   }
 
   Future<void> _rejectOffer(int offerId) async {
+    Map<String, dynamic>? currentOffer;
+    for (final offer in _incomingOffers) {
+      if (offer['id']?.toString() == offerId.toString()) {
+        currentOffer = offer;
+        break;
+      }
+    }
     final reasonCtrl = TextEditingController();
     final confirmed = await showDialog<bool>(
       context: context,
@@ -1204,6 +1432,20 @@ class _InventoryScreenState extends State<InventoryScreen> {
 
     try {
       await supabase.rpc('reject_item_offer', params: {'p_offer_id': offerId, 'p_buyer_id': widget.user.id, 'p_reason': reasonCtrl.text});
+      if (currentOffer != null) {
+        final sellerId = currentOffer['seller_id']?.toString();
+        if (sellerId != null && sellerId.isNotEmpty) {
+          final reason = reasonCtrl.text.trim();
+          await _sendUserEvent(
+            userId: sellerId,
+            title: 'Оффер отклонён',
+            message: reason.isEmpty
+                ? '${_currentUserDisplayName()} отклонил(а) ваш оффер "${_extractItemLabel(currentOffer['item_json'])}"'
+                : '${_currentUserDisplayName()} отклонил(а) ваш оффер "${_extractItemLabel(currentOffer['item_json'])}". Причина: $reason',
+            metadata: {'type': 'item_offer_rejected', 'offer_id': offerId},
+          );
+        }
+      }
       if (!mounted) return;
       Navigator.of(context).pop();
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1213,7 +1455,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
         ),
       );
       await _loadInventory();
-      await _fetchIncomingOffers();
+      await _refreshTradingData();
     } catch (e) {
       if (mounted) Navigator.of(context).pop();
       final msg = (e is PostgrestException) ? (e.message ?? e.toString()) : e.toString();
@@ -1366,7 +1608,6 @@ class _InventoryScreenState extends State<InventoryScreen> {
           final name = (e['name'] ?? 'Предприятие').toString();
           final region = (e['region'] ?? '').toString();
           final colorWord = _normalizeEnterpriseColorWord(e['color']);
-          final investors = (e['investors'] is List) ? (e['investors'] as List) : const [];
           final c = _colorFromWord(colorWord);
 
           return Container(
@@ -1405,7 +1646,6 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 [
                   if (region.isNotEmpty) region,
                   if (colorWord != '—') 'Цвет: $colorWord',
-                  'Инвесторов: ${investors.length}',
                 ].join(' • '),
                 style: TextStyle(
                   fontFamily: 'Cinzel',
@@ -1420,15 +1660,261 @@ class _InventoryScreenState extends State<InventoryScreen> {
     );
   }
 
+  Widget _buildOfferActions({
+    required List<Widget> children,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: children,
+      ),
+    );
+  }
+
+  Widget _buildActionChip({
+    required String label,
+    required VoidCallback? onTap,
+    required BoxDecoration decoration,
+    required Color textColor,
+    IconData? icon,
+  }) {
+    return Container(
+      decoration: decoration,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (icon != null) ...[
+                  Icon(icon, color: textColor, size: 18),
+                  const SizedBox(width: 6),
+                ],
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontFamily: 'Cinzel',
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: textColor,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMetaChip(String text) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: TitanicTheme.panelDark.withOpacity(0.55),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: TitanicTheme.raptureGold.withOpacity(0.18)),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontFamily: 'Cinzel',
+          fontSize: 11,
+          color: TitanicTheme.ivoryCream.withOpacity(0.82),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOfferSection({
+    required String title,
+    required IconData icon,
+    required List<Map<String, dynamic>> offers,
+    required String Function(Map<String, dynamic>) counterpartLabelBuilder,
+    bool incoming = false,
+    bool showStatus = false,
+  }) {
+    if (offers.isEmpty) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: TitanicTheme.artDecoPanelDecoration(),
+      child: ExpansionTile(
+        initiallyExpanded: incoming,
+        tilePadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+        leading: Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            gradient: TitanicTheme.goldGradient,
+            shape: BoxShape.circle,
+          ),
+          child: Icon(icon, color: Colors.black, size: 20),
+        ),
+        title: Text(
+          title,
+          style: TextStyle(
+            fontFamily: 'CormorantGaramond',
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+            color: TitanicTheme.ivoryCream,
+          ),
+        ),
+        subtitle: Text(
+          '${offers.length}',
+          style: TextStyle(
+            fontFamily: 'Cinzel',
+            color: TitanicTheme.ivoryCream.withOpacity(0.7),
+          ),
+        ),
+        children: offers.map((o) {
+          final offerId = (o['id'] is int) ? o['id'] as int : int.tryParse(o['id']?.toString() ?? '') ?? 0;
+          final itemLabel = _extractItemLabel(o['item_json']);
+          final itemVoices = _extractItemVoices(o['item_json']);
+          final price = _formatPrice(o['price']);
+          final createdAt = DateTime.tryParse(o['created_at']?.toString() ?? '');
+          final createdLabel = createdAt == null
+              ? ''
+              : '${createdAt.day.toString().padLeft(2, '0')}.${createdAt.month.toString().padLeft(2, '0')} ${createdAt.hour.toString().padLeft(2, '0')}:${createdAt.minute.toString().padLeft(2, '0')}';
+          final status = (o['status'] ?? '').toString();
+
+          return Container(
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: TitanicTheme.surfaceNavy.withOpacity(0.5),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: TitanicTheme.raptureGold.withOpacity(0.2)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: TitanicTheme.seaFoamGreen.withOpacity(0.18),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(Icons.shopping_bag, color: TitanicTheme.seaFoamGreen, size: 20),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            itemLabel,
+                            style: TextStyle(
+                              fontFamily: 'Cinzel',
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: TitanicTheme.ivoryCream,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            counterpartLabelBuilder(o),
+                            style: TextStyle(
+                              fontFamily: 'Cinzel',
+                              fontSize: 12,
+                              color: TitanicTheme.ivoryCream.withOpacity(0.75),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _buildMetaChip('$itemVoices войсов'),
+                    _buildMetaChip('Цена: $price V'),
+                    if (createdLabel.isNotEmpty) _buildMetaChip(createdLabel),
+                    if (showStatus && status.isNotEmpty) _buildMetaChip('Статус: $status'),
+                  ],
+                ),
+                if (incoming && status == 'pending')
+                  _buildOfferActions(
+                    children: [
+                      _buildActionChip(
+                        label: 'Отклонить',
+                        icon: Icons.close,
+                        onTap: () => _rejectOffer(offerId),
+                        decoration: BoxDecoration(
+                          color: Colors.red.shade900.withOpacity(0.8),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        textColor: Colors.white,
+                      ),
+                      _buildActionChip(
+                        label: 'Принять',
+                        icon: Icons.check,
+                        onTap: () => _acceptOffer(offerId),
+                        decoration: TitanicTheme.primaryAccentButtonDecoration,
+                        textColor: Colors.black,
+                      ),
+                    ],
+                  ),
+              ],
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
   Widget _buildOffersList() {
     if (_loadingOffers) {
       return Center(
         child: CircularProgressIndicator(color: TitanicTheme.raptureGold),
       );
     }
-    if (_incomingOffers.isEmpty) {
+    if (_incomingOffers.isEmpty && _outgoingOffers.isEmpty && _tradeHistory.isEmpty) {
       return const SizedBox.shrink();
     }
+    return Column(
+      children: [
+        _buildOfferSection(
+          title: 'Входящие офферы',
+          icon: Icons.mark_email_unread,
+          offers: _incomingOffers,
+          incoming: true,
+          counterpartLabelBuilder: (offer) => 'От: ${_resolvePlayerName(offer['seller_id']?.toString())}',
+        ),
+        _buildOfferSection(
+          title: 'Исходящие офферы',
+          icon: Icons.outbox,
+          offers: _outgoingOffers,
+          counterpartLabelBuilder: (offer) => 'Кому: ${_resolvePlayerName(offer['buyer_id']?.toString())}',
+        ),
+        _buildOfferSection(
+          title: 'История торговли',
+          icon: Icons.history,
+          offers: _tradeHistory,
+          showStatus: true,
+          counterpartLabelBuilder: (offer) {
+            final isSeller = offer['seller_id']?.toString() == widget.user.id;
+            final otherParty = isSeller ? offer['buyer_id']?.toString() : offer['seller_id']?.toString();
+            return isSeller
+                ? 'Покупатель: ${_resolvePlayerName(otherParty)}'
+                : 'Продавец: ${_resolvePlayerName(otherParty)}';
+          },
+        ),
+      ],
+    );
+    /*
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       decoration: TitanicTheme.artDecoPanelDecoration(),
@@ -1584,6 +2070,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
         }).toList(),
       ),
     );
+    */
   }
 
   @override
@@ -1632,7 +2119,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
               icon: Icon(Icons.refresh, color: TitanicTheme.raptureGold),
               onPressed: () async {
                 await _loadInventory();
-                await _fetchIncomingOffers();
+                await _refreshTradingData();
               },
             ),
           ),
@@ -1645,7 +2132,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
         child: RefreshIndicator(
           onRefresh: () async {
             await _loadInventory();
-            await _fetchIncomingOffers();
+            await _refreshTradingData();
           },
           backgroundColor: TitanicTheme.panelDark,
           color: TitanicTheme.raptureGold,

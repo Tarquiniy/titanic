@@ -245,6 +245,14 @@ class _CollectDebtScreenState extends State<CollectDebtScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    const Text(
+                      'Вы заберёте половину войсов и майндов',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
                     const SizedBox(height: 24),
 
                     // Выбор игрока
@@ -270,9 +278,10 @@ class _CollectDebtScreenState extends State<CollectDebtScreen> {
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
-                        onPressed: _loading ? null : _collectDebt,
+                        onPressed: (_loading || _selectedPlayerId == null)
+                            ? null
+                            : _collectDebt,
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.red,
                           padding: const EdgeInsets.symmetric(vertical: 16),
                         ),
                         child: _loading

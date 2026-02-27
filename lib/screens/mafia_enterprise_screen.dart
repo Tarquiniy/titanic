@@ -92,10 +92,10 @@ class _MafiaEnterpriseScreenState extends State<MafiaEnterpriseScreen> {
     });
 
     try {
-      // 1. Получаем текущий инвентарь мафиози
+      // 1. Получаем текущие предприятия мафиози
       final userRow = await supabase
           .from('user_credentials')
-          .select('inventory, first_name, last_name')
+          .select('enterprises, first_name, last_name')
           .eq('id', widget.mafiaUserId)
           .maybeSingle();
 
@@ -105,52 +105,51 @@ class _MafiaEnterpriseScreenState extends State<MafiaEnterpriseScreen> {
         return;
       }
 
-      dynamic inv = userRow['inventory'];
-      List<dynamic> invList = [];
+      dynamic enterprises = userRow['enterprises'];
+      List<dynamic> entList = [];
 
-      // Парсим существующий инвентарь
-      if (inv == null) {
-        invList = [];
-      } else if (inv is String) {
+      // Парсим существующие предприятия
+      if (enterprises == null) {
+        entList = [];
+      } else if (enterprises is String) {
         try {
-          final decoded = jsonDecode(inv);
+          final decoded = jsonDecode(enterprises);
           if (decoded is List) {
-            invList = List.from(decoded);
+            entList = List.from(decoded);
           } else if (decoded is Map) {
-            invList = [decoded];
+            entList = [decoded];
           }
         } catch (_) {
-          invList = [];
+          entList = [];
         }
-      } else if (inv is List) {
-        invList = List.from(inv);
-      } else if (inv is Map) {
-        invList = [inv];
+      } else if (enterprises is List) {
+        entList = List.from(enterprises);
+      } else if (enterprises is Map) {
+        entList = [enterprises];
       } else {
-        invList = [];
+        entList = [];
       }
 
       // 2. Создаем новое предприятие
       final Map<String, dynamic> newEnterprise = {
-        'type': 'enterprise',
+        'id': DateTime.now().microsecondsSinceEpoch.toString(),
         'name': name,
         'color': _selectedColor,
-        'color_hex': _colorOptions[_selectedColor],
         'region': _selectedRegion,
-        'owner_type': 'mafia',
         'created_at': DateTime.now().toUtc().toIso8601String(),
-        'mafia_id': widget.mafiaUserId,
-        'description': 'Приобретено мафией',
+        'owner_type': 'mafia',
+        'owner_id': widget.mafiaUserId,
+        'p_payout': 200,
       };
 
-      // 3. Добавляем предприятие в инвентарь
-      invList.add(newEnterprise);
+      // 3. Добавляем предприятие в список enterprises
+      entList.add(newEnterprise);
 
-      // 4. Обновляем инвентарь в базе данных
+      // 4. Обновляем enterprises в базе данных
       await supabase
           .from('user_credentials')
           .update({
-            'inventory': invList,
+            'enterprises': entList,
           })
           .eq('id', widget.mafiaUserId);
 
@@ -173,7 +172,7 @@ class _MafiaEnterpriseScreenState extends State<MafiaEnterpriseScreen> {
         'created_at': DateTime.now().toUtc().toIso8601String(),
       });
 
-      _showSnack('Предприятие "$name" успешно добавлено в ваш инвентарь!');
+      _showSnack('Предприятие "$name" успешно добавлено в раздел предприятий!');
 
       if (widget.onSuccess != null) {
         await widget.onSuccess!();
@@ -220,7 +219,7 @@ class _MafiaEnterpriseScreenState extends State<MafiaEnterpriseScreen> {
               ),
               const SizedBox(height: 8),
               const Text(
-                'Предприятие будет добавлено в ваш инвентарь. Стоимость отсутствует.',
+                'Предприятие будет добавлено в ваш список предприятий. Стоимость отсутствует.',
                 style: TextStyle(fontSize: 14, color: Colors.grey),
               ),
               const SizedBox(height: 24),

@@ -101,10 +101,18 @@ class _HollywoodPayBlockState extends State<HollywoodPayBlock> {
       ),
     );
     
-    if (result == true && widget.onPaid != null) {
-      try {
-        await widget.onPaid!();
-      } catch (_) {}
+    if (result == true) {
+      if (widget.onPaid != null) {
+        try {
+          await widget.onPaid!();
+        } catch (_) {}
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Фильм успешно оплачен!'),
+        ),
+      );
     }
   }
 

@@ -4,7 +4,6 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:titanic/blocks/blood_poker_block.dart';
 import 'package:titanic/blocks/journalist_block.dart' as journalist_block;
 import 'package:titanic/screens/home_dialogs.dart' as home_dialogs;
 
@@ -15,6 +14,7 @@ import 'package:titanic/services/speech_service.dart';
 import 'package:titanic/screens/transfer_v_screen.dart';
 import 'package:titanic/screens/inventory_screen.dart';
 import 'package:titanic/screens/debates_screen.dart';
+import 'package:titanic/screens/blood_poker_screen.dart';
 import 'package:titanic/screens/purchase_enterprise_screen.dart';
 import 'package:titanic/screens/resolution_vote_screen.dart';
 import 'login_screen.dart';
@@ -461,7 +461,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final profileRaw = await supabase
           .from('user_credentials')
           .select(
-            'v_balance, m_balance, first_name, last_name, telegram_username, role, color, region',
+            'v_balance, m_balance, first_name, last_name, telegram_username, role, color, region, usurer',
           )
           .eq('id', user.id)
           .maybeSingle();
@@ -476,6 +476,7 @@ class _HomeScreenState extends State<HomeScreen> {
         final role = profile['role'];
         final color = profile['color'];
         final region = profile['region'];
+        final usurer = profile['usurer'];
 
         if (!mounted) return;
         setState(() {
@@ -489,6 +490,8 @@ class _HomeScreenState extends State<HomeScreen> {
             mBalance: m is num ? (m).toDouble() : user.mBalance,
             color: color is String ? color : user.color,
             region: region is String ? region : user.region,
+            usurer: (usurer == true) ||
+                (usurer?.toString().toLowerCase() == 'true'),
           );
           _userColor = color is String ? color : null;
         });
@@ -1013,6 +1016,19 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _openBloodPokerScreen() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => BloodPokerScreen(
+          currentUserId: user.id,
+          onBetPlaced: _onBloodPokerBetPlaced,
+        ),
+      ),
+    );
+    await _refreshProfile();
+    await _loadJournal();
+  }
+
   // -----------------------
   // Helpers (YEKT / ui)
   // -----------------------
@@ -1356,6 +1372,36 @@ class _HomeScreenState extends State<HomeScreen> {
                                         ),
                                         const SizedBox(height: 10),
                                         _buildColorAndRegionChips(isSmallScreen),
+                                        if (user.usurer) ...[
+                                          const SizedBox(height: 8),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 10,
+                                              vertical: 5,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: TitanicTheme.copperDetail
+                                                  .withOpacity(0.2),
+                                              borderRadius:
+                                                  BorderRadius.circular(12),
+                                              border: Border.all(
+                                                color: TitanicTheme.copperDetail,
+                                                width: 1.2,
+                                              ),
+                                            ),
+                                            child: Text(
+                                              'Ростовщик',
+                                              style: TextStyle(
+                                                fontFamily: 'Cinzel',
+                                                fontSize:
+                                                    isSmallScreen ? 11 : 12,
+                                                fontWeight: FontWeight.w700,
+                                                color: TitanicTheme.ivoryCream,
+                                                letterSpacing: 0.8,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
                                       ],
                                     ),
                                   ),
@@ -1538,9 +1584,16 @@ class _HomeScreenState extends State<HomeScreen> {
                                   onEnterpriseBought: _onMafiaEnterpriseBought,
                                 ),
                                 const SizedBox(height: 12),
-                                BloodPokerBlock(
-                                  currentUserId: user.id,
-                                  onBetPlaced: _onBloodPokerBetPlaced,
+                                Card(
+                                  child: ListTile(
+                                    leading: const Icon(Icons.casino),
+                                    title: const Text('Покер на крови'),
+                                    subtitle: const Text(
+                                      'Открыть экран ставок',
+                                    ),
+                                    trailing: const Icon(Icons.chevron_right),
+                                    onTap: _openBloodPokerScreen,
+                                  ),
                                 ),
                               ],
 

@@ -24,6 +24,11 @@ class _BloodPokerBlockState extends State<BloodPokerBlock> {
   bool _alreadyBet = false;
   List<Map<String, dynamic>> _userBets = [];
   double _userBalance = 0.0;
+  String _currentRole = '';
+
+  bool get _isAdmin => _currentRole.contains('admin');
+  bool get _isMafia =>
+      _currentRole.contains('mafia') || _currentRole.contains('мафия');
 
   @override
   void initState() {
@@ -35,6 +40,34 @@ class _BloodPokerBlockState extends State<BloodPokerBlock> {
     setState(() => _loading = true);
     
     try {
+      final profileRes = await supabase
+          .from('user_credentials')
+          .select('m_balance, role')
+          .eq('id', widget.currentUserId)
+          .maybeSingle();
+
+      if (profileRes is Map<String, dynamic>) {
+        final mb = profileRes['m_balance'];
+        final roleRaw = profileRes['role']?.toString() ?? '';
+        _currentRole = roleRaw.toLowerCase();
+        if (mb is num) {
+          _userBalance = mb.toDouble();
+        } else if (mb is String) {
+          _userBalance = double.tryParse(mb.replaceAll(',', '.')) ?? 0.0;
+        }
+      } else {
+        _currentRole = '';
+        _userBalance = 0.0;
+      }
+
+      if (_isAdmin || !_isMafia) {
+        _activeStage = null;
+        _options = [];
+        _alreadyBet = false;
+        _userBets = [];
+        return;
+      }
+
       final stageRes = await supabase
           .from('blood_poker_stages')
           .select()
@@ -53,7 +86,7 @@ class _BloodPokerBlockState extends State<BloodPokerBlock> {
             .from('blood_poker_options')
             .select()
             .eq('stage_id', stageId)
-            .order('id');
+            .order('id', ascending: true);
 
         if (optionsRes is List) {
           _options = optionsRes.map((e) => Map<String, dynamic>.from(e as Map)).toList();
@@ -79,20 +112,6 @@ class _BloodPokerBlockState extends State<BloodPokerBlock> {
         _userBets = [];
       }
 
-      final balanceRes = await supabase
-          .from('user_credentials')
-          .select('m_balance')
-          .eq('id', widget.currentUserId)
-          .maybeSingle();
-
-      if (balanceRes is Map<String, dynamic>) {
-        final mb = balanceRes['m_balance'];
-        if (mb is num) {
-          _userBalance = mb.toDouble();
-        } else if (mb is String) {
-          _userBalance = double.tryParse(mb.replaceAll(',', '.')) ?? 0.0;
-        }
-      }
     } catch (e) {
       debugPrint('BloodPokerBlock._loadState error: $e');
     } finally {
@@ -102,6 +121,10 @@ class _BloodPokerBlockState extends State<BloodPokerBlock> {
 
   Future<void> _placeBet() async {
     if (_activeStage == null || _alreadyBet || _options.isEmpty) return;
+    if (_isAdmin || !_isMafia) {
+      _showMessage('Ставки в покере на крови доступны только мафии (кроме admin).');
+      return;
+    }
 
     final List<bool> selected = List<bool>.filled(_options.length, false);
     final List<TextEditingController> amountCtrls = List.generate(
@@ -266,13 +289,25 @@ class _BloodPokerBlockState extends State<BloodPokerBlock> {
     try {
       final currentBalanceRes = await supabase
           .from('user_credentials')
-          .select('m_balance')
+          .select('m_balance, role')
           .eq('id', widget.currentUserId)
           .maybeSingle();
 
       double currentBalance = 0.0;
       if (currentBalanceRes is Map<String, dynamic>) {
         final mb = currentBalanceRes['m_balance'];
+        final roleNow =
+            (currentBalanceRes['role']?.toString() ?? '').toLowerCase();
+        final isAdminNow = roleNow.contains('admin');
+        final isMafiaNow =
+            roleNow.contains('mafia') || roleNow.contains('мафия');
+        if (isAdminNow || !isMafiaNow) {
+          _showMessage(
+              'Ставки в покере на крови доступны только мафии (кроме admin).');
+          setState(() => _loading = false);
+          return;
+        }
+
         if (mb is num) currentBalance = mb.toDouble();
         else if (mb is String) {
           currentBalance = double.tryParse(mb.replaceAll(',', '.')) ?? 0.0;

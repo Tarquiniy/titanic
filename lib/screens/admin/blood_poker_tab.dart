@@ -166,7 +166,7 @@ class _BloodPokerTabState extends State<BloodPokerTab> {
           .from('blood_poker_options')
           .select('id, label, created_at')
           .eq('stage_id', stageId)
-          .order('id');
+          .order('id', ascending: true);
 
       return (res is List)
           ? res.map((e) => Map<String, dynamic>.from(e as Map)).toList()
@@ -178,20 +178,81 @@ class _BloodPokerTabState extends State<BloodPokerTab> {
 
   Future<List<Map<String, dynamic>>> _loadBetsForStage(int stageId) async {
     try {
-      final res = await supabase
+      final rawRes = await supabase
           .from('blood_poker_bets')
-          .select('''
-            *,
-            user_credentials:user_id(first_name, last_name, telegram_username, color),
-            blood_poker_options:option_id(label)
-          ''')
+          .select('id, stage_id, option_id, user_id, amount, created_at')
           .eq('stage_id', stageId)
           .order('amount', ascending: false);
 
-      if (res is List) {
-        return res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      if (rawRes is! List || rawRes.isEmpty) return [];
+
+      final bets = rawRes
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList(growable: false);
+
+      final userIds = bets
+          .map((b) => b['user_id']?.toString())
+          .whereType<String>()
+          .where((id) => id.isNotEmpty)
+          .toSet()
+          .toList(growable: false);
+
+      final optionIds = bets
+          .map((b) => b['option_id'] is int
+              ? b['option_id'] as int
+              : int.tryParse(b['option_id']?.toString() ?? ''))
+          .whereType<int>()
+          .toSet()
+          .toList(growable: false);
+
+      final Map<String, Map<String, dynamic>> usersById = {};
+      if (userIds.isNotEmpty) {
+        final usersRes = await supabase
+            .from('user_credentials')
+            .select('id, first_name, last_name, telegram_username, color')
+            .inFilter('id', userIds);
+        if (usersRes is List) {
+          for (final row in usersRes) {
+            final user = Map<String, dynamic>.from(row as Map);
+            final id = user['id']?.toString();
+            if (id != null && id.isNotEmpty) {
+              usersById[id] = user;
+            }
+          }
+        }
       }
-      return [];
+
+      final Map<int, Map<String, dynamic>> optionsById = {};
+      if (optionIds.isNotEmpty) {
+        final optionsRes = await supabase
+            .from('blood_poker_options')
+            .select('id, label')
+            .inFilter('id', optionIds);
+        if (optionsRes is List) {
+          for (final row in optionsRes) {
+            final option = Map<String, dynamic>.from(row as Map);
+            final optionId = option['id'] is int
+                ? option['id'] as int
+                : int.tryParse(option['id']?.toString() ?? '');
+            if (optionId != null) {
+              optionsById[optionId] = option;
+            }
+          }
+        }
+      }
+
+      return bets.map((bet) {
+        final userId = bet['user_id']?.toString();
+        final optionId = bet['option_id'] is int
+            ? bet['option_id'] as int
+            : int.tryParse(bet['option_id']?.toString() ?? '');
+        return {
+          ...bet,
+          'user_credentials': userId != null ? (usersById[userId] ?? {}) : {},
+          'blood_poker_options':
+              optionId != null ? (optionsById[optionId] ?? {}) : {},
+        };
+      }).toList(growable: false);
     } catch (e) {
       return [];
     }
@@ -214,7 +275,7 @@ class _BloodPokerTabState extends State<BloodPokerTab> {
           ),
         ),
         content: Text(
-          'После завершения будут определены 3 победителя с наибольшими ставками. '
+          'Будут определены 3 победителя по максимальной ставке. '
           'Все майнды будут распределены на счета цветов мафиози.',
           style: TitanicTheme.body,
         ),
@@ -237,62 +298,89 @@ class _BloodPokerTabState extends State<BloodPokerTab> {
     try {
       final bets = await _loadBetsForStage(stageId);
 
-      if (bets.isEmpty) {
-        _showMessage('Нет ставок для этого этапа');
-        setState(() => _loading = false);
-        return;
-      }
-
-      final Map<String, int> userTotalBets = {};
+      int totalMinds = 0;
+      final Map<String, Map<String, int>> userStats = {};
       for (final bet in bets) {
         final userId = bet['user_id']?.toString();
         final amount = bet['amount'] is int
             ? bet['amount'] as int
             : int.tryParse(bet['amount'].toString()) ?? 0;
-        if (userId != null) {
-          userTotalBets[userId] = (userTotalBets[userId] ?? 0) + amount;
+        if (userId == null || amount <= 0) continue;
+
+        totalMinds += amount;
+        final stat = userStats.putIfAbsent(
+          userId,
+          () => {'max_bet': 0, 'total_amount': 0, 'bets_count': 0},
+        );
+        if (amount > (stat['max_bet'] ?? 0)) {
+          stat['max_bet'] = amount;
         }
+        stat['total_amount'] = (stat['total_amount'] ?? 0) + amount;
+        stat['bets_count'] = (stat['bets_count'] ?? 0) + 1;
       }
 
-      final sortedUsers = userTotalBets.entries.toList()
-        ..sort((a, b) => b.value.compareTo(a.value));
+      final sortedUsers = userStats.entries.toList()
+        ..sort((a, b) {
+          final aMax = a.value['max_bet'] ?? 0;
+          final bMax = b.value['max_bet'] ?? 0;
+          if (aMax != bMax) return bMax.compareTo(aMax);
+          final aTotal = a.value['total_amount'] ?? 0;
+          final bTotal = b.value['total_amount'] ?? 0;
+          return bTotal.compareTo(aTotal);
+        });
 
       final List<Map<String, dynamic>> winners = [];
       for (var i = 0; i < sortedUsers.length && i < 3; i++) {
         final entry = sortedUsers[i];
         final userId = entry.key;
-        final totalAmount = entry.value;
-
-        final userBets = bets
-            .where((bet) => bet['user_id']?.toString() == userId)
-            .toList();
+        final stat = entry.value;
 
         winners.add({
           'user_id': userId,
-          'total_amount': totalAmount,
-          'bets_count': userBets.length,
+          'max_bet': stat['max_bet'] ?? 0,
+          'total_amount': stat['total_amount'] ?? 0,
+          'bets_count': stat['bets_count'] ?? 0,
           'position': i + 1,
         });
       }
 
-      for (final bet in bets) {
-        final userId = bet['user_id']?.toString();
-        final amount = bet['amount'] is int
-            ? bet['amount'] as int
-            : int.tryParse(bet['amount'].toString()) ?? 0;
-
-        if (userId == null || amount <= 0) continue;
-
-        final userRes = await supabase
+      if (bets.isNotEmpty && userStats.isNotEmpty) {
+        final userRows = await supabase
             .from('user_credentials')
-            .select('color')
-            .eq('id', userId)
-            .maybeSingle();
+            .select('id, color')
+            .inFilter('id', userStats.keys.toList(growable: false));
 
-        if (userRes is Map<String, dynamic>) {
-          final color = userRes['color']?.toString();
-          if (color != null && color.isNotEmpty) {
-            await _updateColorBank(color, amount);
+        final Map<String, String> colorsByUser = {};
+        if (userRows is List) {
+          for (final row in userRows) {
+            final user = Map<String, dynamic>.from(row as Map);
+            final userId = user['id']?.toString();
+            final color = user['color']?.toString();
+            if (userId != null &&
+                userId.isNotEmpty &&
+                color != null &&
+                color.isNotEmpty) {
+              colorsByUser[userId] = color;
+            }
+          }
+        }
+
+        final Map<String, int> colorTotals = {};
+        for (final bet in bets) {
+          final userId = bet['user_id']?.toString();
+          final color = userId == null ? null : colorsByUser[userId];
+          if (color == null || color.isEmpty) continue;
+
+          final amount = bet['amount'] is int
+              ? bet['amount'] as int
+              : int.tryParse(bet['amount'].toString()) ?? 0;
+          if (amount <= 0) continue;
+          colorTotals[color] = (colorTotals[color] ?? 0) + amount;
+        }
+
+        for (final entry in colorTotals.entries) {
+          if (entry.value > 0) {
+            await _updateColorBank(entry.key, entry.value);
           }
         }
       }
@@ -306,30 +394,137 @@ class _BloodPokerTabState extends State<BloodPokerTab> {
           })
           .eq('id', stageId);
 
-      await supabase.from('user_journal').insert({
-        'user_id': 'system',
-        'visible_role': 'all',
-        'actor_id': 'system',
-        'title': 'Покер на крови завершен',
-        'message':
-            'Этап покера завершен. Определены победители по общей сумме ставок. '
-            'Все майнды распределены на счета цветов мафиози.',
-        'metadata': {
-          'stage_id': stageId,
-          'winners': winners,
-          'type': 'blood_poker_completed'
-        },
-        'created_at': DateTime.now().toUtc().toIso8601String(),
-      });
+      final actorId = supabase.auth.currentUser?.id;
+      if (actorId != null && actorId.isNotEmpty) {
+        await supabase.from('user_journal').insert({
+          'user_id': actorId,
+          'visible_role': 'all',
+          'actor_id': actorId,
+          'title': 'Покер на крови завершен',
+          'message':
+              'Этап покера завершен. Определены победители по максимальной ставке. '
+              'Все майнды распределены на счета цветов мафиози.',
+          'metadata': {
+            'stage_id': stageId,
+            'winners': winners,
+            'type': 'blood_poker_completed'
+          },
+          'created_at': DateTime.now().toUtc().toIso8601String(),
+        });
+      } else {
+        debugPrint(
+            'BloodPokerTab._closeStage: skip user_journal insert, current user id is null');
+      }
 
-      _showMessage(
-          'Покер на крови завершен. Определены победители по общей сумме ставок. Майнды распределены.');
+      _showMessage('Покер на крови завершен.');
+      await _showCloseResultsDialog(
+        stageId: stageId,
+        winners: winners,
+        betsCount: bets.length,
+        totalMinds: totalMinds,
+      );
       await _loadStages();
     } catch (e) {
       _showMessage('Ошибка при завершении: $e');
     } finally {
       setState(() => _loading = false);
     }
+  }
+
+  Future<void> _showCloseResultsDialog({
+    required int stageId,
+    required List<Map<String, dynamic>> winners,
+    required int betsCount,
+    required int totalMinds,
+  }) async {
+    if (!mounted) return;
+
+    final userIds = winners
+        .map((w) => w['user_id']?.toString())
+        .whereType<String>()
+        .where((id) => id.isNotEmpty)
+        .toList(growable: false);
+
+    final Map<String, String> namesByUser = {};
+    if (userIds.isNotEmpty) {
+      try {
+        final users = await supabase
+            .from('user_credentials')
+            .select('id, first_name, last_name, telegram_username')
+            .inFilter('id', userIds);
+        if (users is List) {
+          for (final row in users) {
+            final user = Map<String, dynamic>.from(row as Map);
+            final id = user['id']?.toString();
+            if (id == null || id.isEmpty) continue;
+            final fullName =
+                '${user['first_name'] ?? ''} ${user['last_name'] ?? ''}'.trim();
+            namesByUser[id] = fullName.isNotEmpty
+                ? fullName
+                : (user['telegram_username']?.toString() ?? id);
+          }
+        }
+      } catch (_) {}
+    }
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(
+          'Результаты покера',
+          style: TitanicTheme.titleLarge,
+        ),
+        backgroundColor: TitanicTheme.panelDark,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(
+            color: TitanicTheme.raptureGold.withOpacity(0.4),
+            width: 1.5,
+          ),
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('Этап ID: $stageId', style: TitanicTheme.body),
+                Text('Ставок: $betsCount', style: TitanicTheme.body),
+                Text(
+                  'Распределено майндов: $totalMinds M',
+                  style: TitanicTheme.body,
+                ),
+                const SizedBox(height: 12),
+                if (winners.isEmpty)
+                  Text('Ставок не было.', style: TitanicTheme.body)
+                else
+                  ...winners.map((w) {
+                    final uid = w['user_id']?.toString() ?? '';
+                    final display = namesByUser[uid] ?? uid;
+                    final position = w['position'] ?? 0;
+                    final maxBet = w['max_bet'] ?? 0;
+                    final total = w['total_amount'] ?? 0;
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Text(
+                        '$position. $display - макс. ставка: $maxBet M, всего: $total M',
+                        style: TitanicTheme.body,
+                      ),
+                    );
+                  }).toList(),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _updateColorBank(String color, int amount) async {

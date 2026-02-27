@@ -31,6 +31,16 @@ class _MovieVoteBlockState extends State<MovieVoteBlock> {
     _loadState();
   }
 
+  @override
+  void didUpdateWidget(covariant MovieVoteBlock oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final oldRole = (oldWidget.currentUserRole ?? '').toString();
+    final newRole = (widget.currentUserRole ?? '').toString();
+    if (oldWidget.currentUserId != widget.currentUserId || oldRole != newRole) {
+      _loadState();
+    }
+  }
+
   Future<void> _loadState() async {
     setState(() {
       _loading = true;

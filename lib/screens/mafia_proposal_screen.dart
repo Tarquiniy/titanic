@@ -68,6 +68,16 @@ class _MafiaProposalScreenState extends State<MafiaProposalScreen> {
     return '${first} ${last}'.trim();
   }
 
+  List<DropdownMenuItem<String>> _buildPoliticianItems({String? excludeId}) {
+    return _politicians
+        .where((pol) => pol['id']?.toString() != excludeId)
+        .map((pol) => DropdownMenuItem<String>(
+              value: pol['id']?.toString(),
+              child: Text(_getPoliticianName(pol)),
+            ))
+        .toList();
+  }
+
   Future<void> _submitTransfer() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -246,13 +256,15 @@ class _MafiaProposalScreenState extends State<MafiaProposalScreen> {
                     const SizedBox(height: 8),
                     DropdownButtonFormField<String>(
                       value: _selectedFromPoliticianId,
-                      items: _politicians.map((pol) {
-                        return DropdownMenuItem(
-                          value: pol['id']?.toString(),
-                          child: Text(_getPoliticianName(pol)),
-                        );
-                      }).toList(),
-                      onChanged: (value) => setState(() => _selectedFromPoliticianId = value),
+                      items: _buildPoliticianItems(
+                        excludeId: _selectedToPoliticianId,
+                      ),
+                      onChanged: (value) => setState(() {
+                        _selectedFromPoliticianId = value;
+                        if (_selectedToPoliticianId == value) {
+                          _selectedToPoliticianId = null;
+                        }
+                      }),
                       decoration: const InputDecoration(
                         labelText: 'Выберите политика',
                         border: OutlineInputBorder(),
@@ -270,13 +282,15 @@ class _MafiaProposalScreenState extends State<MafiaProposalScreen> {
                     const SizedBox(height: 8),
                     DropdownButtonFormField<String>(
                       value: _selectedToPoliticianId,
-                      items: _politicians.map((pol) {
-                        return DropdownMenuItem(
-                          value: pol['id']?.toString(),
-                          child: Text(_getPoliticianName(pol)),
-                        );
-                      }).toList(),
-                      onChanged: (value) => setState(() => _selectedToPoliticianId = value),
+                      items: _buildPoliticianItems(
+                        excludeId: _selectedFromPoliticianId,
+                      ),
+                      onChanged: (value) => setState(() {
+                        _selectedToPoliticianId = value;
+                        if (_selectedFromPoliticianId == value) {
+                          _selectedFromPoliticianId = null;
+                        }
+                      }),
                       decoration: const InputDecoration(
                         labelText: 'Выберите политика',
                         border: OutlineInputBorder(),
