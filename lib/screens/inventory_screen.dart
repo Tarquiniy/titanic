@@ -1607,6 +1607,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
         children: _enterprises.map((e) {
           final name = (e['name'] ?? 'Предприятие').toString();
           final region = (e['region'] ?? '').toString();
+          final enterpriseType = (e['enterprise_type'] ?? e['type_label'] ?? '').toString();
           final colorWord = _normalizeEnterpriseColorWord(e['color']);
           final c = _colorFromWord(colorWord);
 
@@ -1645,6 +1646,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
               subtitle: Text(
                 [
                   if (region.isNotEmpty) region,
+                  if (enterpriseType.isNotEmpty) 'Тип: $enterpriseType',
                   if (colorWord != '—') 'Цвет: $colorWord',
                 ].join(' • '),
                 style: TextStyle(

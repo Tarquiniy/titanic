@@ -9,6 +9,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/app_user.dart';
+import '../services/shared_balance_service.dart';
 
 class TransferVScreen extends StatefulWidget {
   final AppUser user;
@@ -27,6 +28,7 @@ class _TransferVScreenState extends State<TransferVScreen> {
   String? _error;
 
   final supabase = Supabase.instance.client;
+  final SharedBalanceService _sharedBalance = SharedBalanceService();
 
   List<Map<String, dynamic>> _visibleRecipients = [];
   bool _recipientsLoading = false;
@@ -89,6 +91,10 @@ class _TransferVScreenState extends State<TransferVScreen> {
   Future<void> _loadCurrentBalance() async {
     setState(() => _balanceLoading = true);
     try {
+      await _sharedBalance.normalizeLinkedBalanceForSpend(
+        userId: widget.user.id,
+        balanceKey: 'v_balance',
+      );
       final row = await supabase
           .from('user_credentials')
           .select('v_balance')
@@ -241,11 +247,23 @@ class _TransferVScreenState extends State<TransferVScreen> {
     setState(() => _loading = true);
 
     try {
+      await _sharedBalance.normalizeLinkedBalanceForSpend(
+        userId: widget.user.id,
+        balanceKey: 'v_balance',
+      );
       await supabase.rpc('transfer_v_points', params: {
         'from_user': widget.user.id,
         'to_username': toUsername,
         'amount': amount,
       });
+      await _sharedBalance.syncLinkedBalancesForUser(
+        userId: widget.user.id,
+        sourceUserId: widget.user.id,
+      );
+      await _sharedBalance.syncLinkedBalancesForUser(
+        username: toUsername,
+        sourceUsername: toUsername,
+      );
 
       // ✅ всплывашка успеха "Вы перевели Пользователю Количество войсов"
       final first = (_selectedRecipient!['first_name'] ?? '').toString();

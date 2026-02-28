@@ -15,12 +15,16 @@ class PurchaseEnterpriseScreen extends StatefulWidget {
 }
 
 class _PurchaseEnterpriseScreenState extends State<PurchaseEnterpriseScreen> {
+  static const double _baseEnterprisePrice = 200.0;
+  static const String _supranationalInstitutesType =
+      '\u041d\u0430\u0434\u043d\u0430\u0446\u0438\u043e\u043d\u0430\u043b\u044c\u043d\u044b\u0435 \u0438\u043d\u0441\u0442\u0438\u0442\u0443\u0442\u044b';
   final supabase = Supabase.instance.client;
   final _formKey = GlobalKey<FormState>();
 
   final TextEditingController _nameCtrl = TextEditingController();
   String? _selectedColor;
   String? _selectedRegion;
+  String? _selectedEnterpriseType;
 
   List<_InvestorRow> _investors = [];
   List<Map<String, dynamic>> _players = [];
@@ -33,6 +37,15 @@ class _PurchaseEnterpriseScreenState extends State<PurchaseEnterpriseScreen> {
     'Центрально-европейская группа',
   ];
 
+  final List<String> _enterpriseTypes = const [
+    'Чёрная металлургия',
+    'Лёгкая промышленность',
+    'Сельское хозяйство',
+    'Инфраструктура и транспорт',
+    'Финансово-торговый сектор',
+    'Наднациональные институты',
+  ];
+
   final Map<String, String> _colorOptions = {
     'красный': '#F44336',
     'зелёный': '#4CAF50',
@@ -43,6 +56,13 @@ class _PurchaseEnterpriseScreenState extends State<PurchaseEnterpriseScreen> {
 
   bool _loading = false;
   String? _error;
+
+  double get _enterprisePrice {
+    if (_selectedEnterpriseType == _supranationalInstitutesType) {
+      return _baseEnterprisePrice * 2;
+    }
+    return _baseEnterprisePrice;
+  }
 
   @override
   void initState() {
@@ -97,6 +117,7 @@ class _PurchaseEnterpriseScreenState extends State<PurchaseEnterpriseScreen> {
 
     final name = _nameCtrl.text.trim();
     final region = _selectedRegion ?? widget.currentUser.region ?? '';
+    final enterpriseType = _selectedEnterpriseType ?? '';
 
     final List<Map<String, dynamic>> investorsLog = [];
     for (final row in _investors) {
@@ -111,13 +132,14 @@ class _PurchaseEnterpriseScreenState extends State<PurchaseEnterpriseScreen> {
     }
 
     try {
-      final fresh = await supabase.from('user_credentials').select('v_balance, enterprises').eq('id', widget.currentUser.id).maybeSingle();
+      final fresh = await supabase.from('user_credentials').select('m_balance, enterprises').eq('id', widget.currentUser.id).maybeSingle();
       if (fresh is! Map<String, dynamic>) throw 'Не удалось получить профиль';
-      final vbalRaw = fresh['v_balance'];
-      final currentBalance = (vbalRaw is num) ? vbalRaw.toDouble() : double.tryParse(vbalRaw?.toString() ?? '') ?? 0.0;
-      if (currentBalance < 200.0) {
+      final mbalRaw = fresh['m_balance'];
+      final currentBalance = (mbalRaw is num) ? mbalRaw.toDouble() : double.tryParse(mbalRaw?.toString() ?? '') ?? 0.0;
+      final enterprisePrice = _enterprisePrice;
+      if (currentBalance < enterprisePrice) {
         setState(() => _loading = false);
-        _showError('Недостаточно V: требуется 200, у вас ${currentBalance.toStringAsFixed(2)}');
+        _showError('\u041d\u0435\u0434\u043e\u0441\u0442\u0430\u0442\u043e\u0447\u043d\u043e M: \u0442\u0440\u0435\u0431\u0443\u0435\u0442\u0441\u044f ${enterprisePrice.toStringAsFixed(0)}, \u0443 \u0432\u0430\u0441 ${currentBalance.toStringAsFixed(2)}');
         return;
       }
 
@@ -148,17 +170,18 @@ class _PurchaseEnterpriseScreenState extends State<PurchaseEnterpriseScreen> {
         'id': DateTime.now().microsecondsSinceEpoch.toString(),
         'name': name,
         'region': region,
+        'enterprise_type': enterpriseType,
         'color': widget.currentUser.color,
         'investors': investorsLog,
         'created_at': DateTime.now().toIso8601String(),
-        'p_payout': 200,
+        'p_payout': enterprisePrice,
       };
 
       entList.add(enterprise);
 
-      final newBalance = currentBalance - 200.0;
+      final newBalance = currentBalance - enterprisePrice;
       final updateObj = {
-        'v_balance': newBalance,
+        'm_balance': newBalance,
         'enterprises': entList,
       };
 
@@ -281,6 +304,16 @@ class _PurchaseEnterpriseScreenState extends State<PurchaseEnterpriseScreen> {
                 validator: (v) => (v == null || v.isEmpty) ? 'Выберите регион' : null,
               ),
               const SizedBox(height: 14),
+              DropdownButtonFormField<String>(
+                value: _selectedEnterpriseType,
+                decoration: const InputDecoration(labelText: 'Тип предприятия'),
+                items: _enterpriseTypes
+                    .map((type) => DropdownMenuItem(value: type, child: Text(type)))
+                    .toList(),
+                onChanged: (value) => setState(() => _selectedEnterpriseType = value),
+                validator: (value) => (value == null || value.isEmpty) ? 'Выберите тип предприятия' : null,
+              ),
+              const SizedBox(height: 14),
 
               Align(
                 alignment: Alignment.centerLeft,
@@ -303,7 +336,7 @@ class _PurchaseEnterpriseScreenState extends State<PurchaseEnterpriseScreen> {
               const SizedBox(height: 16),
               ElevatedButton(
                 onPressed: _loading ? null : _onSubmit,
-                child: _loading ? const CircularProgressIndicator() : const Text('Купить (200 V)'),
+                child: _loading ? const CircularProgressIndicator() : Text('\u041a\u0443\u043f\u0438\u0442\u044c (${_enterprisePrice.toStringAsFixed(0)} M)'),
               ),
             ],
           ),

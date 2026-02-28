@@ -1211,6 +1211,7 @@ class _InventoryEditorState extends State<_InventoryEditor> {
   String color = '';
   String region = '';
   String description = '';
+  String enterpriseType = '';
   List<dynamic> investors = [];
 
   if (item.containsKey('meta') && item['meta'] is Map) {
@@ -1218,12 +1219,15 @@ class _InventoryEditorState extends State<_InventoryEditor> {
     final meta = item['meta'] as Map;
     color = meta['color']?.toString() ?? '';
     region = meta['region']?.toString() ?? '';
+    enterpriseType =
+        meta['enterprise_type']?.toString() ?? item['enterprise_type']?.toString() ?? '';
     description = meta['description']?.toString() ?? '';
     investors = meta['investors'] as List? ?? [];
   } else {
     // Старый формат
     color = item['color']?.toString() ?? '';
     region = item['region']?.toString() ?? '';
+    enterpriseType = item['enterprise_type']?.toString() ?? '';
     description = item['description']?.toString() ?? '';
     investors = item['investors'] as List? ?? [];
   }
@@ -1267,7 +1271,9 @@ class _InventoryEditorState extends State<_InventoryEditor> {
       if (color.isNotEmpty)
         _buildInfoRow('Цвет', color),
       if (region.isNotEmpty)
-        _buildInfoRow('Регион', region),
+        _buildInfoRow('\u0420\u0435\u0433\u0438\u043e\u043d', region),
+      if (enterpriseType.isNotEmpty)
+        _buildInfoRow('\u0422\u0438\u043f', enterpriseType),
       if (investors.isNotEmpty)
         _buildInfoRow('Инвесторы', _formatInvestors(investors)),
       if (description.isNotEmpty)
@@ -1448,6 +1454,7 @@ class _EnterpriseDialogState extends State<_EnterpriseDialog> {
   late TextEditingController _colorCtrl;
   late TextEditingController _regionCtrl;
   late TextEditingController _descCtrl;
+  String? _selectedEnterpriseType;
   final List<Map<String, dynamic>> _investors = [];
 
   // Информация о владельце (для новых предприятий)
@@ -1482,6 +1489,7 @@ class _EnterpriseDialogState extends State<_EnterpriseDialog> {
     String initialColor = '';
     String initialRegion = '';
     String initialDesc = '';
+    String initialEnterpriseType = '';
 
     if (widget.initialData != null) {
       // Существующее предприятие
@@ -1492,6 +1500,7 @@ class _EnterpriseDialogState extends State<_EnterpriseDialog> {
         initialColor = meta['color']?.toString() ?? '';
         initialRegion = meta['region']?.toString() ?? '';
         initialDesc = meta['description']?.toString() ?? '';
+        initialEnterpriseType = meta['enterprise_type']?.toString() ?? widget.initialData!['enterprise_type']?.toString() ?? '';
         if (meta['investors'] != null) {
           _investors.addAll(List<Map<String, dynamic>>.from(meta['investors'] as List));
         }
@@ -1501,6 +1510,7 @@ class _EnterpriseDialogState extends State<_EnterpriseDialog> {
         initialColor = widget.initialData!['color']?.toString() ?? '';
         initialRegion = widget.initialData!['region']?.toString() ?? '';
         initialDesc = widget.initialData!['description']?.toString() ?? '';
+        initialEnterpriseType = widget.initialData!['enterprise_type']?.toString() ?? '';
         if (widget.initialData!['investors'] != null) {
           _investors.addAll(List<Map<String, dynamic>>.from(widget.initialData!['investors'] as List));
         }
@@ -1511,6 +1521,7 @@ class _EnterpriseDialogState extends State<_EnterpriseDialog> {
     _colorCtrl = TextEditingController(text: initialColor);
     _regionCtrl = TextEditingController(text: initialRegion);
     _descCtrl = TextEditingController(text: initialDesc);
+    _selectedEnterpriseType = initialEnterpriseType.isEmpty ? null : initialEnterpriseType;
 
     // Если это НОВОЕ предприятие и передан ownerId – загружаем информацию о владельце
     if (widget.initialData == null && widget.ownerId != null) {
@@ -1688,6 +1699,31 @@ class _EnterpriseDialogState extends State<_EnterpriseDialog> {
               style: const TextStyle(color: Colors.white),
               dropdownColor: TitanicTheme.panelDark,
             ),
+            DropdownButtonFormField<String>(
+              value: _selectedEnterpriseType,
+              items: const [
+                '\u0427\u0451\u0440\u043d\u0430\u044f \u043c\u0435\u0442\u0430\u043b\u043b\u0443\u0440\u0433\u0438\u044f',
+                '\u041b\u0451\u0433\u043a\u0430\u044f \u043f\u0440\u043e\u043c\u044b\u0448\u043b\u0435\u043d\u043d\u043e\u0441\u0442\u044c',
+                '\u0421\u0435\u043b\u044c\u0441\u043a\u043e\u0435 \u0445\u043e\u0437\u044f\u0439\u0441\u0442\u0432\u043e',
+                '\u0418\u043d\u0444\u0440\u0430\u0441\u0442\u0440\u0443\u043a\u0442\u0443\u0440\u0430 \u0438 \u0442\u0440\u0430\u043d\u0441\u043f\u043e\u0440\u0442',
+                '\u0424\u0438\u043d\u0430\u043d\u0441\u043e\u0432\u043e-\u0442\u043e\u0440\u0433\u043e\u0432\u044b\u0439 \u0441\u0435\u043a\u0442\u043e\u0440',
+                '\u041d\u0430\u0434\u043d\u0430\u0446\u0438\u043e\u043d\u0430\u043b\u044c\u043d\u044b\u0435 \u0438\u043d\u0441\u0442\u0438\u0442\u0443\u0442\u044b',
+              ].map((type) {
+                return DropdownMenuItem(
+                  value: type,
+                  child: Text(type, style: const TextStyle(color: Colors.white)),
+                );
+              }).toList(),
+              onChanged: (value) => setState(() => _selectedEnterpriseType = value),
+              decoration: TitanicTheme.inputDecoration.copyWith(
+                labelText: '\u0422\u0438\u043f \u043f\u0440\u0435\u0434\u043f\u0440\u0438\u044f\u0442\u0438\u044f',
+                labelStyle: const TextStyle(color: Colors.white70),
+              ),
+              style: const TextStyle(color: Colors.white),
+              dropdownColor: TitanicTheme.panelDark,
+            ),
+            const SizedBox(height: 12),
+
             const SizedBox(height: 12),
 
             // Описание
@@ -1815,9 +1851,18 @@ class _EnterpriseDialogState extends State<_EnterpriseDialog> {
             }
 
             // --- ФОРМИРУЕМ ПРЕДПРИЯТИЕ В ЕДИНОМ ФОРМАТЕ С META ---
+            final enterpriseType = (_selectedEnterpriseType ?? '').trim();
+            if (enterpriseType.isEmpty) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0442\u0438\u043f \u043f\u0440\u0435\u0434\u043f\u0440\u0438\u044f\u0442\u0438\u044f')),
+              );
+              return;
+            }
+
             final Map<String, dynamic> meta = {
               'color': color,
               'region': _regionCtrl.text.trim(),
+              'enterprise_type': enterpriseType,
               'description': _descCtrl.text.trim(),
               'investors': List.from(_investors),
               'created_at': widget.initialData?['meta']?['created_at'] ??
@@ -1848,6 +1893,7 @@ class _EnterpriseDialogState extends State<_EnterpriseDialog> {
             final enterprise = {
               'type': 'enterprise',
               'name': name,
+              'enterprise_type': enterpriseType,
               'meta': meta,
             };
 

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:titanic/services/shared_balance_service.dart';
 import 'package:titanic/widgets/art_deco_button.dart';
 
 class BloodPokerBlock extends StatefulWidget {
@@ -18,6 +19,7 @@ class BloodPokerBlock extends StatefulWidget {
 
 class _BloodPokerBlockState extends State<BloodPokerBlock> {
   final supabase = Supabase.instance.client;
+  final SharedBalanceService _sharedBalance = SharedBalanceService();
   bool _loading = true;
   Map<String, dynamic>? _activeStage;
   List<Map<String, dynamic>> _options = [];
@@ -287,6 +289,10 @@ class _BloodPokerBlockState extends State<BloodPokerBlock> {
     setState(() => _loading = true);
     
     try {
+      await _sharedBalance.normalizeLinkedBalanceForSpend(
+        userId: widget.currentUserId,
+        balanceKey: 'm_balance',
+      );
       final currentBalanceRes = await supabase
           .from('user_credentials')
           .select('m_balance, role')
@@ -345,6 +351,10 @@ class _BloodPokerBlockState extends State<BloodPokerBlock> {
           .from('user_credentials')
           .update({'m_balance': newBalance})
           .eq('id', widget.currentUserId);
+      await _sharedBalance.syncLinkedBalancesForUser(
+        userId: widget.currentUserId,
+        sourceUserId: widget.currentUserId,
+      );
 
       final stageId = _activeStage!['id'] is int 
           ? _activeStage!['id'] as int 

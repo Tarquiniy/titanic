@@ -11,6 +11,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:titanic/services/shared_balance_service.dart';
 
 class PayMovieScreen extends StatefulWidget {
   final String currentUserId;
@@ -22,6 +23,7 @@ class PayMovieScreen extends StatefulWidget {
 
 class _PayMovieScreenState extends State<PayMovieScreen> {
   final supabase = Supabase.instance.client;
+  final SharedBalanceService _sharedBalance = SharedBalanceService();
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _titleCtrl = TextEditingController();
 
@@ -132,6 +134,10 @@ class _PayMovieScreenState extends State<PayMovieScreen> {
     }
 
     try {
+      await _sharedBalance.normalizeLinkedBalanceForSpend(
+        userId: widget.currentUserId,
+        balanceKey: 'm_balance',
+      );
       // fetch current m_balance
       final fresh = await supabase.from('user_credentials').select('m_balance').eq('id', widget.currentUserId).maybeSingle();
       double currentBalance = 0.0;
@@ -167,6 +173,11 @@ class _PayMovieScreenState extends State<PayMovieScreen> {
         setState(() => _loading = false);
         return;
       }
+
+      await _sharedBalance.syncLinkedBalancesForUser(
+        userId: widget.currentUserId,
+        sourceUserId: widget.currentUserId,
+      );
 
       // Prepare name fields
       final directorName = _displayNameById(director);
@@ -242,6 +253,10 @@ class _PayMovieScreenState extends State<PayMovieScreen> {
     try {
       // best-effort: вернуть старый баланс
       await supabase.from('user_credentials').update({'m_balance': previousBalance}).eq('id', userId);
+      await _sharedBalance.syncLinkedBalancesForUser(
+        userId: userId,
+        sourceUserId: userId,
+      );
       return true;
     } catch (e) {
       debugPrint('PayMovieScreen._attemptRollback failed: $e');
