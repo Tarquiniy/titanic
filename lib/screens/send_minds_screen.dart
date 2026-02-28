@@ -13,7 +13,6 @@
 
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:titanic/services/shared_balance_service.dart';
 
 class SendMindsScreen extends StatefulWidget {
   final String currentUserId;
@@ -25,7 +24,6 @@ class SendMindsScreen extends StatefulWidget {
 
 class _SendMindsScreenState extends State<SendMindsScreen> {
   final supabase = Supabase.instance.client;
-  final SharedBalanceService _sharedBalance = SharedBalanceService();
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _amountCtrl = TextEditingController();
 
@@ -95,10 +93,6 @@ class _SendMindsScreenState extends State<SendMindsScreen> {
     });
 
     try {
-      await _sharedBalance.normalizeLinkedBalanceForSpend(
-        userId: widget.currentUserId,
-        balanceKey: 'm_balance',
-      );
       // First try RPC 'transfer_minds' (optional server-side transaction)
       try {
         final rpcRes = await supabase.rpc('transfer_minds', params: {
@@ -106,14 +100,6 @@ class _SendMindsScreenState extends State<SendMindsScreen> {
           'recipient_id': _selectedJournalistId,
           'amount': amount,
         }).maybeSingle();
-        await _sharedBalance.syncLinkedBalancesForUser(
-          userId: widget.currentUserId,
-          sourceUserId: widget.currentUserId,
-        );
-        await _sharedBalance.syncLinkedBalancesForUser(
-          userId: _selectedJournalistId,
-          sourceUserId: _selectedJournalistId,
-        );
         // If RPC succeeded (no exception), assume success.
         _showSnack('Успешно: переведено $amount майндов.');
         if (mounted) Navigator.of(context).pop(true);
@@ -201,14 +187,6 @@ class _SendMindsScreenState extends State<SendMindsScreen> {
         }
 
         // success
-        await _sharedBalance.syncLinkedBalancesForUser(
-          userId: widget.currentUserId,
-          sourceUserId: widget.currentUserId,
-        );
-        await _sharedBalance.syncLinkedBalancesForUser(
-          userId: _selectedJournalistId,
-          sourceUserId: _selectedJournalistId,
-        );
         _showSnack('Успешно: переведено $amount майндов журналисту.');
         if (mounted) Navigator.of(context).pop(true);
         return;
@@ -246,10 +224,6 @@ class _SendMindsScreenState extends State<SendMindsScreen> {
       }
       final back = curr + amount;
       await supabase.from('user_credentials').update({'m_balance': back}).eq('id', senderId);
-      await _sharedBalance.syncLinkedBalancesForUser(
-        userId: senderId,
-        sourceUserId: senderId,
-      );
       return true;
     } catch (e) {
       debugPrint('Rollback failed: $e');

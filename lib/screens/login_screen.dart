@@ -7,7 +7,6 @@ import 'home_screen.dart';
 import 'admin_screen.dart';
 import 'package:titanic/services/persistent_storage.dart';
 import 'package:titanic/models/app_user.dart';
-import 'package:titanic/services/shared_balance_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({Key? key}) : super(key: key);
@@ -21,7 +20,6 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _loading = false;
   String? _error;
   final SupabaseClient supabase = Supabase.instance.client;
-  final SharedBalanceService _sharedBalance = SharedBalanceService();
 
   // Background overlay assets (optional). If the asset is missing in pubspec.yaml,
   // the UI will simply skip drawing it (see errorBuilder).
@@ -47,30 +45,18 @@ class _LoginScreenState extends State<LoginScreen> {
           .eq('id', id)
           .maybeSingle();
       if (row is Map<String, dynamic>) {
-        await _sharedBalance.syncLinkedBalancesForUser(
-          userId: row['id']?.toString(),
-          sourceUserId: row['id']?.toString(),
-        );
-        final synced = await supabase
-            .from('user_credentials')
-            .select(
-              'id, telegram_username, role, first_name, last_name, v_balance, m_balance, color, region',
-            )
-            .eq('id', id)
-            .maybeSingle();
-        final profile = synced is Map<String, dynamic> ? synced : row;
         final user = AppUser(
-          id: profile['id']?.toString() ?? '',
-          username: profile['telegram_username']?.toString() ?? '',
-          role: profile['role']?.toString() ?? 'public_figure',
-          firstName: profile['first_name']?.toString() ?? '',
-          lastName: profile['last_name']?.toString() ?? '',
-          vBalance: (profile['v_balance'] is num) ? (profile['v_balance'] as num).toDouble() : 0.0,
-          mBalance: (profile['m_balance'] is num) ? (profile['m_balance'] as num).toDouble() : 0.0,
-          color: profile['color']?.toString(),
-          region: profile['region']?.toString(),
+          id: row['id']?.toString() ?? '',
+          username: row['telegram_username']?.toString() ?? '',
+          role: row['role']?.toString() ?? 'public_figure',
+          firstName: row['first_name']?.toString() ?? '',
+          lastName: row['last_name']?.toString() ?? '',
+          vBalance: (row['v_balance'] is num) ? (row['v_balance'] as num).toDouble() : 0.0,
+          mBalance: (row['m_balance'] is num) ? (row['m_balance'] as num).toDouble() : 0.0,
+          color: row['color']?.toString(),
+          region: row['region']?.toString(),
         );
-        if ((profile['role'] ?? '').toString().toLowerCase() == 'admin') {
+        if ((row['role'] ?? '').toString().toLowerCase() == 'admin') {
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(builder: (_) => const AdminScreen()),
           );
@@ -107,38 +93,26 @@ class _LoginScreenState extends State<LoginScreen> {
         return;
       }
       final row = Map<String, dynamic>.from(data as Map);
-      await _sharedBalance.syncLinkedBalancesForUser(
-        userId: row['id']?.toString(),
-        sourceUserId: row['id']?.toString(),
-      );
-      final synced = await supabase
-          .from('user_credentials')
-          .select(
-            'id, telegram_username, role, first_name, last_name, v_balance, m_balance, password, color, region',
-          )
-          .eq('id', row['id'].toString())
-          .maybeSingle();
-      final profile = synced is Map<String, dynamic> ? synced : row;
-      final stored = (profile['password'] ?? '').toString();
+      final stored = (row['password'] ?? '').toString();
       if (stored.isEmpty || stored != password) {
         setState(() => _error = 'Неверный username или пароль');
         return;
       }
       final user = AppUser(
-        id: profile['id']?.toString() ?? '',
-        username: profile['telegram_username']?.toString() ?? username,
-        role: profile['role']?.toString() ?? 'public_figure',
-        firstName: profile['first_name']?.toString() ?? '',
-        lastName: profile['last_name']?.toString() ?? '',
-        vBalance: (profile['v_balance'] is num) ? (profile['v_balance'] as num).toDouble() : 0.0,
-        mBalance: (profile['m_balance'] is num) ? (profile['m_balance'] as num).toDouble() : 0.0,
-        color: profile['color']?.toString(),
-        region: profile['region']?.toString(),
+        id: row['id']?.toString() ?? '',
+        username: row['telegram_username']?.toString() ?? username,
+        role: row['role']?.toString() ?? 'public_figure',
+        firstName: row['first_name']?.toString() ?? '',
+        lastName: row['last_name']?.toString() ?? '',
+        vBalance: (row['v_balance'] is num) ? (row['v_balance'] as num).toDouble() : 0.0,
+        mBalance: (row['m_balance'] is num) ? (row['m_balance'] as num).toDouble() : 0.0,
+        color: row['color']?.toString(),
+        region: row['region']?.toString(),
       );
       try {
         await saveUserId(user.id);
       } catch (_) {}
-      if ((profile['role'] ?? '').toString().toLowerCase() == 'admin') {
+      if ((row['role'] ?? '').toString().toLowerCase() == 'admin') {
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (_) => const AdminScreen()),
         );

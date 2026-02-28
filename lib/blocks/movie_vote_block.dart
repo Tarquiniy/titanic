@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:titanic/services/shared_balance_service.dart';
 import 'package:titanic/widgets/art_deco_button.dart';
 
 class MovieVoteBlock extends StatefulWidget {
@@ -21,7 +20,6 @@ class MovieVoteBlock extends StatefulWidget {
 
 class _MovieVoteBlockState extends State<MovieVoteBlock> {
   final supabase = Supabase.instance.client;
-  final SharedBalanceService _sharedBalance = SharedBalanceService();
   bool _loading = true;
   bool _disabled = true;
   Map<String, dynamic>? _activePoll;
@@ -197,10 +195,6 @@ class _MovieVoteBlockState extends State<MovieVoteBlock> {
     setState(() => _loading = true);
 
     try {
-      await _sharedBalance.normalizeLinkedBalanceForSpend(
-        userId: widget.currentUserId,
-        balanceKey: 'v_balance',
-      );
       double currentV = 0.0;
       try {
         final row = await supabase
@@ -254,11 +248,6 @@ class _MovieVoteBlockState extends State<MovieVoteBlock> {
         setState(() => _loading = false);
         return;
       }
-
-      await _sharedBalance.syncLinkedBalancesForUser(
-        userId: widget.currentUserId,
-        sourceUserId: widget.currentUserId,
-      );
 
       await supabase.from('movie_poll_votes').insert(inserts);
 

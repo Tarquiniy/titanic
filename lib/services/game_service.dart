@@ -5,11 +5,9 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:titanic/services/shared_balance_service.dart';
 
 class GameService {
   final SupabaseClient client = Supabase.instance.client;
-  final SharedBalanceService _sharedBalance = SharedBalanceService();
 
   GameService();
 
@@ -102,12 +100,6 @@ class GameService {
     required bool agree,
     required int n, // use int here to prefer integer variant
   }) async {
-    if (!agree) {
-      await _sharedBalance.normalizeLinkedBalanceForSpend(
-        userId: userId,
-        balanceKey: 'v_balance',
-      );
-    }
     final params = {
       'p_speech_id': speechId,
       'p_user': userId,
@@ -139,10 +131,6 @@ class GameService {
       if (!parsed.containsKey('status')) {
         throw Exception('Unexpected RPC response (missing status): $parsed');
       }
-      await _sharedBalance.syncLinkedBalancesForUser(
-        userId: userId,
-        sourceUserId: userId,
-      );
       return parsed;
     } on PostgrestException catch (e, st) {
       _logPostgrestException(e);
@@ -356,10 +344,6 @@ class GameService {
           debugPrint('Fallback: failed to debit game_bank: $e');
         }
 
-        await _sharedBalance.syncLinkedBalancesForUser(
-          userId: userId,
-          sourceUserId: userId,
-        );
         return {
           'status': 'kept_color',
           'added_v': n,
@@ -374,17 +358,9 @@ class GameService {
   Future<dynamic> rpcPublishArticle(
       {required String userId, required num amount}) async {
     try {
-      await _sharedBalance.normalizeLinkedBalanceForSpend(
-        userId: userId,
-        balanceKey: 'm_balance',
-      );
       final res =
           await client.rpc('publish_article', params: {'p_user': userId, 'p_amount': amount});
       debugPrint('GameService.rpcPublishArticle -> $res');
-      await _sharedBalance.syncLinkedBalancesForUser(
-        userId: userId,
-        sourceUserId: userId,
-      );
       return res;
     } on PostgrestException catch (e, st) {
       _logPostgrestException(e);
@@ -463,10 +439,6 @@ class GameService {
       required String userId,
       required int optionId,
       required int voices}) async {
-    await _sharedBalance.normalizeLinkedBalanceForSpend(
-      userId: userId,
-      balanceKey: 'v_balance',
-    );
     debugPrint(
         'GameService.rpcVoteInDebate RPC params: debateId=$debateId userId=$userId optionId=$optionId voices=$voices');
 
@@ -479,10 +451,6 @@ class GameService {
         'p_voices': voices,
       });
       debugPrint('GameService.rpcVoteInDebate RPC raw result: $raw');
-      await _sharedBalance.syncLinkedBalancesForUser(
-        userId: userId,
-        sourceUserId: userId,
-      );
       return;
     } on PostgrestException catch (e, st) {
       // detailed logging for PostgrestException
@@ -555,10 +523,6 @@ class GameService {
         'voices': voices,
         'created_at': DateTime.now().toIso8601String(),
       });
-      await _sharedBalance.syncLinkedBalancesForUser(
-        userId: userId,
-        sourceUserId: userId,
-      );
       debugPrint(
           'GameService.rpcVoteInDebate fallback: inserted vote row for userId=$userId debateId=$debateId optionId=$optionId voices=$voices');
       return;
@@ -686,10 +650,6 @@ class GameService {
     required String userId, // text uuid
     required num amount,
   }) async {
-    await _sharedBalance.normalizeLinkedBalanceForSpend(
-      userId: userId,
-      balanceKey: 'm_balance',
-    );
     debugPrint(
         'GameService.placeBetInResolution RPC params: resolutionId=$resolutionId optionId=$optionId userId=$userId amount=$amount');
 
@@ -709,10 +669,6 @@ class GameService {
         'p_amount': amount,
       });
       debugPrint('GameService.placeBetInResolution RPC raw result: $raw');
-      await _sharedBalance.syncLinkedBalancesForUser(
-        userId: userId,
-        sourceUserId: userId,
-      );
       return;
     } on PostgrestException catch (e, st) {
       _logPostgrestException(e);
@@ -778,10 +734,6 @@ class GameService {
         'amount': amount,
         'created_at': DateTime.now().toUtc().toIso8601String(),
       });
-      await _sharedBalance.syncLinkedBalancesForUser(
-        userId: userId,
-        sourceUserId: userId,
-      );
       debugPrint(
           'GameService.placeBetInResolution fallback: inserted bet row (resolution=$resolutionId option=$optionId user=$userId amount=$amount)');
     } catch (e, st) {
@@ -1084,18 +1036,10 @@ class GameService {
     required int cost,
   }) async {
     try {
-      await _sharedBalance.normalizeLinkedBalanceForSpend(
-        userId: fromUser,
-        balanceKey: 'v_balance',
-      );
       final params = {'p_from': fromUser, 'p_to': toUser, 'p_cost': cost};
       debugPrint('GameService.rpcBuyEconomistTurn params: $params');
       final res = await client.rpc('buy_economist_turn', params: params);
       debugPrint('GameService.rpcBuyEconomistTurn raw res: $res');
-      await _sharedBalance.syncLinkedBalancesForUser(
-        userId: fromUser,
-        sourceUserId: fromUser,
-      );
       if (res == null) return null;
       if (res is Map) return Map<String, dynamic>.from(res);
       if (res is List && res.isNotEmpty && res[0] is Map) return Map<String, dynamic>.from(res[0] as Map);

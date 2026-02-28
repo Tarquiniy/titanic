@@ -1,17 +1,11 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:titanic/services/shared_balance_service.dart';
 import 'package:titanic/widgets/art_deco_button.dart';
 
 Future<Map<String, dynamic>> fetchHonorState(String userId) async {
   final supabase = Supabase.instance.client;
-  final sharedBalance = SharedBalanceService();
   try {
-    await sharedBalance.syncLinkedBalancesForUser(
-      userId: userId,
-      sourceUserId: userId,
-    );
     final row = await supabase
         .from('user_credentials')
         .select('m_balance, used_honor_article')
@@ -45,7 +39,6 @@ Future<void> showHonorArticleDialog(
   Future<void> Function()? onPublished,
 }) async {
   final supabase = Supabase.instance.client;
-  final sharedBalance = SharedBalanceService();
   final state = await fetchHonorState(userId);
   final double mBalance = state['m_balance'] as double? ?? 0.0;
   final bool used = state['used'] as bool? ?? false;
@@ -123,17 +116,9 @@ Future<void> showHonorArticleDialog(
   );
 
   try {
-    await sharedBalance.normalizeLinkedBalanceForSpend(
-      userId: userId,
-      balanceKey: 'm_balance',
-    );
     final res = await supabase.rpc(
       'publish_article',
       params: {'p_user': userId, 'p_amount': intAmount},
-    );
-    await sharedBalance.syncLinkedBalancesForUser(
-      userId: userId,
-      sourceUserId: userId,
     );
     
     Map<String, dynamic>? parsed;

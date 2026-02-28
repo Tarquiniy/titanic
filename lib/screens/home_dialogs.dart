@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:titanic/services/game_service.dart';
-import 'package:titanic/services/shared_balance_service.dart';
 import 'package:titanic/models/app_user.dart';
 
 /// showInvestInColorDialog: вынес диалог в отдельную функцию.
@@ -15,15 +14,10 @@ Future<void> showInvestInColorDialog({
   Future<void> Function()? onCompleted,
   required void Function(String) showMessage,
 }) async {
-  final sharedBalance = SharedBalanceService();
   const colors = ['красный', 'зелёный', 'жёлтый', 'синий', 'малиновый'];
 
   double mBalance = 0.0;
   try {
-    await sharedBalance.normalizeLinkedBalanceForSpend(
-      userId: userId,
-      balanceKey: 'm_balance',
-    );
     final row = await supabase.from('user_credentials').select('m_balance').eq('id', userId).maybeSingle();
     if (row is Map<String, dynamic>) {
       final mb = row['m_balance'];
@@ -97,10 +91,6 @@ Future<void> showInvestInColorDialog({
   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Отправка...')));
   try {
     final res = await supabase.rpc('invest_in_color', params: {'p_user': userId, 'p_color': selectedColor, 'p_amount': n});
-    await sharedBalance.syncLinkedBalancesForUser(
-      userId: userId,
-      sourceUserId: userId,
-    );
     Map<String, dynamic>? parsed;
     if (res is Map<String, dynamic>) parsed = res;
     else if (res is List && res.isNotEmpty && res[0] is Map) parsed = Map<String, dynamic>.from(res[0]);

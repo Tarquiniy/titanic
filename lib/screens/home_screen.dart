@@ -11,7 +11,6 @@ import 'package:titanic/models/app_user.dart';
 import 'package:titanic/services/game_service.dart';
 import 'package:titanic/services/debate_service.dart';
 import 'package:titanic/services/speech_service.dart';
-import 'package:titanic/services/shared_balance_service.dart';
 import 'package:titanic/screens/transfer_v_screen.dart';
 import 'package:titanic/screens/inventory_screen.dart';
 import 'package:titanic/screens/debates_screen.dart';
@@ -47,7 +46,6 @@ class _HomeScreenState extends State<HomeScreen> {
   late AppUser user;
   final SupabaseClient supabase = Supabase.instance.client;
   final GameService svc = GameService();
-  final SharedBalanceService _sharedBalance = SharedBalanceService();
 
   static const String _bgAsset = 'assets/art_deco_login.png';
   static const String _frameOverlayAsset = 'assets/art_deco_frame_overlay.png';
@@ -460,10 +458,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _refreshProfile() async {
     try {
-      await _sharedBalance.syncLinkedBalancesForUser(
-        userId: user.id,
-        sourceUserId: user.id,
-      );
       final profileRaw = await supabase
           .from('user_credentials')
           .select(
@@ -750,10 +744,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // ✅ Текущее значение m_balance (с сервера)
   Future<double> _fetchCurrentMBalance() async {
-    await _sharedBalance.normalizeLinkedBalanceForSpend(
-      userId: user.id,
-      balanceKey: 'm_balance',
-    );
     final row = await supabase
         .from('user_credentials')
         .select('m_balance')
@@ -772,10 +762,6 @@ class _HomeScreenState extends State<HomeScreen> {
         .from('user_credentials')
         .update({'m_balance': newVal})
         .eq('id', user.id);
-    await _sharedBalance.syncLinkedBalancesForUser(
-      userId: user.id,
-      sourceUserId: user.id,
-    );
   }
 
   Future<void> _onStartSpeechPressed() async {
