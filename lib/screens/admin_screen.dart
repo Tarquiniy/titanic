@@ -453,11 +453,46 @@ class _UsersTabState extends State<UsersTab> {
   List<Map<String, dynamic>> _users = [];
   bool _loading = false;
   String _filter = '';
+  RealtimeChannel? _usersChannel;
+  Timer? _usersReloadDebounce;
 
   @override
   void initState() {
     super.initState();
     _loadUsers();
+    _subscribeToUsersRealtime();
+  }
+
+  @override
+  void dispose() {
+    _usersReloadDebounce?.cancel();
+    final channel = _usersChannel;
+    if (channel != null) {
+      supabase.removeChannel(channel);
+    }
+    super.dispose();
+  }
+
+  void _scheduleUsersRefresh() {
+    _usersReloadDebounce?.cancel();
+    _usersReloadDebounce = Timer(const Duration(milliseconds: 250), () async {
+      if (!mounted) return;
+      await _loadUsers();
+    });
+  }
+
+  void _subscribeToUsersRealtime() {
+    try {
+      _usersChannel = supabase.channel('admin-users-live');
+      _usersChannel!
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'user_credentials',
+            callback: (_) => _scheduleUsersRefresh(),
+          )
+          .subscribe();
+    } catch (_) {}
   }
 
   Future<void> _loadUsers() async {
@@ -2768,6 +2803,8 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
   bool _closing = false;
 
   List<Map<String, dynamic>> _resolutions = [];
+  RealtimeChannel? _resolutionsChannel;
+  Timer? _resolutionsReloadDebounce;
 
   static const List<String> fixedColors = [
     'зелёный',
@@ -2782,16 +2819,57 @@ class _ResolutionsTabState extends State<ResolutionsTab> {
     super.initState();
     _addOptionField();
     _loadResolutions();
+    _subscribeToResolutionsRealtime();
   }
 
   @override
   void dispose() {
+    _resolutionsReloadDebounce?.cancel();
+    final channel = _resolutionsChannel;
+    if (channel != null) {
+      supabase.removeChannel(channel);
+    }
     _titleCtrl.dispose();
     _descCtrl.dispose();
     for (final c in _optionCtrls) {
       c.dispose();
     }
     super.dispose();
+  }
+
+  void _scheduleResolutionsRefresh() {
+    _resolutionsReloadDebounce?.cancel();
+    _resolutionsReloadDebounce =
+        Timer(const Duration(milliseconds: 250), () async {
+      if (!mounted) return;
+      await _loadResolutions();
+    });
+  }
+
+  void _subscribeToResolutionsRealtime() {
+    try {
+      _resolutionsChannel = supabase.channel('admin-resolutions-live');
+      _resolutionsChannel!
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'political_resolutions',
+            callback: (_) => _scheduleResolutionsRefresh(),
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'resolution_options',
+            callback: (_) => _scheduleResolutionsRefresh(),
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'political_bets',
+            callback: (_) => _scheduleResolutionsRefresh(),
+          )
+          .subscribe();
+    } catch (_) {}
   }
 
   void _addOptionField() {
@@ -3580,11 +3658,71 @@ class _ColorBanksTabState extends State<ColorBanksTab> {
 
   final Map<String, List<Map<String, dynamic>>> _historyCache = {};
   final Map<String, bool> _loadingHistory = {};
+  RealtimeChannel? _banksChannel;
+  Timer? _banksReloadDebounce;
 
   @override
   void initState() {
     super.initState();
     _loadBanks();
+    _subscribeToBanksRealtime();
+  }
+
+  @override
+  void dispose() {
+    _banksReloadDebounce?.cancel();
+    final channel = _banksChannel;
+    if (channel != null) {
+      supabase.removeChannel(channel);
+    }
+    super.dispose();
+  }
+
+  void _scheduleBanksRefresh() {
+    _banksReloadDebounce?.cancel();
+    _banksReloadDebounce = Timer(const Duration(milliseconds: 250), () async {
+      if (!mounted) return;
+      _historyCache.clear();
+      await _loadBanks();
+    });
+  }
+
+  void _subscribeToBanksRealtime() {
+    try {
+      _banksChannel = supabase.channel('admin-color-banks-live');
+      _banksChannel!
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'color_banks',
+            callback: (_) => _scheduleBanksRefresh(),
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'color_bank_history',
+            callback: (_) => _scheduleBanksRefresh(),
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'political_resolutions',
+            callback: (_) => _scheduleBanksRefresh(),
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'political_bets',
+            callback: (_) => _scheduleBanksRefresh(),
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'resolution_options',
+            callback: (_) => _scheduleBanksRefresh(),
+          )
+          .subscribe();
+    } catch (_) {}
   }
 
   Future<void> _loadBanks() async {

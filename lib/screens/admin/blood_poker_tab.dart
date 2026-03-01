@@ -1,4 +1,4 @@
-import 'dart:convert';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:titanic/theme/app_theme.dart';
@@ -22,15 +22,23 @@ class _BloodPokerTabState extends State<BloodPokerTab> {
   List<Map<String, dynamic>> _activeStages = [];
   List<Map<String, dynamic>> _closedStages = [];
   bool _loading = false;
+  RealtimeChannel? _stagesChannel;
+  Timer? _stagesReloadDebounce;
 
   @override
   void initState() {
     super.initState();
     _loadStages();
+    _subscribeToStagesRealtime();
   }
 
   @override
   void dispose() {
+    _stagesReloadDebounce?.cancel();
+    final channel = _stagesChannel;
+    if (channel != null) {
+      supabase.removeChannel(channel);
+    }
     _titleCtrl.dispose();
     _descriptionCtrl.dispose();
     for (final ctrl in _optionCtrls) {
@@ -50,6 +58,40 @@ class _BloodPokerTabState extends State<BloodPokerTab> {
       _optionCtrls[index].dispose();
       _optionCtrls.removeAt(index);
     });
+  }
+
+  void _scheduleStagesRefresh() {
+    _stagesReloadDebounce?.cancel();
+    _stagesReloadDebounce = Timer(const Duration(milliseconds: 250), () async {
+      if (!mounted) return;
+      await _loadStages();
+    });
+  }
+
+  void _subscribeToStagesRealtime() {
+    try {
+      _stagesChannel = supabase.channel('admin-blood-poker-live');
+      _stagesChannel!
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'blood_poker_stages',
+            callback: (_) => _scheduleStagesRefresh(),
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'blood_poker_options',
+            callback: (_) => _scheduleStagesRefresh(),
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'blood_poker_bets',
+            callback: (_) => _scheduleStagesRefresh(),
+          )
+          .subscribe();
+    } catch (_) {}
   }
 
   Future<void> _loadStages() async {

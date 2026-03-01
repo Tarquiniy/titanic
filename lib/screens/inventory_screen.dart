@@ -400,6 +400,163 @@ class _InventoryScreenState extends State<InventoryScreen> {
     } catch (_) {}
   }
 
+  String _normalizeItemLabel(String? value) {
+    return (value ?? '').trim().toLowerCase();
+  }
+
+  bool _isExtraTurnItem(Map<String, dynamic> item) {
+    return _normalizeItemLabel(item['label']?.toString()) == 'дополнительный ход';
+  }
+
+  bool _inventoryEntryMatchesItem(dynamic entry, Map<String, dynamic> item) {
+    final itemId = item['id']?.toString();
+    final normalizedLabel = _normalizeItemLabel(item['label']?.toString());
+
+    if (entry is Map) {
+      final map = Map<String, dynamic>.from(entry);
+      if (itemId != null && itemId.isNotEmpty && map['id']?.toString() == itemId) {
+        return true;
+      }
+
+      if (map.length == 1) {
+        final key = map.keys.first.toString();
+        return _normalizeItemLabel(key) == normalizedLabel;
+      }
+
+      final entryLabel =
+          map['name']?.toString() ?? map['label']?.toString() ?? map['id']?.toString();
+      return _normalizeItemLabel(entryLabel) == normalizedLabel;
+    }
+
+    if (entry is List && entry.isNotEmpty) {
+      return _normalizeItemLabel(entry.first?.toString()) == normalizedLabel;
+    }
+
+    return _normalizeItemLabel(entry?.toString()) == normalizedLabel;
+  }
+
+  dynamic _removeUsedItemFromInventory(dynamic inventory, Map<String, dynamic> item) {
+    if (inventory == null) return null;
+
+    if (inventory is Map) {
+      final updated = Map<String, dynamic>.from(inventory);
+      final targetKey = updated.keys.cast<String?>().firstWhere(
+            (key) => _normalizeItemLabel(key) == _normalizeItemLabel(item['label']?.toString()),
+            orElse: () => null,
+          );
+      if (targetKey != null) {
+        updated.remove(targetKey);
+      }
+      return updated.isEmpty ? null : updated;
+    }
+
+    if (inventory is List) {
+      final updated = List<dynamic>.from(inventory);
+      updated.removeWhere((entry) => _inventoryEntryMatchesItem(entry, item));
+      return updated.isEmpty ? null : updated;
+    }
+
+    return inventory;
+  }
+
+  Future<void> _useInventoryItem(Map<String, dynamic> item) async {
+    final itemLabel = item['label']?.toString() ?? 'предмет';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: TitanicTheme.panelDark,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: TitanicTheme.raptureGold.withOpacity(0.3)),
+        ),
+        title: Text(
+          'Использовать предмет?',
+          style: TextStyle(
+            fontFamily: 'CormorantGaramond',
+            fontWeight: FontWeight.w700,
+            color: TitanicTheme.ivoryCream,
+          ),
+        ),
+        content: Text(
+          'Предмет "$itemLabel" будет удален из вашего инвентаря.',
+          style: TextStyle(
+            fontFamily: 'Cinzel',
+            color: TitanicTheme.ivoryCream,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text(
+              'Отмена',
+              style: TextStyle(color: TitanicTheme.ivoryCream.withOpacity(0.8)),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: TitanicTheme.raptureGold,
+              foregroundColor: Colors.black,
+            ),
+            child: const Text('Использовать'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    setState(() => _loading = true);
+    try {
+      final res = await supabase
+          .from('user_credentials')
+          .select('inventory')
+          .eq('id', widget.user.id)
+          .maybeSingle();
+
+      dynamic inventory = res is Map<String, dynamic> ? res['inventory'] : null;
+      if (inventory is String) {
+        try {
+          inventory = jsonDecode(inventory);
+        } catch (_) {}
+      }
+
+      final updatedInventory = _removeUsedItemFromInventory(inventory, item);
+      await supabase
+          .from('user_credentials')
+          .update({'inventory': updatedInventory})
+          .eq('id', widget.user.id);
+
+      if (!mounted) return;
+      await _loadInventory();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Предмет "$itemLabel" использован',
+            style: const TextStyle(fontFamily: 'Cinzel'),
+          ),
+          backgroundColor: TitanicTheme.surfaceNavy,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      final msg = e is PostgrestException ? (e.message ?? e.toString()) : e.toString();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Ошибка при использовании предмета: $msg',
+            style: const TextStyle(fontFamily: 'Cinzel'),
+          ),
+          backgroundColor: TitanicTheme.surfaceNavy,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _loading = false);
+      }
+    }
+  }
+
   Future<void> _openSellToPlayer(Map<String, dynamic> item) async {
     final itemLabel = item['label']?.toString() ?? 'item';
     final itemId = item['id']?.toString();
@@ -1519,13 +1676,33 @@ class _InventoryScreenState extends State<InventoryScreen> {
             side: BorderSide(color: TitanicTheme.raptureGold.withOpacity(0.3)),
           ),
           onSelected: (v) async {
-            if (v == 'sell_player') {
+            if (v == 'use_item') {
+              await _useInventoryItem(item);
+            } else if (v == 'sell_player') {
               await _openSellToPlayer(item);
             } else if (v == 'sell_bank') {
               await _openSellToBank(item);
             }
           },
           itemBuilder: (_) => [
+            if (_isExtraTurnItem(item))
+              PopupMenuItem(
+                value: 'use_item',
+                child: Row(
+                  children: [
+                    Icon(Icons.play_circle_outline,
+                        color: TitanicTheme.seaFoamGreen, size: 20),
+                    const SizedBox(width: 10),
+                    Text(
+                      'Использовать',
+                      style: TextStyle(
+                        fontFamily: 'Cinzel',
+                        color: TitanicTheme.ivoryCream,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             PopupMenuItem(
               value: 'sell_player',
               child: Row(
@@ -1542,22 +1719,22 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 ],
               ),
             ),
-            PopupMenuItem(
-              value: 'sell_bank',
-              child: Row(
-                children: [
-                  Icon(Icons.account_balance, color: TitanicTheme.raptureGold, size: 20),
-                  const SizedBox(width: 10),
-                  Text(
-                    'Продать в Банк',
-                    style: TextStyle(
-                      fontFamily: 'Cinzel',
-                      color: TitanicTheme.ivoryCream,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+//            PopupMenuItem(
+              //value: 'sell_bank',
+              //child: Row(
+//                children: [
+                  //Icon(Icons.account_balance, color: TitanicTheme.raptureGold, size: 20),
+                  //const SizedBox(width: 10),
+                  //Text(
+                    //'Продать в Банк',
+                    //style: TextStyle(
+//                      fontFamily: 'Cinzel',
+                      //color: TitanicTheme.ivoryCream,
+                    //),
+                  //),
+                //],
+              //),
+            //),
           ],
         ),
       ),

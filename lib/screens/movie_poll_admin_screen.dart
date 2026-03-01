@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:titanic/theme/app_theme.dart';
@@ -23,16 +24,24 @@ class _MoviePollAdminScreenState extends State<MoviePollAdminScreen> {
   List<Map<String, dynamic>> _options = [];
   Map<int, int> _optionTotals = {};
   bool _loading = false;
+  RealtimeChannel? _pollChannel;
+  Timer? _pollReloadDebounce;
 
   @override
   void initState() {
     super.initState();
     _optionCtrls.addAll(List.generate(3, (_) => TextEditingController()));
     _loadActivePoll();
+    _subscribeToPollRealtime();
   }
 
   @override
   void dispose() {
+    _pollReloadDebounce?.cancel();
+    final channel = _pollChannel;
+    if (channel != null) {
+      supabase.removeChannel(channel);
+    }
     _titleCtrl.dispose();
     for (final c in _optionCtrls) {
       c.dispose();
@@ -49,6 +58,40 @@ class _MoviePollAdminScreenState extends State<MoviePollAdminScreen> {
     if (idx < 0 || idx >= _optionCtrls.length) return;
     _optionCtrls[idx].dispose();
     setState(() => _optionCtrls.removeAt(idx));
+  }
+
+  void _schedulePollRefresh() {
+    _pollReloadDebounce?.cancel();
+    _pollReloadDebounce = Timer(const Duration(milliseconds: 250), () async {
+      if (!mounted) return;
+      await _loadActivePoll();
+    });
+  }
+
+  void _subscribeToPollRealtime() {
+    try {
+      _pollChannel = supabase.channel('admin-movie-poll-live');
+      _pollChannel!
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'movie_polls',
+            callback: (_) => _schedulePollRefresh(),
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'movie_poll_options',
+            callback: (_) => _schedulePollRefresh(),
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'movie_poll_votes',
+            callback: (_) => _schedulePollRefresh(),
+          )
+          .subscribe();
+    } catch (_) {}
   }
 
   Future<void> _loadActivePoll() async {
