@@ -34,7 +34,7 @@ class _PayMovieScreenState extends State<PayMovieScreen> {
   bool _loadingUsers = true;
   String? _error;
 
-  static const int price = 1; // стоимость в "M"
+  static const int price = 100; // стоимость в "M"
 
   @override
   void initState() {
