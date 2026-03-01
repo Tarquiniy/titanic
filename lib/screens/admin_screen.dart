@@ -1,4 +1,5 @@
 // lib/admin_screen.dart
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -1933,6 +1934,10 @@ class _DebatesTabState extends State<DebatesTab> {
   final Map<String, String?> _speakerB = {};
 
   Map<String, dynamic>? _activeDebate;
+  List<Map<String, dynamic>> _activeDebateOptions = [];
+  Map<int, int> _activeDebateOptionTotals = {};
+  RealtimeChannel? _debatesChannel;
+  Timer? _debatesReloadDebounce;
 
   final List<_ColorDef> _colorDefs = const [
     _ColorDef(label: 'красный', hex: '#FF0000'),
@@ -1951,10 +1956,16 @@ class _DebatesTabState extends State<DebatesTab> {
     }
     _loadPoliticians();
     _loadActiveDebate();
+    _subscribeToDebateRealtime();
   }
 
   @override
   void dispose() {
+    _debatesReloadDebounce?.cancel();
+    final channel = _debatesChannel;
+    if (channel != null) {
+      supabase.removeChannel(channel);
+    }
     _titleCtrl.dispose();
     _descCtrl.dispose();
     super.dispose();
@@ -1980,6 +1991,60 @@ class _DebatesTabState extends State<DebatesTab> {
   if (mounted) setState(() {});
 }
 
+  void _scheduleRealtimeRefresh({bool reloadPoliticians = false}) {
+    _debatesReloadDebounce?.cancel();
+    _debatesReloadDebounce = Timer(const Duration(milliseconds: 250), () async {
+      if (!mounted) return;
+      if (reloadPoliticians) {
+        await _loadPoliticians();
+      }
+      await _loadActiveDebate();
+    });
+  }
+
+  void _subscribeToDebateRealtime() {
+    try {
+      _debatesChannel = supabase.channel('admin-debates-live');
+      _debatesChannel!
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'debates',
+            callback: (_) => _scheduleRealtimeRefresh(),
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'debate_options',
+            callback: (_) => _scheduleRealtimeRefresh(),
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'debate_votes',
+            callback: (_) => _scheduleRealtimeRefresh(),
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'debate_speakers',
+            callback: (_) => _scheduleRealtimeRefresh(),
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'user_credentials',
+            callback: (payload) {
+              final nextRole =
+                  payload.newRecord['role']?.toString() ?? payload.oldRecord['role']?.toString() ?? '';
+              if (nextRole != 'politician') return;
+              _scheduleRealtimeRefresh(reloadPoliticians: true);
+            },
+          )
+          .subscribe();
+    } catch (_) {}
+  }
+
   Future<void> _loadActiveDebate() async {
     try {
       final row = await supabase
@@ -1991,11 +2056,110 @@ class _DebatesTabState extends State<DebatesTab> {
           .maybeSingle();
       if (row is Map<String, dynamic>) {
         _activeDebate = Map<String, dynamic>.from(row);
+        final debateId = _activeDebate!['id'] is int
+            ? _activeDebate!['id'] as int
+            : int.tryParse(_activeDebate!['id'].toString());
+
+        if (debateId != null) {
+          final optionsRaw = await supabase
+              .from('debate_options')
+              .select()
+              .eq('debate_id', debateId)
+              .order('id', ascending: true);
+
+          final options = (optionsRaw is List)
+              ? optionsRaw
+                  .map((e) => Map<String, dynamic>.from(e as Map))
+                  .toList()
+              : <Map<String, dynamic>>[];
+
+          final speakersRaw = await supabase
+              .from('debate_speakers')
+              .select(
+                'id, option_id, politician_id, '
+                'politician:user_credentials!debate_speakers_politician_id_fkey(first_name,last_name,telegram_username,color)',
+              )
+              .eq('debate_id', debateId)
+              .order('id', ascending: true);
+
+          final Map<int, List<String>> speakerLinesByOption = {};
+          if (speakersRaw is List) {
+            for (final item in speakersRaw) {
+              final speaker = Map<String, dynamic>.from(item as Map);
+              final optionId = speaker['option_id'] is int
+                  ? speaker['option_id'] as int
+                  : int.tryParse(speaker['option_id']?.toString() ?? '');
+              if (optionId == null) continue;
+
+              final lines = speakerLinesByOption.putIfAbsent(
+                optionId,
+                () => <String>[],
+              );
+              if (lines.length >= 2) continue;
+
+              lines.add(
+                _buildSpeakerSummary(
+                  label: lines.isEmpty ? 'Спикер A' : 'Спикер B',
+                  politician: speaker['politician'] is Map
+                      ? Map<String, dynamic>.from(speaker['politician'] as Map)
+                      : null,
+                  politicianId: speaker['politician_id'],
+                ),
+              );
+            }
+          }
+
+          final votesRaw = await supabase
+              .from('debate_votes')
+              .select('option_id, voices')
+              .eq('debate_id', debateId);
+
+          final Map<int, int> totals = {};
+          if (votesRaw is List) {
+            for (final item in votesRaw) {
+              final vote = Map<String, dynamic>.from(item as Map);
+              final optionId = vote['option_id'] is int
+                  ? vote['option_id'] as int
+                  : int.tryParse(vote['option_id']?.toString() ?? '');
+              if (optionId == null) continue;
+
+              final voicesRaw = vote['voices'];
+              final voices = voicesRaw is int
+                  ? voicesRaw
+                  : voicesRaw is num
+                      ? voicesRaw.toInt()
+                      : int.tryParse(voicesRaw?.toString() ?? '') ?? 0;
+              totals[optionId] = (totals[optionId] ?? 0) + voices;
+            }
+          }
+
+          _activeDebateOptions = options
+              .map((option) {
+                final optionId = option['id'] is int
+                    ? option['id'] as int
+                    : int.tryParse(option['id']?.toString() ?? '');
+                return {
+                  ...option,
+                  'speaker_lines': optionId == null
+                      ? <String>[]
+                      : (speakerLinesByOption[optionId] ?? <String>[]),
+                };
+              })
+              .toList();
+          _activeDebateOptionTotals = totals;
+        } else {
+          _activeDebateOptions = [];
+          _activeDebateOptionTotals = {};
+        }
       } else {
         _activeDebate = null;
+        _activeDebateOptions = [];
+        _activeDebateOptionTotals = {};
       }
     } catch (_) {
       _activeDebate = null;
+      _activeDebateOptions = [];
+      _activeDebateOptionTotals = {};
     }
     if (mounted) setState(() {});
   }
@@ -2206,6 +2370,49 @@ class _DebatesTabState extends State<DebatesTab> {
   );
 }
 
+  String _formatPoliticianName(Map<String, dynamic>? politician, dynamic fallbackId) {
+    if (politician == null) return fallbackId?.toString() ?? '—';
+
+    final firstName = (politician['first_name'] ?? '').toString().trim();
+    final lastName = (politician['last_name'] ?? '').toString().trim();
+    final username = (politician['telegram_username'] ?? '').toString().trim();
+    final fullName = ('$firstName $lastName').trim();
+
+    if (fullName.isNotEmpty) return fullName;
+    if (username.isNotEmpty) {
+      return username.startsWith('@') ? username : '@$username';
+    }
+    return fallbackId?.toString() ?? '—';
+  }
+
+  String _buildSpeakerSummary({
+    required String label,
+    required Map<String, dynamic>? politician,
+    required dynamic politicianId,
+  }) {
+    final name = _formatPoliticianName(politician, politicianId);
+    return '$label: $name';
+  }
+
+  Color _parseDebateColor(String? colorLabel) {
+    switch ((colorLabel ?? '').trim().toLowerCase()) {
+      case 'красный':
+        return const Color(0xFFFF5A5A);
+      case 'зелёный':
+      case 'зеленый':
+        return const Color(0xFF4CD964);
+      case 'жёлтый':
+      case 'желтый':
+        return const Color(0xFFFFD54F);
+      case 'малиновый':
+        return const Color(0xFFFF4FCB);
+      case 'синий':
+        return const Color(0xFF4A90E2);
+      default:
+        return TitanicTheme.raptureGold;
+    }
+  }
+
   Widget _buildColorRow(_ColorDef c) {
     Color parsed;
     try {
@@ -2315,6 +2522,10 @@ class _DebatesTabState extends State<DebatesTab> {
   Widget build(BuildContext context) {
     final isSmall = MediaQuery.of(context).size.width < 380;
     final hasActive = _activeDebate != null;
+    final totalVoices = _activeDebateOptionTotals.values.fold<int>(
+      0,
+      (sum, value) => sum + value,
+    );
 
     return SingleChildScrollView(
       padding: EdgeInsets.all(isSmall ? 12 : 16),
@@ -2374,13 +2585,6 @@ class _DebatesTabState extends State<DebatesTab> {
                         loading: _creating,
                         primary: true,
                       ),
-                      ArtDecoButton(
-                        text: 'Закрыть текущие дебаты',
-                        onPressed: hasActive && !_closing ? _closeDebate : null,
-                        loading: _closing,
-                        primary: false,
-                        customColor: Colors.redAccent,
-                      ),
                     ],
                   ),
                 ],
@@ -2422,6 +2626,108 @@ class _DebatesTabState extends State<DebatesTab> {
                       'Создан: ${_activeDebate?['created_at'] ?? '—'}',
                       style: TitanicTheme.body,
                     ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Всего вложено: $totalVoices войсов',
+                      style: TitanicTheme.subtitle.copyWith(
+                        color: TitanicTheme.raptureGold,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    if (_activeDebateOptions.isEmpty)
+                      Text(
+                        'Варианты дебатов не найдены',
+                        style: TitanicTheme.body,
+                      )
+                    else
+                      ..._activeDebateOptions.map((option) {
+                        final optionId = option['id'] is int
+                            ? option['id'] as int
+                            : int.tryParse(option['id']?.toString() ?? '');
+                        final optionTotal = optionId == null
+                            ? 0
+                            : (_activeDebateOptionTotals[optionId] ?? 0);
+                        final share = totalVoices == 0
+                            ? 0.0
+                            : optionTotal / totalVoices;
+                        final speakerLines =
+                            (option['speaker_lines'] as List?)
+                                    ?.map((e) => e.toString())
+                                    .toList() ??
+                                <String>[];
+                        final speakersText = speakerLines.isEmpty
+                            ? 'Спикеры не назначены'
+                            : speakerLines.join('\n');
+                        final optionColor =
+                            _parseDebateColor(option['color']?.toString());
+
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 10),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: TitanicTheme.surfaceNavy.withOpacity(0.3),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: optionColor.withOpacity(0.45),
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Container(
+                                    width: 12,
+                                    height: 12,
+                                    decoration: BoxDecoration(
+                                      color: optionColor,
+                                      shape: BoxShape.circle,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      option['label']?.toString() ?? '—',
+                                      style: TitanicTheme.subtitle,
+                                    ),
+                                  ),
+                                  Text(
+                                    '$optionTotal',
+                                    style: TitanicTheme.subtitle.copyWith(
+                                      color: TitanicTheme.raptureGold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(999),
+                                child: LinearProgressIndicator(
+                                  value: share,
+                                  minHeight: 8,
+                                  backgroundColor:
+                                      Colors.white.withOpacity(0.08),
+                                  valueColor:
+                                      AlwaysStoppedAnimation<Color>(optionColor),
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                speakersText,
+                                style: TitanicTheme.body.copyWith(fontSize: 12),
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
+                    const SizedBox(height: 2),
+                    ArtDecoButton(
+                        text: 'Закрыть текущие дебаты',
+                        onPressed: hasActive && !_closing ? _closeDebate : null,
+                        loading: _closing,
+                        primary: false,
+                        customColor: Colors.redAccent,
+                      ),
                   ] else
                     Text(
                       'Нет активных дебатов',

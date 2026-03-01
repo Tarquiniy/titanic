@@ -333,15 +333,6 @@ class _MoviePollAdminScreenState extends State<MoviePollAdminScreen> {
                   loading: _creating,
                   primary: true,
                 ),
-                ArtDecoButton(
-                  text: 'Закрыть активное',
-                  onPressed: (_activePoll != null && !_closing)
-                      ? _closePoll
-                      : null,
-                  loading: _closing,
-                  primary: false,
-                  customColor: Colors.redAccent,
-                ),
               ],
             ),
           ],
@@ -490,6 +481,15 @@ class _MoviePollAdminScreenState extends State<MoviePollAdminScreen> {
                   _buildCreateCard(),
                   const SizedBox(height: 16),
                   _buildActiveCard(),
+                  ArtDecoButton(
+                  text: 'Закрыть активное',
+                  onPressed: (_activePoll != null && !_closing)
+                      ? _closePoll
+                      : null,
+                  loading: _closing,
+                  primary: false,
+                  customColor: Colors.redAccent,
+                ),
                 ],
               ),
             ),
