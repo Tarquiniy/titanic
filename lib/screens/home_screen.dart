@@ -95,6 +95,9 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _lastSpeechJournalSignature;
   double? _lastKnownVBalance;
   double? _lastKnownMBalance;
+  DateTime? _lastPersistedBalanceAt;
+  Timer? _pendingVBalanceJournalTimer;
+  Timer? _pendingMBalanceJournalTimer;
 
   bool? _honorUsedLocal;
   double? _honorMBalance;
@@ -186,6 +189,8 @@ class _HomeScreenState extends State<HomeScreen> {
     _debatePollTimer?.cancel();
     _resolutionPollTimer?.cancel();
     _pollTimer?.cancel();
+    _pendingVBalanceJournalTimer?.cancel();
+    _pendingMBalanceJournalTimer?.cancel();
     debateService.dispose();
     speechService.dispose();
     _journalChannel?.unsubscribe();
@@ -394,6 +399,97 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  bool _isJournalVisibleToCurrentUser(Map<String, dynamic> row) {
+    final vis = row['visible_role']?.toString();
+    final role = (user.role ?? '').toString();
+    return (row['user_id']?.toString() == user.id) ||
+        vis == 'all' ||
+        vis == role ||
+        (vis == 'non_politician' && role != 'politician');
+  }
+
+  Future<Map<String, dynamic>?> _persistJournalEntry({
+    String? userId,
+    String? visibleRole,
+    String? actorId,
+    required String title,
+    required String message,
+    Map<String, dynamic>? metadata,
+  }) async {
+    try {
+      final inserted = await supabase
+          .from('user_journal')
+          .insert({
+            'user_id': userId,
+            'visible_role': visibleRole,
+            'actor_id': actorId,
+            'title': title,
+            'message': message,
+            'metadata': metadata,
+          })
+          .select('id,user_id,visible_role,actor_id,title,message,metadata,created_at')
+          .maybeSingle();
+
+      if (inserted is Map<String, dynamic>) {
+        final normalized = _normalizePersistedJournalEntry(inserted);
+        if (normalized != null) {
+          _pushCuratedJournalEntry(normalized, notify: true);
+        }
+        if ((metadata?['type']?.toString() ?? '') == 'balance_change') {
+          _lastPersistedBalanceAt = DateTime.now();
+        }
+        return inserted;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  void _scheduleBalanceJournalPersistence({
+    required String balanceType,
+    required num oldValue,
+    required num newValue,
+  }) {
+    final timer = balanceType == 'v_balance'
+        ? _pendingVBalanceJournalTimer
+        : _pendingMBalanceJournalTimer;
+    timer?.cancel();
+
+    final nextTimer = Timer(const Duration(milliseconds: 500), () async {
+      final lastPersisted = _lastPersistedBalanceAt;
+      if (lastPersisted != null &&
+          DateTime.now().difference(lastPersisted) <
+              const Duration(milliseconds: 900)) {
+        return;
+      }
+
+      final entry = _buildBalanceJournalEntry(
+        balanceType: balanceType,
+        oldValue: oldValue,
+        newValue: newValue,
+      );
+
+      final persisted = await _persistJournalEntry(
+        userId: user.id,
+        actorId: user.id,
+        title: entry['title']?.toString() ?? 'Изменение баланса',
+        message: entry['message']?.toString() ?? '',
+        metadata: entry['metadata'] is Map<String, dynamic>
+            ? Map<String, dynamic>.from(entry['metadata'] as Map<String, dynamic>)
+            : null,
+      );
+
+      if (persisted == null) {
+        _pushCuratedJournalEntry(entry, notify: true);
+      }
+    });
+
+    if (balanceType == 'v_balance') {
+      _pendingVBalanceJournalTimer = nextTimer;
+    } else {
+      _pendingMBalanceJournalTimer = nextTimer;
+    }
+  }
+
   void _markJournalSeen() {
     if (!mounted || _newJournalEntriesCount == 0) return;
     setState(() => _newJournalEntriesCount = 0);
@@ -467,6 +563,25 @@ class _HomeScreenState extends State<HomeScreen> {
           .onPostgresChanges(
             event: PostgresChangeEvent.insert,
             schema: 'public',
+            table: 'user_journal',
+            callback: (payload) {
+              final rec = payload.newRecord;
+              if (rec == null) return;
+              final row = Map<String, dynamic>.from(rec as Map);
+              if (!_isJournalVisibleToCurrentUser(row)) return;
+              final normalized = _normalizePersistedJournalEntry(row);
+              if (normalized == null) return;
+              final meta = row['metadata'];
+              if (meta is Map &&
+                  (meta['type']?.toString() ?? '') == 'balance_change') {
+                _lastPersistedBalanceAt = DateTime.now();
+              }
+              _pushCuratedJournalEntry(normalized, notify: true);
+            },
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.insert,
+            schema: 'public',
             table: 'item_offers',
             filter: PostgresChangeFilter(
               type: PostgresChangeFilterType.eq,
@@ -512,28 +627,19 @@ class _HomeScreenState extends State<HomeScreen> {
               final oldM = oldRec != null && oldRec['m_balance'] != null
                   ? parseNum(oldRec['m_balance'])
                   : (_lastKnownMBalance ?? user.mBalance);
-              final createdAt = DateTime.now().toUtc().toIso8601String();
 
               if (oldV != newV) {
-                _pushCuratedJournalEntry(
-                  _buildBalanceJournalEntry(
-                    balanceType: 'v_balance',
-                    oldValue: oldV,
-                    newValue: newV,
-                    createdAt: createdAt,
-                  ),
-                  notify: true,
+                _scheduleBalanceJournalPersistence(
+                  balanceType: 'v_balance',
+                  oldValue: oldV,
+                  newValue: newV,
                 );
               }
               if (oldM != newM) {
-                _pushCuratedJournalEntry(
-                  _buildBalanceJournalEntry(
-                    balanceType: 'm_balance',
-                    oldValue: oldM,
-                    newValue: newM,
-                    createdAt: createdAt,
-                  ),
-                  notify: true,
+                _scheduleBalanceJournalPersistence(
+                  balanceType: 'm_balance',
+                  oldValue: oldM,
+                  newValue: newM,
                 );
               }
 
@@ -559,15 +665,12 @@ class _HomeScreenState extends State<HomeScreen> {
               _lastSpeechJournalSignature = signature;
 
               final actorName = await _resolveUserLabel(actorId);
-              _pushCuratedJournalEntry(
-                {
-                  'journal_key': 'speech::$signature',
-                  'title': 'Речь жизни',
-                  'message': '$actorName начал(а) речь жизни.',
-                  'created_at': DateTime.now().toUtc().toIso8601String(),
-                  'metadata': {'type': 'speech_started', 'actor_id': actorId},
-                },
-                notify: true,
+              await _persistJournalEntry(
+                visibleRole: 'all',
+                actorId: actorId,
+                title: 'Речь жизни',
+                message: '$actorName начал(а) речь жизни.',
+                metadata: {'type': 'speech_started', 'actor_id': actorId},
               );
             },
           )
@@ -589,15 +692,12 @@ class _HomeScreenState extends State<HomeScreen> {
               _lastSpeechJournalSignature = signature;
 
               final actorName = await _resolveUserLabel(actorId);
-              _pushCuratedJournalEntry(
-                {
-                  'journal_key': 'speech::$signature',
-                  'title': 'Речь жизни',
-                  'message': '$actorName начал(а) речь жизни.',
-                  'created_at': DateTime.now().toUtc().toIso8601String(),
-                  'metadata': {'type': 'speech_started', 'actor_id': actorId},
-                },
-                notify: true,
+              await _persistJournalEntry(
+                visibleRole: 'all',
+                actorId: actorId,
+                title: 'Речь жизни',
+                message: '$actorName начал(а) речь жизни.',
+                metadata: {'type': 'speech_started', 'actor_id': actorId},
               );
             },
           )
