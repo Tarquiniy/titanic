@@ -193,6 +193,52 @@ class _TransferVScreenState extends State<TransferVScreen> {
     );
   }
 
+  Future<void> _addRecipientJournalEntry({
+    required String recipientId,
+    required String senderName,
+    required num amount,
+  }) async {
+    try {
+      await supabase.from('user_journal').insert({
+        'user_id': recipientId,
+        'actor_id': widget.user.id,
+        'title': 'Изменение баланса',
+        'message':
+            'Войсы: вам перевели ${amount.toStringAsFixed(0)} Войсов от $senderName',
+        'metadata': {
+          'type': 'balance_change',
+          'balance': 'v_balance',
+          'source': 'transfer_v_points',
+          'sender_id': widget.user.id,
+          'amount': amount,
+        },
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _addSenderJournalEntry({
+    required String recipientId,
+    required String recipientName,
+    required num amount,
+  }) async {
+    try {
+      await supabase.from('user_journal').insert({
+        'user_id': widget.user.id,
+        'actor_id': recipientId,
+        'title': 'Изменение баланса',
+        'message':
+            'Войсы: вы перевели ${amount.toStringAsFixed(0)} Войсов пользователю $recipientName',
+        'metadata': {
+          'type': 'balance_change',
+          'balance': 'v_balance',
+          'source': 'transfer_v_points',
+          'recipient_id': recipientId,
+          'amount': amount,
+        },
+      });
+    } catch (_) {}
+  }
+
   Future<void> _transfer() async {
     // ✅ не прячем клавиатуру вообще (никаких FocusScope.unfocus())
     // ✅ ошибки показываем, но фокус не трогаем
@@ -251,6 +297,25 @@ class _TransferVScreenState extends State<TransferVScreen> {
       final first = (_selectedRecipient!['first_name'] ?? '').toString();
       final last = (_selectedRecipient!['last_name'] ?? '').toString();
       final displayName = ('$first $last').trim().isEmpty ? 'Без имени' : '$first $last';
+      final senderName =
+          ('${widget.user.firstName} ${widget.user.lastName}').trim().isEmpty
+              ? widget.user.username
+              : ('${widget.user.firstName} ${widget.user.lastName}').trim();
+      final recipientId = _selectedRecipient!['id']?.toString();
+
+      if (recipientId != null && recipientId.isNotEmpty) {
+        await _addRecipientJournalEntry(
+          recipientId: recipientId,
+          senderName: senderName.isEmpty ? 'Игрок' : senderName,
+          amount: amount,
+        );
+        await _addSenderJournalEntry(
+          recipientId: recipientId,
+          recipientName: displayName,
+          amount: amount,
+        );
+      }
+
       _showSnack('Вы перевели $displayName ${amount.toStringAsFixed(0)} войсов');
 
       // обновим баланс локально/сервера (best effort)

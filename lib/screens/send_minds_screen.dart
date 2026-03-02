@@ -75,6 +75,69 @@ class _SendMindsScreenState extends State<SendMindsScreen> {
     return (fn + ' ' + ln).trim();
   }
 
+  Future<String> _currentSenderName() async {
+    try {
+      final row = await supabase
+          .from('user_credentials')
+          .select('first_name,last_name,telegram_username')
+          .eq('id', widget.currentUserId)
+          .maybeSingle();
+      if (row is Map<String, dynamic>) {
+        final fn = (row['first_name'] ?? '').toString().trim();
+        final ln = (row['last_name'] ?? '').toString().trim();
+        final full = '$fn $ln'.trim();
+        if (full.isNotEmpty) return full;
+        final tg = (row['telegram_username'] ?? '').toString().trim();
+        if (tg.isNotEmpty) return tg;
+      }
+    } catch (_) {}
+    return 'Игрок';
+  }
+
+  Future<void> _addRecipientJournalEntry({
+    required String recipientId,
+    required String senderName,
+    required int amount,
+  }) async {
+    try {
+      await supabase.from('user_journal').insert({
+        'user_id': recipientId,
+        'actor_id': widget.currentUserId,
+        'title': 'Изменение баланса',
+        'message': 'Майнды: вам перевели $amount Майндов от $senderName',
+        'metadata': {
+          'type': 'balance_change',
+          'balance': 'm_balance',
+          'source': 'transfer_minds',
+          'sender_id': widget.currentUserId,
+          'amount': amount,
+        },
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _addSenderJournalEntry({
+    required String recipientId,
+    required String recipientName,
+    required int amount,
+  }) async {
+    try {
+      await supabase.from('user_journal').insert({
+        'user_id': widget.currentUserId,
+        'actor_id': recipientId,
+        'title': 'Изменение баланса',
+        'message': 'Майнды: вы перевели $amount Майндов пользователю $recipientName',
+        'metadata': {
+          'type': 'balance_change',
+          'balance': 'm_balance',
+          'source': 'transfer_minds',
+          'recipient_id': recipientId,
+          'amount': amount,
+        },
+      });
+    } catch (_) {}
+  }
+
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     final amountStr = _amountCtrl.text.trim();
@@ -101,6 +164,22 @@ class _SendMindsScreenState extends State<SendMindsScreen> {
           'amount': amount,
         }).maybeSingle();
         // If RPC succeeded (no exception), assume success.
+        final senderName = await _currentSenderName();
+        await _addRecipientJournalEntry(
+          recipientId: _selectedJournalistId!,
+          senderName: senderName,
+          amount: amount,
+        );
+        final recipientName = _journalists
+            .where((u) => u['id']?.toString() == _selectedJournalistId)
+            .map(_displayName)
+            .cast<String?>()
+            .firstWhere((_) => true, orElse: () => 'Игрок') ?? 'Игрок';
+        await _addSenderJournalEntry(
+          recipientId: _selectedJournalistId!,
+          recipientName: recipientName,
+          amount: amount,
+        );
         _showSnack('Успешно: переведено $amount майндов.');
         if (mounted) Navigator.of(context).pop(true);
         return;
@@ -187,6 +266,22 @@ class _SendMindsScreenState extends State<SendMindsScreen> {
         }
 
         // success
+        final senderName = await _currentSenderName();
+        await _addRecipientJournalEntry(
+          recipientId: _selectedJournalistId!,
+          senderName: senderName,
+          amount: amount,
+        );
+        final recipientName = _journalists
+            .where((u) => u['id']?.toString() == _selectedJournalistId)
+            .map(_displayName)
+            .cast<String?>()
+            .firstWhere((_) => true, orElse: () => 'Игрок') ?? 'Игрок';
+        await _addSenderJournalEntry(
+          recipientId: _selectedJournalistId!,
+          recipientName: recipientName,
+          amount: amount,
+        );
         _showSnack('Успешно: переведено $amount майндов журналисту.');
         if (mounted) Navigator.of(context).pop(true);
         return;
