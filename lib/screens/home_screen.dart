@@ -91,6 +91,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   List<Map<String, dynamic>> _journalEntries = [];
   RealtimeChannel? _journalChannel;
+  int _newJournalEntriesCount = 0;
+  String? _lastSpeechJournalSignature;
+  double? _lastKnownVBalance;
+  double? _lastKnownMBalance;
 
   bool? _honorUsedLocal;
   double? _honorMBalance;
@@ -217,241 +221,388 @@ class _HomeScreenState extends State<HomeScreen> {
         _honorUsedLocal = (st['used'] as bool?) ?? false;
         _honorMBalance = (st['m_balance'] as double?) ?? user.mBalance;
         user = user.copyWith(mBalance: _honorMBalance ?? user.mBalance);
+        _lastKnownMBalance = user.mBalance;
       });
     } catch (_) {}
   }
 
-  Future<void> _insertJournalEntry(
-    String title,
-    String message, {
-    String? visibleRole,
-  }) async {
-    final nowIso = DateTime.now().toUtc().toIso8601String();
-    final existsLocally = _journalEntries.any((e) {
-      final t = (e['title'] ?? '').toString();
-      final m = (e['message'] ?? '').toString();
-      return t.trim() == title.trim() && m.trim() == message.trim();
-    });
-    if (existsLocally) return;
+  String _journalEntryKey(Map<String, dynamic> entry) {
+    final explicit = entry['journal_key']?.toString();
+    if (explicit != null && explicit.isNotEmpty) return explicit;
+    final id = entry['id']?.toString();
+    if (id != null && id.isNotEmpty) return 'id::$id';
+    final title = (entry['title'] ?? '').toString();
+    final message = (entry['message'] ?? '').toString();
+    final createdAt = (entry['created_at'] ?? '').toString();
+    return 'txt::$title::$message::$createdAt';
+  }
 
-    final localRow = {
-      'id': null,
+  String _journalText(Map<String, dynamic> entry) {
+    return [
+      entry['title']?.toString() ?? '',
+      entry['message']?.toString() ?? '',
+      entry['metadata']?.toString() ?? '',
+    ].join(' ').toLowerCase();
+  }
+
+  bool _isSpeechJournalEntry(Map<String, dynamic> entry) {
+    final text = _journalText(entry);
+    return (text.contains('speech_state') ||
+            text.contains('речь жизни') ||
+            text.contains('речь')) &&
+        !text.contains('доступн');
+  }
+
+  bool _isBalanceJournalEntry(Map<String, dynamic> entry) {
+    if ((entry['user_id']?.toString() ?? '') != user.id) return false;
+    final text = _journalText(entry);
+    return text.contains('v_balance') ||
+        text.contains('m_balance') ||
+        text.contains('баланс') ||
+        text.contains('войс') ||
+        text.contains('майнд');
+  }
+
+  Map<String, dynamic> _buildOfferJournalEntry(
+    Map<String, dynamic> offer, {
+    String? sellerName,
+  }) {
+    final offerId = offer['id']?.toString() ?? '';
+    final item = offer['item_json'];
+    String itemName = 'предмет';
+    if (item is Map) {
+      itemName =
+          (item['name'] ?? item['label'] ?? item['id'] ?? 'предмет').toString();
+    }
+    final price = offer['price']?.toString() ?? '-';
+    final seller = sellerName?.trim().isNotEmpty == true
+        ? sellerName!.trim()
+        : 'Игрок';
+
+    return {
+      'journal_key': 'offer::$offerId',
+      'id': 'offer::$offerId',
+      'title': 'Входящий оффер',
+      'message':
+          '$seller предлагает предмет "$itemName" за $price V. Принять или отклонить оффер можно в инвентаре.',
+      'created_at':
+          offer['created_at']?.toString() ?? DateTime.now().toUtc().toIso8601String(),
       'user_id': user.id,
-      'visible_role': visibleRole ?? user.role ?? 'all',
-      'actor_id': user.id,
-      'title': title,
-      'message': message,
-      'metadata': null,
-      'created_at': nowIso,
+      'metadata': {'type': 'incoming_offer', 'offer_id': offerId},
     };
-
-    if (mounted) {
-      setState(() {
-        _journalEntries.insert(0, localRow);
-      });
-    }
-
-    try {
-      await supabase.from('user_journal').insert({
-        'user_id': user.id,
-        'visible_role': visibleRole ?? user.role ?? 'all',
-        'actor_id': user.id,
-        'title': title,
-        'message': message,
-        'metadata': null,
-        'created_at': nowIso,
-      });
-    } catch (_) {}
   }
 
-  String _normalizeJournalMessage(String msg) {
-    if (msg.isEmpty) return msg;
-    var out = msg;
-    try {
-      out = out.replaceAll(
-        RegExp(r'Тип:\s*UPDATE', caseSensitive: false),
-        'Изменён статус',
-      );
-      out = out.replaceAll(
-        RegExp(r'Тип:\s*INSERT', caseSensitive: false),
-        'Создано',
-      );
-      out = out.replaceAll(
-        RegExp(r'Тип:\s*DELETE', caseSensitive: false),
-        'Удалено',
-      );
+  Map<String, dynamic> _buildBalanceJournalEntry({
+    required String balanceType,
+    required num oldValue,
+    required num newValue,
+    String? createdAt,
+  }) {
+    final label = balanceType == 'v_balance' ? 'Войсы' : 'Майнды';
+    final delta = newValue - oldValue;
+    final deltaText =
+        delta > 0 ? '+${delta.toStringAsFixed(0)}' : delta.toStringAsFixed(0);
 
-      out = out.replaceAll(
-        RegExp(r'<b>\s*v_balance\s*<\/b>', caseSensitive: false),
-        'Войсы',
-      );
-      out = out.replaceAll(
-        RegExp(r'\bv_balance\b', caseSensitive: false),
-        'Войсы',
-      );
-      out = out.replaceAll(
-        RegExp(r'<b>\s*m_balance\s*<\/b>', caseSensitive: false),
-        'Майнды',
-      );
-      out = out.replaceAll(
-        RegExp(r'\bm_balance\b', caseSensitive: false),
-        'Майнды',
-      );
+    return {
+      'journal_key':
+          'balance::$balanceType::${createdAt ?? DateTime.now().toUtc().toIso8601String()}::$deltaText',
+      'title': 'Изменение баланса',
+      'message':
+          '$label: ${oldValue.toStringAsFixed(0)} -> ${newValue.toStringAsFixed(0)} ($deltaText)',
+      'created_at': createdAt ?? DateTime.now().toUtc().toIso8601String(),
+      'user_id': user.id,
+      'metadata': {'type': 'balance_change', 'balance': balanceType},
+    };
+  }
 
-      out = out.replaceAll('Тип: Изменён статус', 'Изменён статус');
-      out = out.replaceAll(RegExp(r'\s+'), ' ');
-      return out.trim();
-    } catch (_) {
-      return msg.replaceAll(RegExp(r'\s+'), ' ').trim();
+  Map<String, dynamic>? _normalizePersistedJournalEntry(Map<String, dynamic> raw) {
+    if (_isBalanceJournalEntry(raw)) {
+      return {
+        'journal_key':
+            'persisted-balance::${raw['id'] ?? raw['created_at'] ?? DateTime.now().toUtc().toIso8601String()}',
+        'id': raw['id'],
+        'title': 'Изменение баланса',
+        'message': (raw['message'] ?? '').toString().trim(),
+        'created_at':
+            raw['created_at']?.toString() ?? DateTime.now().toUtc().toIso8601String(),
+        'user_id': user.id,
+        'metadata': raw['metadata'],
+      };
     }
+
+    if (_isSpeechJournalEntry(raw)) {
+      return {
+        'journal_key':
+            'persisted-speech::${raw['id'] ?? raw['created_at'] ?? DateTime.now().toUtc().toIso8601String()}',
+        'id': raw['id'],
+        'title': 'Речь жизни',
+        'message': (raw['message'] ?? 'Кто-то начал речь жизни').toString().trim(),
+        'created_at':
+            raw['created_at']?.toString() ?? DateTime.now().toUtc().toIso8601String(),
+        'metadata': raw['metadata'],
+      };
+    }
+
+    return null;
+  }
+
+  Future<String> _resolveUserLabel(String? userId) async {
+    final id = (userId ?? '').trim();
+    if (id.isEmpty) return 'Игрок';
+    try {
+      final row = await supabase
+          .from('user_credentials')
+          .select('first_name,last_name,telegram_username')
+          .eq('id', id)
+          .maybeSingle();
+      if (row is Map<String, dynamic>) {
+        final first = (row['first_name'] ?? '').toString().trim();
+        final last = (row['last_name'] ?? '').toString().trim();
+        final full = '$first $last'.trim();
+        if (full.isNotEmpty) return full;
+        final username = (row['telegram_username'] ?? '').toString().trim();
+        if (username.isNotEmpty) return username;
+      }
+    } catch (_) {}
+    return 'Игрок';
+  }
+
+  void _pushCuratedJournalEntry(Map<String, dynamic> entry, {bool notify = false}) {
+    final key = _journalEntryKey(entry);
+    if (_journalEntries.any((e) => _journalEntryKey(e) == key)) return;
+
+    final updated = List<Map<String, dynamic>>.from(_journalEntries)
+      ..insert(0, entry);
+    updated.sort((a, b) {
+      final da = DateTime.tryParse((a['created_at'] ?? '').toString());
+      final db = DateTime.tryParse((b['created_at'] ?? '').toString());
+      if (da != null && db != null) return db.compareTo(da);
+      if (da != null) return -1;
+      if (db != null) return 1;
+      return 0;
+    });
+
+    if (!mounted) return;
+    setState(() {
+      _journalEntries = updated.take(50).toList();
+      if (notify) _newJournalEntriesCount += 1;
+    });
+
+    if (notify) {
+      final title = (entry['title'] ?? 'Журнал').toString();
+      _showMessageSafe('Новая запись в журнале: $title');
+    }
+  }
+
+  void _markJournalSeen() {
+    if (!mounted || _newJournalEntriesCount == 0) return;
+    setState(() => _newJournalEntriesCount = 0);
   }
 
   Future<void> _loadJournal() async {
     try {
       final role = (user.role ?? '').toString();
-      final userId = user.id;
       final orFilter =
-          'user_id.eq.$userId,visible_role.eq.$role,visible_role.eq.all,visible_role.eq.non_politician,visible_role.is.null';
+          'user_id.eq.${user.id},visible_role.eq.$role,visible_role.eq.all,visible_role.eq.non_politician';
 
-      final res = await supabase
+      final journalRes = await supabase
           .from('user_journal')
           .select(
             'id,user_id,visible_role,actor_id,title,message,metadata,created_at',
           )
           .or(orFilter)
           .order('created_at', ascending: false)
-          .limit(200);
+          .limit(100);
 
-      if (res is List) {
-        final List<Map<String, dynamic>> rows =
-            res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
-        final Map<String, Map<String, dynamic>> uniq = {};
-        for (final r in rows) {
-          String title = (r['title'] ?? '').toString();
-          String message = (r['message'] ?? '').toString();
+      final offersRes = await supabase
+          .from('item_offers')
+          .select('id,seller_id,buyer_id,item_json,price,status,created_at')
+          .eq('buyer_id', user.id)
+          .eq('status', 'pending')
+          .order('created_at', ascending: false)
+          .limit(20);
 
-          if (title.toLowerCase().contains('speech_state') ||
-              title.toLowerCase().contains('речь')) {
-            title = 'Речь жизни';
-          }
-          message = _normalizeJournalMessage(message);
+      final Map<String, Map<String, dynamic>> merged = {};
 
-          if (title.toLowerCase().contains('изменение профиля') &&
-              !message.toLowerCase().contains('добав')) {
-            continue;
-          }
-          if (message.toLowerCase().contains('добавлен') &&
-              title.toLowerCase().contains('изменение профиля')) {
-            title = 'Добавлен предмет';
-          }
-
-          final idVal = r['id']?.toString();
-          final key = (idVal != null && idVal.isNotEmpty)
-              ? 'id::$idVal'
-              : 'txt::${title}::${message}::${(r['created_at'] ?? '').toString()}';
-          if (!uniq.containsKey(key)) {
-            final copy = Map<String, dynamic>.from(r);
-            copy['title'] = title;
-            copy['message'] = message;
-            uniq[key] = copy;
+      if (journalRes is List) {
+        for (final row in journalRes) {
+          final normalized =
+              _normalizePersistedJournalEntry(Map<String, dynamic>.from(row as Map));
+          if (normalized != null) {
+            merged[_journalEntryKey(normalized)] = normalized;
           }
         }
+      }
 
-        final merged = uniq.values.toList();
-        merged.sort((a, b) {
-          final sa = (a['created_at'] ?? '').toString();
-          final sb = (b['created_at'] ?? '').toString();
-          final da = DateTime.tryParse(sa);
-          final db = DateTime.tryParse(sb);
+      if (offersRes is List) {
+        for (final row in offersRes) {
+          final offer = Map<String, dynamic>.from(row as Map);
+          final sellerName = await _resolveUserLabel(offer['seller_id']?.toString());
+          final entry = _buildOfferJournalEntry(offer, sellerName: sellerName);
+          merged[_journalEntryKey(entry)] = entry;
+        }
+      }
+
+      final entries = merged.values.toList()
+        ..sort((a, b) {
+          final da = DateTime.tryParse((a['created_at'] ?? '').toString());
+          final db = DateTime.tryParse((b['created_at'] ?? '').toString());
           if (da != null && db != null) return db.compareTo(da);
           if (da != null) return -1;
           if (db != null) return 1;
           return 0;
         });
 
-        if (!mounted) return;
-        setState(() {
-          _journalEntries = merged;
-        });
-      } else {
-        if (!mounted) return;
-        setState(() => _journalEntries = []);
-      }
+      if (!mounted) return;
+      setState(() => _journalEntries = entries.take(50).toList());
     } catch (e) {
-      // ignore: avoid_print
       print('loadJournal error: $e');
     }
   }
 
   void _subscribeToJournal() {
     try {
-      _journalChannel = supabase.channel('journal-${user.id}');
+      _journalChannel = supabase.channel('journal-feed-${user.id}');
       _journalChannel!
           .onPostgresChanges(
             event: PostgresChangeEvent.insert,
             schema: 'public',
-            table: 'user_journal',
-            callback: (payload) {
-              final rec = payload.newRecord ?? payload.oldRecord;
+            table: 'item_offers',
+            filter: PostgresChangeFilter(
+              type: PostgresChangeFilterType.eq,
+              column: 'buyer_id',
+              value: user.id,
+            ),
+            callback: (payload) async {
+              final rec = payload.newRecord;
               if (rec == null) return;
-              final Map<String, dynamic> row = Map<String, dynamic>.from(
-                rec as Map,
+              final offer = Map<String, dynamic>.from(rec as Map);
+              if ((offer['status']?.toString() ?? 'pending') != 'pending') return;
+              final sellerName = await _resolveUserLabel(offer['seller_id']?.toString());
+              _pushCuratedJournalEntry(
+                _buildOfferJournalEntry(offer, sellerName: sellerName),
+                notify: true,
               );
+            },
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.update,
+            schema: 'public',
+            table: 'user_credentials',
+            filter: PostgresChangeFilter(
+              type: PostgresChangeFilterType.eq,
+              column: 'id',
+              value: user.id,
+            ),
+            callback: (payload) {
+              final newRec = payload.newRecord;
+              final oldRec = payload.oldRecord;
+              if (newRec == null) return;
 
-              final String? vis = row['visible_role']?.toString();
-              final String role = (user.role ?? '').toString();
-              final bool visibleToUser =
-                  (row['user_id']?.toString() == user.id) ||
-                      vis == null ||
-                      vis == 'all' ||
-                      vis == role ||
-                      (vis == 'non_politician' && role != 'politician');
-
-              if (!visibleToUser) return;
-
-              String title = (row['title'] ?? '').toString();
-              String message = (row['message'] ?? '').toString();
-
-              if (title.toLowerCase().contains('speech_state') ||
-                  title.toLowerCase().contains('речь')) {
-                title = 'Речь жизни';
-              }
-              message = _normalizeJournalMessage(message);
-              if (title.toLowerCase().contains('изменение профиля') &&
-                  !message.toLowerCase().contains('добав')) {
-                return;
-              }
-              if (message.toLowerCase().contains('добавлен') &&
-                  title.toLowerCase().contains('изменение профиля')) {
-                title = 'Добавлен предмет';
+              num parseNum(dynamic value) {
+                if (value is num) return value;
+                return num.tryParse(value?.toString() ?? '') ?? 0;
               }
 
-              final exists = _journalEntries.any(
-                (e) =>
-                    (e['id'] != null &&
-                        row['id'] != null &&
-                        e['id'].toString() == row['id'].toString()) ||
-                    ((e['title'] ?? '').toString().trim() == title.trim() &&
-                        (e['message'] ?? '').toString().trim() ==
-                            message.trim() &&
-                        (e['created_at'] ?? '').toString().trim() ==
-                            (row['created_at'] ?? '').toString().trim()),
+              final newV = parseNum(newRec['v_balance']);
+              final newM = parseNum(newRec['m_balance']);
+              final oldV = oldRec != null && oldRec['v_balance'] != null
+                  ? parseNum(oldRec['v_balance'])
+                  : (_lastKnownVBalance ?? user.vBalance);
+              final oldM = oldRec != null && oldRec['m_balance'] != null
+                  ? parseNum(oldRec['m_balance'])
+                  : (_lastKnownMBalance ?? user.mBalance);
+              final createdAt = DateTime.now().toUtc().toIso8601String();
+
+              if (oldV != newV) {
+                _pushCuratedJournalEntry(
+                  _buildBalanceJournalEntry(
+                    balanceType: 'v_balance',
+                    oldValue: oldV,
+                    newValue: newV,
+                    createdAt: createdAt,
+                  ),
+                  notify: true,
+                );
+              }
+              if (oldM != newM) {
+                _pushCuratedJournalEntry(
+                  _buildBalanceJournalEntry(
+                    balanceType: 'm_balance',
+                    oldValue: oldM,
+                    newValue: newM,
+                    createdAt: createdAt,
+                  ),
+                  notify: true,
+                );
+              }
+
+              _lastKnownVBalance = newV.toDouble();
+              _lastKnownMBalance = newM.toDouble();
+            },
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.update,
+            schema: 'public',
+            table: 'speech_state',
+            callback: (payload) async {
+              final rec = payload.newRecord;
+              if (rec == null) return;
+              final row = Map<String, dynamic>.from(rec as Map);
+              final isActive = row['active'] == true;
+              final actorId = row['actor_id']?.toString();
+              if (!isActive || actorId == null || actorId.isEmpty) return;
+
+              final signature =
+                  '$actorId::${row['expires_at']?.toString() ?? ''}::${row['active']}';
+              if (_lastSpeechJournalSignature == signature) return;
+              _lastSpeechJournalSignature = signature;
+
+              final actorName = await _resolveUserLabel(actorId);
+              _pushCuratedJournalEntry(
+                {
+                  'journal_key': 'speech::$signature',
+                  'title': 'Речь жизни',
+                  'message': '$actorName начал(а) речь жизни.',
+                  'created_at': DateTime.now().toUtc().toIso8601String(),
+                  'metadata': {'type': 'speech_started', 'actor_id': actorId},
+                },
+                notify: true,
               );
-              if (exists) return;
+            },
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.insert,
+            schema: 'public',
+            table: 'speech_state',
+            callback: (payload) async {
+              final rec = payload.newRecord;
+              if (rec == null) return;
+              final row = Map<String, dynamic>.from(rec as Map);
+              final isActive = row['active'] == true;
+              final actorId = row['actor_id']?.toString();
+              if (!isActive || actorId == null || actorId.isEmpty) return;
 
-              final toInsert = Map<String, dynamic>.from(row);
-              toInsert['title'] = title;
-              toInsert['message'] = message;
+              final signature =
+                  '$actorId::${row['expires_at']?.toString() ?? ''}::${row['active']}';
+              if (_lastSpeechJournalSignature == signature) return;
+              _lastSpeechJournalSignature = signature;
 
-              if (!mounted) return;
-              setState(() {
-                _journalEntries.insert(0, toInsert);
-              });
+              final actorName = await _resolveUserLabel(actorId);
+              _pushCuratedJournalEntry(
+                {
+                  'journal_key': 'speech::$signature',
+                  'title': 'Речь жизни',
+                  'message': '$actorName начал(а) речь жизни.',
+                  'created_at': DateTime.now().toUtc().toIso8601String(),
+                  'metadata': {'type': 'speech_started', 'actor_id': actorId},
+                },
+                notify: true,
+              );
             },
           )
           .subscribe();
     } catch (e) {
-      // ignore: avoid_print
       print('subscribeToJournal error: $e');
     }
   }
@@ -480,20 +631,24 @@ class _HomeScreenState extends State<HomeScreen> {
 
         if (!mounted) return;
         setState(() {
+          final nextV = v is num ? (v).toDouble() : user.vBalance;
+          final nextM = m is num ? (m).toDouble() : user.mBalance;
           user = AppUser(
             id: user.id,
             username: uname is String ? uname : user.username,
             role: role is String ? role : user.role,
             firstName: fn is String ? fn : user.firstName,
             lastName: ln is String ? ln : user.lastName,
-            vBalance: v is num ? (v).toDouble() : user.vBalance,
-            mBalance: m is num ? (m).toDouble() : user.mBalance,
+            vBalance: nextV,
+            mBalance: nextM,
             color: color is String ? color : user.color,
             region: region is String ? region : user.region,
             usurer: (usurer == true) ||
                 (usurer?.toString().toLowerCase() == 'true'),
           );
           _userColor = color is String ? color : null;
+          _lastKnownVBalance = nextV;
+          _lastKnownMBalance = nextM;
         });
       }
     } catch (_) {}
@@ -608,13 +763,6 @@ class _HomeScreenState extends State<HomeScreen> {
           });
 
           final newEnabled = _isSpeechButtonEnabled;
-          if (_speechButtonPreviouslyEnabled == false && newEnabled == true) {
-            await _insertJournalEntry(
-              'Речь жизни доступна!',
-              'Кнопка "Речь жизни" снова доступна для запуска.',
-              visibleRole: 'politician',
-            );
-          }
           _speechButtonPreviouslyEnabled = newEnabled;
           return;
         }
@@ -637,13 +785,6 @@ class _HomeScreenState extends State<HomeScreen> {
         } catch (_) {}
 
         final newEnabled = _isSpeechButtonEnabled;
-        if (_speechButtonPreviouslyEnabled == false && newEnabled == true) {
-          await _insertJournalEntry(
-            'Речь жизни доступна!',
-            'Кнопка "Речь жизни" снова доступна для запуска.',
-            visibleRole: 'politician',
-          );
-        }
         _speechButtonPreviouslyEnabled = newEnabled;
       } else {
         if (!mounted) return;
@@ -656,13 +797,6 @@ class _HomeScreenState extends State<HomeScreen> {
         });
 
         final newEnabled = _isSpeechButtonEnabled;
-        if (_speechButtonPreviouslyEnabled == false && newEnabled == true) {
-          await _insertJournalEntry(
-            'Речь жизни доступна!',
-            'Кнопка "Речь жизни" снова доступна для запуска.',
-            visibleRole: 'politician',
-          );
-        }
         _speechButtonPreviouslyEnabled = newEnabled;
       }
     } catch (_) {}
@@ -819,14 +953,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _listenedToThisSpeech = false;
     });
 
-    try {
-      _speechButtonPreviouslyEnabled = false;
-      await _insertJournalEntry(
-        'Произносится Речь жизни',
-        'Вы начали Речь жизни — кнопка недоступна, пока длится речь.',
-        visibleRole: 'politician',
-      );
-    } catch (_) {}
+    _speechButtonPreviouslyEnabled = false;
 
     DateTime? applyExpires = clientNextSlotUtc;
 
@@ -936,6 +1063,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _openInventoryScreen() async {
+    _markJournalSeen();
     await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => InventoryScreen(user: user)),
     );
@@ -1785,130 +1913,173 @@ class _HomeScreenState extends State<HomeScreen> {
   // Journal block
   // -----------------------
   Widget _buildJournalBlock(bool isSmallScreen) {
-    return Container(
-      decoration: BoxDecoration(
-        color: TitanicTheme.panelDark.withOpacity(0.9),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: TitanicTheme.raptureGold.withOpacity(0.3),
-          width: 1.5,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.4),
-            blurRadius: 20,
-            offset: const Offset(0, 8),
+    return GestureDetector(
+      onTap: _markJournalSeen,
+      child: Container(
+        decoration: BoxDecoration(
+          color: TitanicTheme.panelDark.withOpacity(0.9),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: TitanicTheme.raptureGold.withOpacity(0.3),
+            width: 1.5,
           ),
-        ],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Журнал событий',
-              style: TextStyle(
-                fontFamily: 'CormorantGaramond',
-                fontSize: isSmallScreen ? 22 : 24,
-                fontWeight: FontWeight.w700,
-                color: TitanicTheme.ivoryCream,
-                letterSpacing: 0.5,
-              ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.4),
+              blurRadius: 20,
+              offset: const Offset(0, 8),
             ),
-            const SizedBox(height: 20),
-            if (_journalEntries.isEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 40),
-                child: Column(
-                  children: [
-                    Icon(
-                      Icons.history_toggle_off,
-                      size: 60,
-                      color: TitanicTheme.ivoryCream.withOpacity(0.2),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'История событий пуста',
+          ],
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Журнал событий',
                       style: TextStyle(
-                        fontFamily: 'Cinzel',
-                        fontSize: 15,
-                        color: TitanicTheme.ivoryCream.withOpacity(0.5),
+                        fontFamily: 'CormorantGaramond',
+                        fontSize: isSmallScreen ? 22 : 24,
+                        fontWeight: FontWeight.w700,
+                        color: TitanicTheme.ivoryCream,
                         letterSpacing: 0.5,
                       ),
                     ),
-                  ],
+                  ),
+                  if (_newJournalEntriesCount > 0)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: TitanicTheme.raptureGold.withOpacity(0.16),
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(
+                          color: TitanicTheme.raptureGold.withOpacity(0.65),
+                        ),
+                      ),
+                      child: Text(
+                        'Новых: $_newJournalEntriesCount',
+                        style: TextStyle(
+                          fontFamily: 'Cinzel',
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: TitanicTheme.raptureGold,
+                          letterSpacing: 0.4,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Офферы, изменения вашего баланса и старт речи жизни.',
+                style: TextStyle(
+                  fontFamily: 'Cinzel',
+                  fontSize: 11,
+                  color: TitanicTheme.ivoryCream.withOpacity(0.58),
+                  letterSpacing: 0.3,
                 ),
-              )
-            else
-              ..._journalEntries.take(5).map((entry) {
-                return Container(
-                  margin: const EdgeInsets.only(bottom: 16),
-                  decoration: BoxDecoration(
-                    color: TitanicTheme.surfaceNavy.withOpacity(0.35),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: TitanicTheme.raptureGold.withOpacity(0.15),
-                      width: 1.5,
-                    ),
+              ),
+              const SizedBox(height: 20),
+              if (_journalEntries.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 40),
+                  child: Column(
+                    children: [
+                      Icon(
+                        Icons.history_toggle_off,
+                        size: 60,
+                        color: TitanicTheme.ivoryCream.withOpacity(0.2),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'История событий пуста',
+                        style: TextStyle(
+                          fontFamily: 'Cinzel',
+                          fontSize: 15,
+                          color: TitanicTheme.ivoryCream.withOpacity(0.5),
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ],
                   ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(14),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          entry['title']?.toString() ?? 'Событие',
-                          style: TextStyle(
-                            fontFamily: 'Cinzel',
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                            color: TitanicTheme.ivoryCream,
-                            letterSpacing: 0.3,
-                          ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 10),
-                        Text(
-                          entry['message']?.toString() ?? '',
-                          style: TextStyle(
-                            fontFamily: 'Cinzel',
-                            fontSize: 14,
-                            color: TitanicTheme.ivoryCream.withOpacity(0.85),
-                            letterSpacing: 0.3,
-                            height: 1.4,
-                          ),
-                          maxLines: 3,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 10),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            Icon(
-                              Icons.access_time,
-                              size: 14,
-                              color: TitanicTheme.ivoryCream.withOpacity(0.5),
+                )
+              else
+                ..._journalEntries.take(5).map((entry) {
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 16),
+                    decoration: BoxDecoration(
+                      color: TitanicTheme.surfaceNavy.withOpacity(0.35),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: TitanicTheme.raptureGold.withOpacity(0.15),
+                        width: 1.5,
+                      ),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(14),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            entry['title']?.toString() ?? 'Событие',
+                            style: TextStyle(
+                              fontFamily: 'Cinzel',
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              color: TitanicTheme.ivoryCream,
+                              letterSpacing: 0.3,
                             ),
-                            const SizedBox(width: 8),
-                            Text(
-                              _formatJournalDate(entry['created_at']?.toString()),
-                              style: TextStyle(
-                                fontFamily: 'Cinzel',
-                                fontSize: 12,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            entry['message']?.toString() ?? '',
+                            style: TextStyle(
+                              fontFamily: 'Cinzel',
+                              fontSize: 14,
+                              color: TitanicTheme.ivoryCream.withOpacity(0.85),
+                              letterSpacing: 0.3,
+                              height: 1.4,
+                            ),
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 10),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              Icon(
+                                Icons.access_time,
+                                size: 14,
                                 color: TitanicTheme.ivoryCream.withOpacity(0.5),
-                                letterSpacing: 0.3,
                               ),
-                            ),
-                          ],
-                        ),
-                      ],
+                              const SizedBox(width: 8),
+                              Text(
+                                _formatJournalDate(entry['created_at']?.toString()),
+                                style: TextStyle(
+                                  fontFamily: 'Cinzel',
+                                  fontSize: 12,
+                                  color: TitanicTheme.ivoryCream.withOpacity(0.5),
+                                  letterSpacing: 0.3,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                );
-              }).toList(),
-          ],
+                  );
+                }).toList(),
+            ],
+          ),
         ),
       ),
     );
