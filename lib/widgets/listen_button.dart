@@ -93,10 +93,12 @@ class _ListenButtonState extends State<ListenButton> {
       return widget.activeSpeechId;
     }
 
-    _dbg('no activeSpeechId provided, trying to fetch active life_speeches row');
+    _dbg('no activeSpeechId provided, trying to ensure active life_speeches row');
     try {
-      final life = await _svc.getActiveLifeSpeech();
-      _dbg('getActiveLifeSpeech -> $life');
+      final life = await _svc.ensureActiveLifeSpeech(
+        fallbackActorId: widget.speechActorId,
+      );
+      _dbg('ensureActiveLifeSpeech -> $life');
       if (life is Map<String, dynamic>) {
         final idRaw = life['id'];
         final id = idRaw is int ? idRaw : int.tryParse(idRaw?.toString() ?? '');
@@ -148,6 +150,68 @@ class _ListenButtonState extends State<ListenButton> {
     }
   }
 
+  String _normalizeColor(dynamic value) {
+    return (value ?? '').toString().trim().toLowerCase();
+  }
+
+  Future<String?> _fetchUserColor(String userId) async {
+    final res = await _supabase
+        .from('user_credentials')
+        .select('color')
+        .eq('id', userId)
+        .maybeSingle();
+
+    final color = res?['color']?.toString().trim();
+    if (color == null || color.isEmpty) return null;
+    return color;
+  }
+
+  Future<String?> _fetchSpeechActorId(int speechId) async {
+    final res = await _supabase
+        .from('life_speeches')
+        .select('politician_id')
+        .eq('id', speechId)
+        .maybeSingle();
+
+    final actorId = res?['politician_id']?.toString().trim();
+    if (actorId == null || actorId.isEmpty) return null;
+    return actorId;
+  }
+
+  Future<bool> _hasSameColorAsSpeechActor(int speechId) async {
+    final listenerColor = await _fetchUserColor(widget.userId);
+    if (listenerColor == null) return false;
+
+    final actorId =
+        widget.speechActorId?.trim().isNotEmpty == true
+            ? widget.speechActorId!.trim()
+            : await _fetchSpeechActorId(speechId);
+    if (actorId == null || actorId.isEmpty) return false;
+
+    final actorColor = await _fetchUserColor(actorId);
+    if (actorColor == null) return false;
+
+    return _normalizeColor(listenerColor) == _normalizeColor(actorColor);
+  }
+
+  Future<void> _showSameColorSpeechDialog() {
+    return showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        content: const Text(
+          'Тот кто произносит Речь Жизни вашего цвета, нельзя сотворить здесь!',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Ок'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _handlePress() async {
     if (!_isEnabled) {
       _dbg('pressed but not enabled');
@@ -181,6 +245,17 @@ class _ListenButtonState extends State<ListenButton> {
         });
       }
       return;
+    }
+
+    try {
+      final hasSameColor = await _hasSameColorAsSpeechActor(sid);
+      if (hasSameColor) {
+        await _showSameColorSpeechDialog();
+        if (mounted) setState(() => _loading = false);
+        return;
+      }
+    } catch (e, st) {
+      _dbg('same-color check failed: $e\n$st');
     }
 
     final agree = await showDialog<bool>(

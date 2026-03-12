@@ -472,7 +472,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
         title: Text(
           'Использовать предмет?',
           style: TextStyle(
-            fontFamily: 'CormorantGaramond',
+            fontFamily: 'PlayfairDisplay',
             fontWeight: FontWeight.w700,
             color: TitanicTheme.ivoryCream,
           ),
@@ -480,7 +480,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
         content: Text(
           'Предмет "$itemLabel" будет удален из вашего инвентаря.',
           style: TextStyle(
-            fontFamily: 'Cinzel',
+            fontFamily: 'PlayfairDisplay',
             color: TitanicTheme.ivoryCream,
           ),
         ),
@@ -533,7 +533,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
         SnackBar(
           content: Text(
             'Предмет "$itemLabel" использован',
-            style: const TextStyle(fontFamily: 'Cinzel'),
+            style: const TextStyle(fontFamily: 'PlayfairDisplay'),
           ),
           backgroundColor: TitanicTheme.surfaceNavy,
         ),
@@ -545,7 +545,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
         SnackBar(
           content: Text(
             'Ошибка при использовании предмета: $msg',
-            style: const TextStyle(fontFamily: 'Cinzel'),
+            style: const TextStyle(fontFamily: 'PlayfairDisplay'),
           ),
           backgroundColor: TitanicTheme.surfaceNavy,
         ),
@@ -629,7 +629,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                     child: Text(
                       'Выберите покупателя',
                       style: TextStyle(
-                        fontFamily: 'CormorantGaramond',
+                        fontFamily: 'PlayfairDisplay',
                         fontSize: 20,
                         fontWeight: FontWeight.w700,
                         color: TitanicTheme.ivoryCream,
@@ -663,7 +663,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                             child: Text(
                               'Не найдено',
                               style: TextStyle(
-                                fontFamily: 'Cinzel',
+                                fontFamily: 'PlayfairDisplay',
                                 color: TitanicTheme.ivoryCream.withOpacity(0.5),
                               ),
                             ),
@@ -687,14 +687,14 @@ class _InventoryScreenState extends State<InventoryScreen> {
                                   title: Text(
                                     displayName,
                                     style: TextStyle(
-                                      fontFamily: 'Cinzel',
+                                      fontFamily: 'PlayfairDisplay',
                                       color: TitanicTheme.ivoryCream,
                                     ),
                                   ),
                                   subtitle: Text(
                                     p['telegram_username']?.toString() ?? '',
                                     style: TextStyle(
-                                      fontFamily: 'Cinzel',
+                                      fontFamily: 'PlayfairDisplay',
                                       color: TitanicTheme.ivoryCream.withOpacity(0.7),
                                     ),
                                   ),
@@ -737,7 +737,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 Text(
                   'Продажа: "$itemLabel"',
                   style: TextStyle(
-                    fontFamily: 'CormorantGaramond',
+                    fontFamily: 'PlayfairDisplay',
                     fontSize: 22,
                     fontWeight: FontWeight.w700,
                     color: TitanicTheme.raptureGold,
@@ -756,14 +756,14 @@ class _InventoryScreenState extends State<InventoryScreen> {
                       Text(
                         'Войсы:',
                         style: TextStyle(
-                          fontFamily: 'Cinzel',
+                          fontFamily: 'PlayfairDisplay',
                           color: TitanicTheme.ivoryCream,
                         ),
                       ),
                       Text(
                         '${item['voices'] ?? 0}',
                         style: TextStyle(
-                          fontFamily: 'Cinzel',
+                          fontFamily: 'PlayfairDisplay',
                           fontSize: 18,
                           fontWeight: FontWeight.w700,
                           color: TitanicTheme.raptureGold,
@@ -812,7 +812,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                                 child: Text(
                                   'Отмена',
                                   style: TextStyle(
-                                    fontFamily: 'Cinzel',
+                                    fontFamily: 'PlayfairDisplay',
                                     fontSize: 16,
                                     fontWeight: FontWeight.w600,
                                     color: TitanicTheme.ivoryCream,
@@ -843,7 +843,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                                   Text(
                                     'Отправить',
                                     style: TextStyle(
-                                      fontFamily: 'Cinzel',
+                                      fontFamily: 'PlayfairDisplay',
                                       fontSize: 16,
                                       fontWeight: FontWeight.w600,
                                       color: Colors.black,
@@ -879,7 +879,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
         SnackBar(
           content: Text(
             'Введите корректную цену',
-            style: TextStyle(fontFamily: 'Cinzel'),
+            style: TextStyle(fontFamily: 'PlayfairDisplay'),
           ),
           backgroundColor: TitanicTheme.surfaceNavy,
         ),
@@ -909,7 +909,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
               Text(
                 'Отправка оффера...',
                 style: TextStyle(
-                  fontFamily: 'Cinzel',
+                  fontFamily: 'PlayfairDisplay',
                   color: TitanicTheme.ivoryCream,
                 ),
               ),
@@ -936,7 +936,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
         SnackBar(
           content: Text(
             'Оффер отправлен покупателю',
-            style: TextStyle(fontFamily: 'Cinzel'),
+            style: TextStyle(fontFamily: 'PlayfairDisplay'),
           ),
           backgroundColor: TitanicTheme.surfaceNavy,
           behavior: SnackBarBehavior.floating,
@@ -960,7 +960,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
         SnackBar(
           content: Text(
             'Ошибка при создании оффера: $msg',
-            style: TextStyle(fontFamily: 'Cinzel'),
+            style: TextStyle(fontFamily: 'PlayfairDisplay'),
           ),
           backgroundColor: TitanicTheme.surfaceNavy,
         ),
@@ -994,7 +994,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 Text(
                   'Продажа в Банк',
                   style: TextStyle(
-                    fontFamily: 'CormorantGaramond',
+                    fontFamily: 'PlayfairDisplay',
                     fontSize: 22,
                     fontWeight: FontWeight.w700,
                     color: TitanicTheme.raptureGold,
@@ -1004,7 +1004,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 Text(
                   '"$itemLabel"',
                   style: TextStyle(
-                    fontFamily: 'Cinzel',
+                    fontFamily: 'PlayfairDisplay',
                     fontSize: 16,
                     color: TitanicTheme.ivoryCream,
                   ),
@@ -1022,14 +1022,14 @@ class _InventoryScreenState extends State<InventoryScreen> {
                       Text(
                         'Войсы:',
                         style: TextStyle(
-                          fontFamily: 'Cinzel',
+                          fontFamily: 'PlayfairDisplay',
                           color: TitanicTheme.ivoryCream,
                         ),
                       ),
                       Text(
                         '${item['voices'] ?? 0}',
                         style: TextStyle(
-                          fontFamily: 'Cinzel',
+                          fontFamily: 'PlayfairDisplay',
                           fontSize: 18,
                           fontWeight: FontWeight.w700,
                           color: TitanicTheme.raptureGold,
@@ -1099,7 +1099,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                                 child: Text(
                                   'Отмена',
                                   style: TextStyle(
-                                    fontFamily: 'Cinzel',
+                                    fontFamily: 'PlayfairDisplay',
                                     fontSize: 16,
                                     fontWeight: FontWeight.w600,
                                     color: TitanicTheme.ivoryCream,
@@ -1130,7 +1130,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                                   Text(
                                     'Продать',
                                     style: TextStyle(
-                                      fontFamily: 'Cinzel',
+                                      fontFamily: 'PlayfairDisplay',
                                       fontSize: 16,
                                       fontWeight: FontWeight.w600,
                                       color: Colors.black,
@@ -1201,7 +1201,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
               Text(
                 'Продажа в банк...',
                 style: TextStyle(
-                  fontFamily: 'Cinzel',
+                  fontFamily: 'PlayfairDisplay',
                   color: TitanicTheme.ivoryCream,
                 ),
               ),
@@ -1363,7 +1363,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
               Text(
                 'Принятие оффера...',
                 style: TextStyle(
-                  fontFamily: 'Cinzel',
+                  fontFamily: 'PlayfairDisplay',
                   color: TitanicTheme.ivoryCream,
                 ),
               ),
@@ -1442,7 +1442,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 Text(
                   'Отклонение оффера',
                   style: TextStyle(
-                    fontFamily: 'CormorantGaramond',
+                    fontFamily: 'PlayfairDisplay',
                     fontSize: 22,
                     fontWeight: FontWeight.w700,
                     color: TitanicTheme.raptureGold,
@@ -1452,7 +1452,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 Text(
                   'Укажите причину (необязательно):',
                   style: TextStyle(
-                    fontFamily: 'Cinzel',
+                    fontFamily: 'PlayfairDisplay',
                     color: TitanicTheme.ivoryCream,
                   ),
                 ),
@@ -1493,7 +1493,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                                 child: Text(
                                   'Отмена',
                                   style: TextStyle(
-                                    fontFamily: 'Cinzel',
+                                    fontFamily: 'PlayfairDisplay',
                                     fontSize: 16,
                                     fontWeight: FontWeight.w600,
                                     color: TitanicTheme.ivoryCream,
@@ -1529,7 +1529,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                                   Text(
                                     'Отклонить',
                                     style: TextStyle(
-                                      fontFamily: 'Cinzel',
+                                      fontFamily: 'PlayfairDisplay',
                                       fontSize: 16,
                                       fontWeight: FontWeight.w600,
                                       color: Colors.white,
@@ -1577,7 +1577,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
               Text(
                 'Отклонение оффера...',
                 style: TextStyle(
-                  fontFamily: 'Cinzel',
+                  fontFamily: 'PlayfairDisplay',
                   color: TitanicTheme.ivoryCream,
                 ),
               ),
@@ -1654,7 +1654,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
         title: Text(
           name,
           style: TextStyle(
-            fontFamily: 'CormorantGaramond',
+            fontFamily: 'PlayfairDisplay',
             fontSize: 18,
             fontWeight: FontWeight.w600,
             color: TitanicTheme.ivoryCream,
@@ -1663,7 +1663,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
         subtitle: Text(
           '$voices войсов',
           style: TextStyle(
-            fontFamily: 'Cinzel',
+            fontFamily: 'PlayfairDisplay',
             fontSize: 14,
             color: TitanicTheme.raptureGold,
           ),
@@ -1696,7 +1696,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                     Text(
                       'Использовать',
                       style: TextStyle(
-                        fontFamily: 'Cinzel',
+                        fontFamily: 'PlayfairDisplay',
                         color: TitanicTheme.ivoryCream,
                       ),
                     ),
@@ -1712,7 +1712,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                   Text(
                     'Продать игроку',
                     style: TextStyle(
-                      fontFamily: 'Cinzel',
+                      fontFamily: 'PlayfairDisplay',
                       color: TitanicTheme.ivoryCream,
                     ),
                   ),
@@ -1728,7 +1728,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                   //Text(
                     //'Продать в Банк',
                     //style: TextStyle(
-//                      fontFamily: 'Cinzel',
+//                      fontFamily: 'PlayfairDisplay',
                       //color: TitanicTheme.ivoryCream,
                     //),
                   //),
@@ -1768,7 +1768,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
         title: Text(
           'Предприятия',
           style: TextStyle(
-            fontFamily: 'CormorantGaramond',
+            fontFamily: 'PlayfairDisplay',
             fontSize: 18,
             fontWeight: FontWeight.w600,
             color: TitanicTheme.ivoryCream,
@@ -1777,7 +1777,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
         subtitle: Text(
           '${_enterprises.length} шт.',
           style: TextStyle(
-            fontFamily: 'Cinzel',
+            fontFamily: 'PlayfairDisplay',
             color: TitanicTheme.ivoryCream.withOpacity(0.7),
           ),
         ),
@@ -1814,7 +1814,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
               title: Text(
                 name,
                 style: TextStyle(
-                  fontFamily: 'Cinzel',
+                  fontFamily: 'PlayfairDisplay',
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
                   color: TitanicTheme.ivoryCream,
@@ -1827,7 +1827,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                   if (colorWord != '—') 'Цвет: $colorWord',
                 ].join(' • '),
                 style: TextStyle(
-                  fontFamily: 'Cinzel',
+                  fontFamily: 'PlayfairDisplay',
                   fontSize: 12,
                   color: TitanicTheme.ivoryCream.withOpacity(0.7),
                 ),
@@ -1878,7 +1878,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 Text(
                   label,
                   style: TextStyle(
-                    fontFamily: 'Cinzel',
+                    fontFamily: 'PlayfairDisplay',
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
                     color: textColor,
@@ -1903,7 +1903,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
       child: Text(
         text,
         style: TextStyle(
-          fontFamily: 'Cinzel',
+          fontFamily: 'PlayfairDisplay',
           fontSize: 11,
           color: TitanicTheme.ivoryCream.withOpacity(0.82),
         ),
@@ -1938,7 +1938,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
         title: Text(
           title,
           style: TextStyle(
-            fontFamily: 'CormorantGaramond',
+            fontFamily: 'PlayfairDisplay',
             fontSize: 18,
             fontWeight: FontWeight.w600,
             color: TitanicTheme.ivoryCream,
@@ -1947,7 +1947,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
         subtitle: Text(
           '${offers.length}',
           style: TextStyle(
-            fontFamily: 'Cinzel',
+            fontFamily: 'PlayfairDisplay',
             color: TitanicTheme.ivoryCream.withOpacity(0.7),
           ),
         ),
@@ -1993,7 +1993,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                           Text(
                             itemLabel,
                             style: TextStyle(
-                              fontFamily: 'Cinzel',
+                              fontFamily: 'PlayfairDisplay',
                               fontSize: 14,
                               fontWeight: FontWeight.w600,
                               color: TitanicTheme.ivoryCream,
@@ -2003,7 +2003,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                           Text(
                             counterpartLabelBuilder(o),
                             style: TextStyle(
-                              fontFamily: 'Cinzel',
+                              fontFamily: 'PlayfairDisplay',
                               fontSize: 12,
                               color: TitanicTheme.ivoryCream.withOpacity(0.75),
                             ),
@@ -2115,7 +2115,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
         title: Text(
           'Входящие офферы',
           style: TextStyle(
-            fontFamily: 'CormorantGaramond',
+            fontFamily: 'PlayfairDisplay',
             fontSize: 18,
             fontWeight: FontWeight.w600,
             color: TitanicTheme.ivoryCream,
@@ -2124,7 +2124,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
         subtitle: Text(
           '${_incomingOffers.length} предложений',
           style: TextStyle(
-            fontFamily: 'Cinzel',
+            fontFamily: 'PlayfairDisplay',
             color: TitanicTheme.ivoryCream.withOpacity(0.7),
           ),
         ),
@@ -2177,7 +2177,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
               title: Text(
                 itemLabel,
                 style: TextStyle(
-                  fontFamily: 'Cinzel',
+                  fontFamily: 'PlayfairDisplay',
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
                   color: TitanicTheme.ivoryCream,
@@ -2186,7 +2186,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
               subtitle: Text(
                 '$itemVoices войсов • Цена: $price • От: $seller',
                 style: TextStyle(
-                  fontFamily: 'Cinzel',
+                  fontFamily: 'PlayfairDisplay',
                   fontSize: 12,
                   color: TitanicTheme.ivoryCream.withOpacity(0.7),
                 ),
@@ -2209,7 +2209,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                           child: Text(
                             'Отклонить',
                             style: TextStyle(
-                              fontFamily: 'Cinzel',
+                              fontFamily: 'PlayfairDisplay',
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
                               color: Colors.white,
@@ -2232,7 +2232,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                           child: Text(
                             'Принять',
                             style: TextStyle(
-                              fontFamily: 'Cinzel',
+                              fontFamily: 'PlayfairDisplay',
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
                               color: Colors.black,
@@ -2265,7 +2265,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
             Text(
               'ИНВЕНТАРЬ',
               style: TextStyle(
-                fontFamily: 'CormorantGaramond',
+                fontFamily: 'PlayfairDisplay',
                 fontSize: 22,
                 fontWeight: FontWeight.w700,
                 color: TitanicTheme.ivoryCream,
@@ -2329,7 +2329,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                           child: Text(
                             _error!,
                             style: TextStyle(
-                              fontFamily: 'Cinzel',
+                              fontFamily: 'PlayfairDisplay',
                               color: TitanicTheme.ivoryCream,
                             ),
                             textAlign: TextAlign.center,
@@ -2358,7 +2358,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                                         Text(
                                           'Инвентарь пуст',
                                           style: TextStyle(
-                                            fontFamily: 'CormorantGaramond',
+                                            fontFamily: 'PlayfairDisplay',
                                             fontSize: 24,
                                             fontWeight: FontWeight.w700,
                                             color: TitanicTheme.ivoryCream,
@@ -2368,7 +2368,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                                         Text(
                                           'Предметы будут отображаться здесь',
                                           style: TextStyle(
-                                            fontFamily: 'Cinzel',
+                                            fontFamily: 'PlayfairDisplay',
                                             color: TitanicTheme.ivoryCream.withOpacity(0.7),
                                           ),
                                           textAlign: TextAlign.center,
@@ -2403,7 +2403,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                                     Text(
                                       'Общая стоимость:',
                                       style: TextStyle(
-                                        fontFamily: 'CormorantGaramond',
+                                        fontFamily: 'PlayfairDisplay',
                                         fontSize: 18,
                                         fontWeight: FontWeight.w700,
                                         color: TitanicTheme.ivoryCream,
@@ -2412,7 +2412,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                                     Text(
                                       '${_totalVoicesSum()} войсов',
                                       style: TextStyle(
-                                        fontFamily: 'Cinzel',
+                                        fontFamily: 'PlayfairDisplay',
                                         fontSize: 20,
                                         fontWeight: FontWeight.w700,
                                         color: TitanicTheme.raptureGold,

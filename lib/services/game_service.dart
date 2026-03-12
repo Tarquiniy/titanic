@@ -59,6 +59,73 @@ class GameService {
     }
   }
 
+  Future<Map<String, dynamic>?> ensureActiveLifeSpeech({
+    String? fallbackActorId,
+    DateTime? fallbackExpiresAt,
+  }) async {
+    try {
+      final existing = await getActiveLifeSpeech();
+      if (existing != null) return existing;
+
+      final state = await fetchSpeechState();
+      final active = (state?['active'] as bool?) ?? false;
+      final actorId =
+          state?['actor_id']?.toString() ?? fallbackActorId?.toString();
+      final expiresRaw = state?['expires_at'];
+      final expiresAt = expiresRaw != null
+          ? DateTime.tryParse(expiresRaw.toString())
+          : fallbackExpiresAt;
+
+      if (!active || actorId == null || actorId.isEmpty || expiresAt == null) {
+        debugPrint(
+            'GameService.ensureActiveLifeSpeech: no active state to restore');
+        return null;
+      }
+
+      if (DateTime.now().toUtc().isAfter(expiresAt.toUtc())) {
+        debugPrint(
+            'GameService.ensureActiveLifeSpeech: speech already expired at $expiresAt');
+        return null;
+      }
+
+      final matched = await client
+          .from('life_speeches')
+          .select('id, politician_id, started_at, expires_at')
+          .eq('politician_id', actorId)
+          .eq('expires_at', expiresAt.toUtc().toIso8601String())
+          .order('started_at', ascending: false)
+          .limit(1)
+          .maybeSingle();
+
+      if (matched is Map<String, dynamic>) {
+        debugPrint(
+            'GameService.ensureActiveLifeSpeech restored existing row -> $matched');
+        return matched;
+      }
+
+      final inserted = await client
+          .from('life_speeches')
+          .insert({
+            'politician_id': actorId,
+            'started_at': DateTime.now().toUtc().toIso8601String(),
+            'expires_at': expiresAt.toUtc().toIso8601String(),
+          })
+          .select('id, politician_id, started_at, expires_at')
+          .maybeSingle();
+
+      if (inserted is Map<String, dynamic>) {
+        debugPrint(
+            'GameService.ensureActiveLifeSpeech inserted missing row -> $inserted');
+        return inserted;
+      }
+
+      return null;
+    } catch (e, st) {
+      debugPrint('GameService.ensureActiveLifeSpeech error: $e\n$st');
+      rethrow;
+    }
+  }
+
   Future<Map<String, dynamic>?> rpcStartSpeech(
       {required String actorId, required int durationSeconds}) async {
     try {

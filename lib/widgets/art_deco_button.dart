@@ -103,7 +103,7 @@ class _ArtDecoButtonState extends State<ArtDecoButton> {
             style: theme.textTheme.labelLarge?.copyWith(
               color: textColor,
               fontSize: 15,
-              fontFamily: 'Cinzel',
+              fontFamily: 'PlayfairDisplay',
               fontWeight: widget.primary ? FontWeight.w700 : FontWeight.w600,
               letterSpacing: 1.0,
               height: 1.1,

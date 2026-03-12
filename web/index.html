@@ -19,6 +19,50 @@
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="description" content="A new Flutter project.">
+  <style>
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(180deg, #0a1a2a 0%, #0d2b4a 55%, #006b6b 100%);
+      color: #f5e9d8;
+      font-family: "Segoe UI", "Arial", sans-serif;
+    }
+    #app-loader {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      background: linear-gradient(180deg, #0a1a2a 0%, #0d2b4a 55%, #006b6b 100%);
+      transition: opacity .28s ease;
+    }
+    #app-loader.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+    .loader-wrap {
+      text-align: center;
+    }
+    .loader-spinner {
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      border: 3px solid rgba(245, 233, 216, 0.2);
+      border-top-color: #d4af37;
+      animation: spin 0.9s linear infinite;
+      margin: 0 auto 14px auto;
+    }
+    .loader-title {
+      letter-spacing: 2px;
+      font-size: 22px;
+      font-weight: 700;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
@@ -33,6 +77,32 @@
   <link rel="manifest" href="manifest.json">
 </head>
 <body>
+  <div id="app-loader">
+    <div class="loader-wrap">
+      <div class="loader-spinner"></div>
+      <div class="loader-title">TITANIC</div>
+    </div>
+  </div>
   <script src="flutter_bootstrap.js" async></script>
+  <script>
+    (function () {
+      const hideLoader = () => {
+        const loader = document.getElementById('app-loader');
+        if (!loader) return;
+        loader.classList.add('hidden');
+        setTimeout(() => loader.remove(), 320);
+      };
+
+      const observer = new MutationObserver(() => {
+        const flutterRoot = document.querySelector('flt-glass-pane, flutter-view');
+        if (flutterRoot) {
+          hideLoader();
+          observer.disconnect();
+        }
+      });
+
+      observer.observe(document.documentElement, { childList: true, subtree: true });
+    })();
+  </script>
 </body>
 </html>

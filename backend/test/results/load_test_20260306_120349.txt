@@ -1,0 +1,27 @@
+Load test summary
+=================
+target: http://192.168.10.10:8080
+concurrency: 200
+duration_seconds: 90
+ramp_up_seconds: 20
+timeout_seconds: 5.0
+method: GET
+endpoints: /api/health:8,/:2
+
+total_requests: 165448
+successful_requests: 165448
+failed_requests: 0
+error_rate_percent: 0.00
+requests_per_second: 1835.87
+
+latency_ms:
+  min: 0.55
+  avg: 96.79
+  p50: 101.05
+  p90: 116.34
+  p95: 161.56
+  p99: 206.71
+  max: 997.92
+
+status_codes: {'200': 165448}
+errors: {}

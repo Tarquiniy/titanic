@@ -128,7 +128,7 @@ class DecorativeBackground extends StatelessWidget {
                   child: Text(
                     'TITANIC',
                     style: TextStyle(
-                      fontFamily: 'Cinzel',
+                      fontFamily: 'PlayfairDisplay',
                       fontSize: 32,
                       fontWeight: FontWeight.w900,
                       color: TitanicTheme.abyssalBlue,

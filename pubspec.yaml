@@ -38,6 +38,7 @@ dependencies:
   intl: ^0.20.2
   uuid: ^4.5.2
   shared_preferences: ^2.5.4
+  google_fonts: ^8.0.2
 
 dev_dependencies:
   flutter_test:
@@ -89,15 +90,17 @@ flutter:
   # list giving the asset and other descriptors for the font. For
   # example:
   fonts:
-   - family: DecoHeadline
-     fonts:
-       - asset: assets/fonts/Metropolis1920.otf
+    - family: PlayfairDisplay
+      fonts:
+        - asset: assets/fonts/PoiretOne-Regular.ttf
+        - asset: assets/fonts/CormorantGaramond-Bold.ttf
+          weight: 700
 
-   - family: DecoBody 
-     fonts:
-       - asset: assets/fonts/CormorantGaramond-Regular.ttf
-       - asset: assets/fonts/CormorantGaramond-Bold.ttf
-         weight: 700
+    - family: CormorantGaramond
+      fonts:
+        - asset: assets/fonts/CormorantGaramond-Regular.ttf
+        - asset: assets/fonts/CormorantGaramond-Bold.ttf
+          weight: 700
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package

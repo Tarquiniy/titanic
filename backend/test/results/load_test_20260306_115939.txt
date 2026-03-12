@@ -1,0 +1,27 @@
+Load test summary
+=================
+target: http://192.168.10.10:8080
+concurrency: 200
+duration_seconds: 90
+ramp_up_seconds: 20
+timeout_seconds: 5.0
+method: GET
+endpoints: /api/health:8,/:2
+
+total_requests: 7911
+successful_requests: 0
+failed_requests: 7911
+error_rate_percent: 100.00
+requests_per_second: 85.94
+
+latency_ms:
+  min: 2019.43
+  avg: 2049.25
+  p50: 2049.13
+  p90: 2055.15
+  p95: 2061.75
+  p99: 2068.73
+  max: 2081.58
+
+status_codes: {}
+errors: {'request:ConnectionRefusedError': 7911}

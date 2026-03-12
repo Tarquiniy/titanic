@@ -468,20 +468,20 @@ class TitanicTheme {
         ),
         labelStyle: TextStyle(
           color: ivoryCream.withOpacity(0.9),
-          fontFamily: 'CormorantGaramond',
+          fontFamily: 'PlayfairDisplay',
           fontSize: 16,
           letterSpacing: 0.5,
         ),
         hintStyle: TextStyle(
           color: ivoryCream.withOpacity(0.6),
-          fontFamily: 'CormorantGaramond',
+          fontFamily: 'PlayfairDisplay',
         ),
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       );
 
   // Art Deco typography - ornate, serif fonts
   static TextStyle get heading => TextStyle(
-        fontFamily: 'CormorantGaramond',
+        fontFamily: 'PlayfairDisplay',
         fontSize: 32,
         fontWeight: FontWeight.w700,
         color: ivoryCream,
@@ -497,7 +497,7 @@ class TitanicTheme {
       );
 
   static TextStyle get titleLarge => TextStyle(
-        fontFamily: 'CormorantGaramond',
+        fontFamily: 'PlayfairDisplay',
         fontSize: 24,
         fontWeight: FontWeight.w600,
         color: raptureGold,
@@ -505,7 +505,7 @@ class TitanicTheme {
       );
 
   static TextStyle get subtitle => TextStyle(
-        fontFamily: 'Cinzel',
+        fontFamily: 'PlayfairDisplay',
         fontSize: 16,
         fontWeight: FontWeight.w500,
         color: ivoryCream.withOpacity(0.9),
@@ -513,7 +513,7 @@ class TitanicTheme {
       );
 
   static TextStyle get body => TextStyle(
-        fontFamily: 'Cinzel',
+        fontFamily: 'PlayfairDisplay',
         fontSize: 15,
         color: ivoryCream.withOpacity(0.85),
         height: 1.5,
@@ -521,7 +521,7 @@ class TitanicTheme {
       );
 
   static TextStyle get buttonText => TextStyle(
-        fontFamily: 'Cinzel',
+        fontFamily: 'PlayfairDisplay',
         fontSize: 17,
         fontWeight: FontWeight.w700,
         color: const Color(0xFF0A0A0A),
@@ -823,7 +823,7 @@ class TitanicTheme {
   titleMedium: body.copyWith( // ✅ это важно для TextField/EditableText
     fontSize: 16,
     color: const Color.fromARGB(255, 254, 247, 50).withOpacity(0.9),
-    fontFamily: 'Cinzel',
+    fontFamily: 'PlayfairDisplay',
   ),
   bodyLarge: body,
   bodyMedium: body.copyWith(fontSize: 14),
@@ -1006,7 +1006,7 @@ static Widget artDecoPattern({double size = 20, Color? color}) {
 // Стиль текста в духе ар-деко
 static TextStyle artDecoText({double fontSize = 16, Color? color}) {
   return TextStyle(
-    fontFamily: 'Cinzel',
+    fontFamily: 'PlayfairDisplay',
     fontSize: fontSize,
     fontWeight: FontWeight.w600,
     color: color ?? ivoryCream,

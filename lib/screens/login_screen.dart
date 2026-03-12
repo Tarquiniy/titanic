@@ -16,7 +16,6 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _emailCtrl = TextEditingController();
-  final _passCtrl = TextEditingController();
   bool _loading = false;
   String? _error;
   final SupabaseClient supabase = Supabase.instance.client;
@@ -74,17 +73,13 @@ class _LoginScreenState extends State<LoginScreen> {
       _error = null;
     });
     final username = _emailCtrl.text.trim();
-    final password = _passCtrl.text;
-    if (username.isEmpty || password.isEmpty) {
-      setState(() => _error = 'Введите username и пароль');
-      return;
-    }
+  
     setState(() => _loading = true);
     try {
       final data = await supabase
           .from('user_credentials')
           .select(
-            'id, telegram_username, role, first_name, last_name, v_balance, m_balance, password, color, region',
+            'id, telegram_username, role, first_name, last_name, v_balance, m_balance, color, region',
           )
           .eq('telegram_username', username)
           .maybeSingle();
@@ -94,10 +89,6 @@ class _LoginScreenState extends State<LoginScreen> {
       }
       final row = Map<String, dynamic>.from(data as Map);
       final stored = (row['password'] ?? '').toString();
-      if (stored.isEmpty || stored != password) {
-        setState(() => _error = 'Неверный username или пароль');
-        return;
-      }
       final user = AppUser(
         id: row['id']?.toString() ?? '',
         username: row['telegram_username']?.toString() ?? username,
@@ -131,7 +122,6 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void dispose() {
     _emailCtrl.dispose();
-    _passCtrl.dispose();
     super.dispose();
   }
 
@@ -396,68 +386,6 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                           onSubmitted: (_) => FocusScope.of(context).nextFocus(),
                         ),
-                        const SizedBox(height: 16),
-
-                        // Поле пароля
-                        TextField(
-                          controller: _passCtrl,
-                          obscureText: true,
-                          textInputAction: TextInputAction.done,
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: isSmallScreen ? 15 : 16,
-                            fontFamily: 'Cinzel',
-                          ),
-                          cursorColor: TitanicTheme.raptureGold,
-                          cursorWidth: 2.0,
-                          cursorHeight: 20,
-                          decoration: _fieldDecoration(
-                            label: 'Пароль',
-                            icon: Icons.lock_outline,
-                          ),
-                          onSubmitted: (_) {
-                            if (!_loading) _signIn();
-                          },
-                        ),
-
-                        // Сообщение об ошибке
-                        if (_error != null) ...[
-                          const SizedBox(height: 20),
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                            decoration: BoxDecoration(
-                              color: Colors.redAccent.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: Colors.redAccent.withOpacity(0.25),
-                                width: 1.5,
-                              ),
-                            ),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  Icons.warning_amber_rounded,
-                                  color: Colors.redAccent.withOpacity(0.9),
-                                  size: 20,
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Text(
-                                    _error!,
-                                    style: TextStyle(
-                                      color: Colors.redAccent.withOpacity(0.9),
-                                      fontSize: 14,
-                                      fontFamily: 'Cinzel',
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-
-                        const SizedBox(height: 24),
 
                         // Декоративный разделитель
                         Row(

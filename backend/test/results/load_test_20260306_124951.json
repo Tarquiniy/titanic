@@ -1,0 +1,37 @@
+{
+  "started_at_utc": "2026-03-06T07:48:21.629619+00:00",
+  "finished_at_utc": "2026-03-06T07:49:51.875065+00:00",
+  "config": {
+    "base_url": "http://192.168.10.10:8080",
+    "concurrency": 200,
+    "duration_seconds": 90,
+    "timeout_seconds": 5.0,
+    "method": "GET",
+    "endpoints_spec": "/api/health:8,/:2",
+    "ramp_up_seconds": 0,
+    "scenario_file": "H:\\Titanic\\titanic\\backend\\test\\scenario.local.json"
+  },
+  "summary": {
+    "duration_seconds": 90.20836419999978,
+    "total_requests": 166873,
+    "successful_requests": 166764,
+    "failed_requests": 109,
+    "error_rate_percent": 0.06531913491098021,
+    "requests_per_second": 1849.8617226893514,
+    "latency_ms": {
+      "min": 2.9662000015378,
+      "avg": 107.83667478920927,
+      "p50": 101.21200000139652,
+      "p90": 116.31610000040382,
+      "p95": 163.07740000047488,
+      "p99": 207.66480000020238,
+      "max": 5024.500300001819
+    },
+    "status_codes": {
+      "200": 166764
+    },
+    "errors": {
+      "request:TimeoutError": 109
+    }
+  }
+}

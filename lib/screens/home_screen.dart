@@ -875,7 +875,10 @@ class _HomeScreenState extends State<HomeScreen> {
         });
 
         try {
-          final life = await svc.getActiveLifeSpeech();
+          final life = await svc.ensureActiveLifeSpeech(
+            fallbackActorId: actor,
+            fallbackExpiresAt: expires,
+          );
           if (life is Map<String, dynamic>) {
             _activeSpeechId = (life['id'] is int)
                 ? (life['id'] as int)
@@ -1114,6 +1117,15 @@ class _HomeScreenState extends State<HomeScreen> {
           'expires_at': applyExpires!.toUtc().toIso8601String(),
         };
         await svc.upsertSpeechState(obj: upsertObj);
+        final life = await svc.ensureActiveLifeSpeech(
+          fallbackActorId: user.id,
+          fallbackExpiresAt: applyExpires,
+        );
+        if (life is Map<String, dynamic>) {
+          _activeSpeechId = (life['id'] is int)
+              ? (life['id'] as int)
+              : int.tryParse(life['id']?.toString() ?? '');
+        }
       } catch (_) {
         _showMessage(
           'Не удалось сохранить состояние речи на сервере (права). Кнопка всё равно будет локально заблокирована.',
@@ -1415,7 +1427,7 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Text(
         text,
         style: TextStyle(
-          fontFamily: 'Cinzel',
+          fontFamily: 'PlayfairDisplay',
           fontSize: isSmallScreen ? 12.5 : 13.5,
           color: TitanicTheme.ivoryCream,
           fontWeight: FontWeight.w600,
@@ -1591,7 +1603,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                         Text(
                                           '${user.firstName} ${user.lastName}',
                                           style: TextStyle(
-                                            fontFamily: 'CormorantGaramond',
+                                            fontFamily: 'PlayfairDisplay',
                                             fontSize: isSmallScreen ? 22 : 26,
                                             fontWeight: FontWeight.w700,
                                             color: TitanicTheme.ivoryCream,
@@ -1620,7 +1632,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                             child: Text(
                                               'Ростовщик',
                                               style: TextStyle(
-                                                fontFamily: 'Cinzel',
+                                                fontFamily: 'PlayfairDisplay',
                                                 fontSize:
                                                     isSmallScreen ? 11 : 12,
                                                 fontWeight: FontWeight.w700,
@@ -1656,7 +1668,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                         Text(
                                           'Войсы',
                                           style: TextStyle(
-                                            fontFamily: 'Cinzel',
+                                            fontFamily: 'PlayfairDisplay',
                                             fontSize: 13,
                                             color: TitanicTheme.ivoryCream.withOpacity(0.7),
                                             letterSpacing: 1.0,
@@ -1671,7 +1683,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                             return Text(
                                               _formatVoices(val),
                                               style: TextStyle(
-                                                fontFamily: 'CormorantGaramond',
+                                                fontFamily: 'PlayfairDisplay',
                                                 fontSize: isSmallScreen ? 24 : 28,
                                                 fontWeight: FontWeight.w700,
                                                 color: TitanicTheme.raptureGold,
@@ -1692,7 +1704,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                         Text(
                                           'Майнды',
                                           style: TextStyle(
-                                            fontFamily: 'Cinzel',
+                                            fontFamily: 'PlayfairDisplay',
                                             fontSize: 13,
                                             color: TitanicTheme.ivoryCream.withOpacity(0.7),
                                             letterSpacing: 1.0,
@@ -1707,7 +1719,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                             return Text(
                                               _formatMinds(val),
                                               style: TextStyle(
-                                                fontFamily: 'CormorantGaramond',
+                                                fontFamily: 'PlayfairDisplay',
                                                 fontSize: isSmallScreen ? 24 : 28,
                                                 fontWeight: FontWeight.w700,
                                                 color: TitanicTheme.seaFoamGreen,
@@ -2042,7 +2054,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: Text(
                       'Журнал событий',
                       style: TextStyle(
-                        fontFamily: 'CormorantGaramond',
+                        fontFamily: 'PlayfairDisplay',
                         fontSize: isSmallScreen ? 22 : 24,
                         fontWeight: FontWeight.w700,
                         color: TitanicTheme.ivoryCream,
@@ -2066,7 +2078,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       child: Text(
                         'Новых: $_newJournalEntriesCount',
                         style: TextStyle(
-                          fontFamily: 'Cinzel',
+                          fontFamily: 'PlayfairDisplay',
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
                           color: TitanicTheme.raptureGold,
@@ -2080,7 +2092,7 @@ class _HomeScreenState extends State<HomeScreen> {
               Text(
                 'Офферы, изменения вашего баланса и старт речи жизни.',
                 style: TextStyle(
-                  fontFamily: 'Cinzel',
+                  fontFamily: 'PlayfairDisplay',
                   fontSize: 11,
                   color: TitanicTheme.ivoryCream.withOpacity(0.58),
                   letterSpacing: 0.3,
@@ -2101,7 +2113,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       Text(
                         'История событий пуста',
                         style: TextStyle(
-                          fontFamily: 'Cinzel',
+                          fontFamily: 'PlayfairDisplay',
                           fontSize: 15,
                           color: TitanicTheme.ivoryCream.withOpacity(0.5),
                           letterSpacing: 0.5,
@@ -2130,7 +2142,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           Text(
                             entry['title']?.toString() ?? 'Событие',
                             style: TextStyle(
-                              fontFamily: 'Cinzel',
+                              fontFamily: 'PlayfairDisplay',
                               fontSize: 15,
                               fontWeight: FontWeight.w600,
                               color: TitanicTheme.ivoryCream,
@@ -2143,7 +2155,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           Text(
                             entry['message']?.toString() ?? '',
                             style: TextStyle(
-                              fontFamily: 'Cinzel',
+                              fontFamily: 'PlayfairDisplay',
                               fontSize: 14,
                               color: TitanicTheme.ivoryCream.withOpacity(0.85),
                               letterSpacing: 0.3,
@@ -2165,7 +2177,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               Text(
                                 _formatJournalDate(entry['created_at']?.toString()),
                                 style: TextStyle(
-                                  fontFamily: 'Cinzel',
+                                  fontFamily: 'PlayfairDisplay',
                                   fontSize: 12,
                                   color: TitanicTheme.ivoryCream.withOpacity(0.5),
                                   letterSpacing: 0.3,
