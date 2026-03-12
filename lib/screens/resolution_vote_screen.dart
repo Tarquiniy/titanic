@@ -5,13 +5,13 @@ import 'package:titanic/theme/app_theme.dart';
 import 'package:titanic/widgets/art_deco_button.dart';
 
 class ResolutionVoteScreen extends StatefulWidget {
-  final int resolutionId;
+  final int? resolutionId;
   final String userId;
   final GameService service;
 
   const ResolutionVoteScreen({
     super.key,
-    required this.resolutionId,
+    this.resolutionId,
     required this.userId,
     required this.service,
   });
@@ -34,6 +34,10 @@ class _ResolutionVoteScreenState extends State<ResolutionVoteScreen> {
   double _mBalance = 0;
   int? _selectedOptionId;
   List<Map<String, dynamic>> _options = [];
+  List<Map<String, dynamic>> _resolutions = [];
+  Set<int> _betResolutionIds = <int>{};
+
+  bool get _isListMode => widget.resolutionId == null;
 
   @override
   void initState() {
@@ -59,6 +63,7 @@ class _ResolutionVoteScreenState extends State<ResolutionVoteScreen> {
   }
 
   bool get _canSubmit {
+    if (_isListMode) return false;
     return !_loading &&
         !_success &&
         !_submitting &&
@@ -79,18 +84,6 @@ class _ResolutionVoteScreenState extends State<ResolutionVoteScreen> {
           .eq('id', widget.userId)
           .maybeSingle();
 
-      final titleRow = await _supabase
-          .from('political_resolutions')
-          .select('title')
-          .eq('id', widget.resolutionId)
-          .maybeSingle();
-
-      final opts = await _supabase
-          .from('resolution_options')
-          .select('id,label,color')
-          .eq('resolution_id', widget.resolutionId)
-          .order('id', ascending: true);
-
       double balance = 0;
       final raw = (profile is Map<String, dynamic>) ? profile['m_balance'] : null;
       if (raw is num) {
@@ -98,6 +91,65 @@ class _ResolutionVoteScreenState extends State<ResolutionVoteScreen> {
       } else {
         balance = double.tryParse((raw ?? '0').toString()) ?? 0;
       }
+
+      if (_isListMode) {
+        final rows = await _supabase
+            .from('political_resolutions')
+            .select('id,title,created_at')
+            .eq('is_closed', false)
+            .order('created_at', ascending: false);
+
+        final List<Map<String, dynamic>> resolutions = [];
+        if (rows is List) {
+          resolutions.addAll(rows.map((e) => Map<String, dynamic>.from(e as Map)));
+        }
+
+        final ids = resolutions
+            .map((r) => r['id'])
+            .where((id) => id != null)
+            .map((id) => (id is int) ? id : int.tryParse(id.toString()))
+            .whereType<int>()
+            .toList(growable: false);
+
+        final Set<int> betIds = <int>{};
+        if (ids.isNotEmpty) {
+          final bets = await _supabase
+              .from('political_bets')
+              .select('resolution_id')
+              .eq('user_id', widget.userId)
+              .inFilter('resolution_id', ids);
+          if (bets is List) {
+            for (final b in bets) {
+              final map = (b is Map) ? Map<String, dynamic>.from(b) : null;
+              if (map == null) continue;
+              final ridRaw = map['resolution_id'];
+              final rid = (ridRaw is int) ? ridRaw : int.tryParse(ridRaw?.toString() ?? '');
+              if (rid != null) betIds.add(rid);
+            }
+          }
+        }
+
+        if (!mounted) return;
+        setState(() {
+          _mBalance = balance;
+          _resolutions = resolutions;
+          _betResolutionIds = betIds;
+          _loading = false;
+        });
+        return;
+      }
+
+      final titleRow = await _supabase
+          .from('political_resolutions')
+          .select('title')
+          .eq('id', widget.resolutionId!)
+          .maybeSingle();
+
+      final opts = await _supabase
+          .from('resolution_options')
+          .select('id,label,color')
+          .eq('resolution_id', widget.resolutionId!)
+          .order('id', ascending: true);
 
       String title = 'Политрешение';
       if (titleRow is Map<String, dynamic>) {
@@ -154,7 +206,7 @@ class _ResolutionVoteScreenState extends State<ResolutionVoteScreen> {
     setState(() => _submitting = true);
     try {
       await widget.service.placeBetInResolution(
-        resolutionId: widget.resolutionId,
+        resolutionId: widget.resolutionId!,
         optionId: _selectedOptionId!,
         userId: widget.userId,
         amount: amount,
@@ -183,6 +235,106 @@ class _ResolutionVoteScreenState extends State<ResolutionVoteScreen> {
     }
   }
 
+  Widget _buildListMode() {
+    return SafeArea(
+      child: Column(
+        children: [
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: TitanicTheme.surfaceNavy.withOpacity(0.35),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: TitanicTheme.raptureGold.withOpacity(0.35),
+              ),
+            ),
+            child: Text(
+              '\u0412\u0430\u0448\u0438 \u043c\u0430\u0439\u043d\u0434\u044b: ${_mBalance.toStringAsFixed(0)}',
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+          Expanded(
+            child: _resolutions.isEmpty
+                ? const Center(
+                    child: Text('\u041d\u0435\u0442 \u0430\u043a\u0442\u0438\u0432\u043d\u044b\u0445 \u043f\u043e\u043b\u0438\u0442\u0440\u0435\u0448\u0435\u043d\u0438\u0439'),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                    itemCount: _resolutions.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 10),
+                    itemBuilder: (context, i) {
+                      final res = _resolutions[i];
+                      final ridRaw = res['id'];
+                      final rid = (ridRaw is int)
+                          ? ridRaw
+                          : int.tryParse(ridRaw?.toString() ?? '');
+                      if (rid == null) return const SizedBox.shrink();
+                      final title =
+                          (res['title'] ?? '\u041f\u043e\u043b\u0438\u0442\u0440\u0435\u0448\u0435\u043d\u0438\u0435').toString().trim();
+                      final alreadyBet = _betResolutionIds.contains(rid);
+
+                      return Container(
+                        decoration: BoxDecoration(
+                          color: TitanicTheme.surfaceNavy.withOpacity(0.3),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: TitanicTheme.raptureGold.withOpacity(0.3),
+                          ),
+                        ),
+                        padding: const EdgeInsets.all(12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              title.isEmpty ? '\u041f\u043e\u043b\u0438\u0442\u0440\u0435\u0448\u0435\u043d\u0438\u0435' : title,
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              alreadyBet
+                                  ? '\u0412\u044b \u0443\u0436\u0435 \u0441\u0434\u0435\u043b\u0430\u043b\u0438 \u0441\u0442\u0430\u0432\u043a\u0443'
+                                  : '\u0421\u0442\u0430\u0432\u043a\u0430 \u0435\u0449\u0435 \u043d\u0435 \u0441\u0434\u0435\u043b\u0430\u043d\u0430',
+                            ),
+                            const SizedBox(height: 10),
+                            ArtDecoButton(
+                              text: alreadyBet
+                                  ? '\u0421\u0442\u0430\u0432\u043a\u0430 \u0441\u0434\u0435\u043b\u0430\u043d\u0430'
+                                  : '\u041e\u0442\u043a\u0440\u044b\u0442\u044c \u043f\u043e\u043b\u0438\u0442\u0440\u0435\u0448\u0435\u043d\u0438\u0435',
+                              primary: !alreadyBet,
+                              expanded: true,
+                              onPressed: alreadyBet
+                                  ? null
+                                  : () async {
+                                      final updated = await Navigator.of(context).push<bool>(
+                                        MaterialPageRoute(
+                                          builder: (_) => ResolutionVoteScreen(
+                                            resolutionId: rid,
+                                            userId: widget.userId,
+                                            service: widget.service,
+                                          ),
+                                        ),
+                                      );
+                                      if (updated == true) {
+                                        await _loadData();
+                                      }
+                                    },
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final keyboardInset = MediaQuery.of(context).viewInsets.bottom;
@@ -191,7 +343,9 @@ class _ResolutionVoteScreenState extends State<ResolutionVoteScreen> {
       appBar: AppBar(title: const Text('Политрешение')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : SafeArea(
+          : _isListMode
+              ? _buildListMode()
+              : SafeArea(
               child: Column(
                 children: [
                   Expanded(
@@ -302,4 +456,3 @@ class _ResolutionVoteScreenState extends State<ResolutionVoteScreen> {
     );
   }
 }
-

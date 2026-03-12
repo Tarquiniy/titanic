@@ -11,6 +11,7 @@ import 'package:titanic/models/app_user.dart';
 import 'package:titanic/services/game_service.dart';
 import 'package:titanic/services/debate_service.dart';
 import 'package:titanic/services/speech_service.dart';
+import 'package:titanic/services/app_log.dart';
 import 'package:titanic/screens/transfer_v_screen.dart';
 import 'package:titanic/screens/inventory_screen.dart';
 import 'package:titanic/screens/debates_screen.dart';
@@ -248,6 +249,51 @@ class _HomeScreenState extends State<HomeScreen> {
       entry['message']?.toString() ?? '',
       entry['metadata']?.toString() ?? '',
     ].join(' ').toLowerCase();
+  }
+
+  Map<String, dynamic>? _dbRecordSummary(dynamic rec) {
+    if (rec is! Map) return null;
+    final map = Map<String, dynamic>.from(rec);
+    const keys = [
+      'id',
+      'user_id',
+      'visible_role',
+      'title',
+      'status',
+      'seller_id',
+      'buyer_id',
+      'actor_id',
+      'active',
+      'v_balance',
+      'm_balance',
+      'created_at',
+      'updated_at',
+      'expires_at',
+    ];
+    final out = <String, dynamic>{};
+    for (final k in keys) {
+      if (map.containsKey(k)) out[k] = map[k];
+    }
+    return out;
+  }
+
+  void _logDbRealtime({
+    required String table,
+    required String event,
+    dynamic newRec,
+    dynamic oldRec,
+  }) {
+    unawaited(
+      AppLog.db(
+        'HomeScreen',
+        'Realtime $event on $table',
+        data: {
+          'user_id': user.id,
+          if (_dbRecordSummary(newRec) != null) 'new': _dbRecordSummary(newRec),
+          if (_dbRecordSummary(oldRec) != null) 'old': _dbRecordSummary(oldRec),
+        },
+      ),
+    );
   }
 
   bool _isSpeechJournalEntry(Map<String, dynamic> entry) {
@@ -566,6 +612,11 @@ class _HomeScreenState extends State<HomeScreen> {
             table: 'user_journal',
             callback: (payload) {
               final rec = payload.newRecord;
+              _logDbRealtime(
+                table: 'user_journal',
+                event: 'INSERT',
+                newRec: rec,
+              );
               if (rec == null) return;
               final row = Map<String, dynamic>.from(rec as Map);
               if (!_isJournalVisibleToCurrentUser(row)) return;
@@ -590,6 +641,11 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             callback: (payload) async {
               final rec = payload.newRecord;
+              _logDbRealtime(
+                table: 'item_offers',
+                event: 'INSERT',
+                newRec: rec,
+              );
               if (rec == null) return;
               final offer = Map<String, dynamic>.from(rec as Map);
               if ((offer['status']?.toString() ?? 'pending') != 'pending') return;
@@ -612,6 +668,12 @@ class _HomeScreenState extends State<HomeScreen> {
             callback: (payload) {
               final newRec = payload.newRecord;
               final oldRec = payload.oldRecord;
+              _logDbRealtime(
+                table: 'user_credentials',
+                event: 'UPDATE',
+                newRec: newRec,
+                oldRec: oldRec,
+              );
               if (newRec == null) return;
 
               num parseNum(dynamic value) {
@@ -653,6 +715,12 @@ class _HomeScreenState extends State<HomeScreen> {
             table: 'speech_state',
             callback: (payload) async {
               final rec = payload.newRecord;
+              _logDbRealtime(
+                table: 'speech_state',
+                event: 'UPDATE',
+                newRec: rec,
+                oldRec: payload.oldRecord,
+              );
               if (rec == null) return;
               final row = Map<String, dynamic>.from(rec as Map);
               final isActive = row['active'] == true;
@@ -680,6 +748,11 @@ class _HomeScreenState extends State<HomeScreen> {
             table: 'speech_state',
             callback: (payload) async {
               final rec = payload.newRecord;
+              _logDbRealtime(
+                table: 'speech_state',
+                event: 'INSERT',
+                newRec: rec,
+              );
               if (rec == null) return;
               final row = Map<String, dynamic>.from(rec as Map);
               final isActive = row['active'] == true;
@@ -791,32 +864,48 @@ class _HomeScreenState extends State<HomeScreen> {
           .from('political_resolutions')
           .select('id')
           .eq('is_closed', false)
-          .order('created_at', ascending: false)
-          .limit(1)
-          .maybeSingle();
+          .order('created_at', ascending: false);
 
-      if (active is Map<String, dynamic> && active['id'] != null) {
-        final int id = (active['id'] is int)
-            ? (active['id'] as int)
-            : int.parse(active['id'].toString());
-        bool already = false;
-        try {
-          final bet = await supabase
-              .from('political_bets')
-              .select('id')
-              .eq('resolution_id', id)
-              .eq('user_id', user.id)
-              .limit(1)
-              .maybeSingle();
-          already = bet != null;
-        } catch (_) {
-          already = false;
+      final activeRows = <Map<String, dynamic>>[];
+      if (active is List) {
+        activeRows.addAll(active.map((e) => Map<String, dynamic>.from(e as Map)));
+      }
+
+      if (activeRows.isNotEmpty) {
+        final ids = activeRows
+            .map((r) => r['id'])
+            .where((id) => id != null)
+            .map((id) => (id is int) ? id : int.tryParse(id.toString()))
+            .whereType<int>()
+            .toList(growable: false);
+
+        final firstId = ids.isNotEmpty ? ids.first : null;
+        final votedIds = <int>{};
+        if (ids.isNotEmpty) {
+          try {
+            final bets = await supabase
+                .from('political_bets')
+                .select('resolution_id')
+                .eq('user_id', user.id)
+                .inFilter('resolution_id', ids);
+            if (bets is List) {
+              for (final b in bets) {
+                final map = (b is Map) ? Map<String, dynamic>.from(b) : null;
+                if (map == null) continue;
+                final ridRaw = map['resolution_id'];
+                final rid = (ridRaw is int) ? ridRaw : int.tryParse(ridRaw?.toString() ?? '');
+                if (rid != null) votedIds.add(rid);
+              }
+            }
+          } catch (_) {}
         }
+        final alreadyForAll = ids.isNotEmpty && ids.every(votedIds.contains);
+
         if (!mounted) return;
         setState(() {
           _hasActiveResolution = true;
-          _activeResolutionId = id;
-          _alreadyBetInActiveResolution = already;
+          _activeResolutionId = firstId;
+          _alreadyBetInActiveResolution = alreadyForAll;
         });
       } else {
         if (!mounted) return;
@@ -1232,12 +1321,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _onOpenResolutionPressed() async {
-    if (_activeResolutionId == null) return;
-    final resolutionId = _activeResolutionId!;
+    if (!_hasActiveResolution) return;
     final bool? res = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
         builder: (_) => ResolutionVoteScreen(
-          resolutionId: resolutionId,
           userId: user.id,
           service: svc,
         ),
@@ -1247,10 +1334,6 @@ class _HomeScreenState extends State<HomeScreen> {
     if (res == true) {
       await _refreshProfile();
       await _loadResolutionState();
-      if (!mounted) return;
-      setState(() {
-        _alreadyBetInActiveResolution = true;
-      });
     } else {
       await _loadResolutionState();
     }
@@ -2345,7 +2428,7 @@ Future<void> openBuyTurnFlow({
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Text('Стоимость: 40 войсов'),
+          const Text('Стоимость: 30 войсов'),
           const SizedBox(height: 8),
           Text('Получатель: $displayName'),
         ],
@@ -2373,7 +2456,7 @@ Future<void> openBuyTurnFlow({
     final rpcRes = await svc.rpcBuyEconomistTurn(
       fromUser: currentUser.id,
       toUser: chosen['id'].toString(),
-      cost: 40,
+      cost: 30,
     );
 
     Navigator.of(context).pop();

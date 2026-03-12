@@ -73,7 +73,10 @@ class _LoginScreenState extends State<LoginScreen> {
       _error = null;
     });
     final username = _emailCtrl.text.trim();
-  
+    if (username.isEmpty) {
+      setState(() => _error = 'Enter username');
+      return;
+    }
     setState(() => _loading = true);
     try {
       final data = await supabase
@@ -84,11 +87,10 @@ class _LoginScreenState extends State<LoginScreen> {
           .eq('telegram_username', username)
           .maybeSingle();
       if (data == null) {
-        setState(() => _error = 'Неверный username или пароль');
+        setState(() => _error = 'Invalid username');
         return;
       }
       final row = Map<String, dynamic>.from(data as Map);
-      final stored = (row['password'] ?? '').toString();
       final user = AppUser(
         id: row['id']?.toString() ?? '',
         username: row['telegram_username']?.toString() ?? username,
@@ -131,13 +133,13 @@ class _LoginScreenState extends State<LoginScreen> {
       labelStyle: TextStyle(
         color: TitanicTheme.ivoryCream.withOpacity(0.9),
         fontSize: 15,
-        fontFamily: 'Cinzel',
+        fontFamily: 'PlayfairDisplay',
         letterSpacing: 0.5,
       ),
       hintStyle: TextStyle(
         color: TitanicTheme.ivoryCream.withOpacity(0.5),
         fontSize: 15,
-        fontFamily: 'Cinzel',
+        fontFamily: 'PlayfairDisplay',
       ),
       prefixIcon: Container(
         margin: const EdgeInsets.only(right: 12, left: 4),
@@ -297,7 +299,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       Text(
                         'TITANIC',
                         style: TextStyle(
-                          fontFamily: 'CormorantGaramond',
+                          fontFamily: 'PlayfairDisplay',
                           fontSize: isSmallScreen ? 42 : 48,
                           fontWeight: FontWeight.w800,
                           color: TitanicTheme.raptureGold,
@@ -318,7 +320,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       Text(
                         'ВХОД В СИСТЕМУ',
                         style: TextStyle(
-                          fontFamily: 'Cinzel',
+                          fontFamily: 'PlayfairDisplay',
                           fontSize: isSmallScreen ? 16 : 18,
                           fontWeight: FontWeight.w600,
                           color: TitanicTheme.ivoryCream.withOpacity(0.9),
@@ -371,21 +373,64 @@ class _LoginScreenState extends State<LoginScreen> {
                         TextField(
                           controller: _emailCtrl,
                           keyboardType: TextInputType.text,
-                          textInputAction: TextInputAction.next,
+                          textInputAction: TextInputAction.done,
                           style: TextStyle(
                             color: Colors.white,
                             fontSize: isSmallScreen ? 15 : 16,
-                            fontFamily: 'Cinzel',
+                            fontFamily: 'PlayfairDisplay',
                           ),
                           cursorColor: TitanicTheme.raptureGold,
                           cursorWidth: 2.0,
                           cursorHeight: 20,
                           decoration: _fieldDecoration(
-                            label: 'Telegram Username',
+                            label: 'Логин',
                             icon: Icons.person_outline,
                           ),
-                          onSubmitted: (_) => FocusScope.of(context).nextFocus(),
+                          onSubmitted: (_) {
+                            if (!_loading) _signIn();
+                          },
                         ),
+
+                        const SizedBox(height: 16),
+
+                        // Сообщение об ошибке
+                        if (_error != null) ...[
+                          const SizedBox(height: 20),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            decoration: BoxDecoration(
+                              color: Colors.redAccent.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: Colors.redAccent.withOpacity(0.25),
+                                width: 1.5,
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.warning_amber_rounded,
+                                  color: Colors.redAccent.withOpacity(0.9),
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    _error!,
+                                    style: TextStyle(
+                                      color: Colors.redAccent.withOpacity(0.9),
+                                      fontSize: 14,
+                                      fontFamily: 'PlayfairDisplay',
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+
+                        const SizedBox(height: 24),
 
                         // Декоративный разделитель
                         Row(
@@ -463,3 +508,4 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 }
+

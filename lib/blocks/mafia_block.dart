@@ -242,15 +242,6 @@ class _MafiaBlockState extends State<MafiaBlock> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        SizedBox(
-          width: double.infinity,
-          child: ArtDecoButton(
-            text: 'Купить предприятие (мафия)',
-            onPressed: () => _openMafiaEnterpriseScreen(context),
-            primary: true,
-          ),
-        ),
-
         if (_showProposalButton) ...[
           const SizedBox(height: 8),
           SizedBox(

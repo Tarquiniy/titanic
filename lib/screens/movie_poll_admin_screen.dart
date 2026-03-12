@@ -50,7 +50,7 @@ class _MoviePollAdminScreenState extends State<MoviePollAdminScreen> {
   }
 
   void _addOptionField() {
-    if (_optionCtrls.length >= 5) return;
+    if (_optionCtrls.length >= 10) return;
     setState(() => _optionCtrls.add(TextEditingController()));
   }
 
@@ -177,9 +177,9 @@ class _MoviePollAdminScreenState extends State<MoviePollAdminScreen> {
       );
       return;
     }
-    if (options.length > 5) {
+    if (options.length > 10) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Максимум 5 вариантов')),
+        const SnackBar(content: Text('Максимум 10 вариантов')),
       );
       return;
     }
@@ -317,7 +317,7 @@ class _MoviePollAdminScreenState extends State<MoviePollAdminScreen> {
             ),
             const SizedBox(height: 16),
             Text(
-              'Варианты (максимум 5):',
+              'Варианты (максимум 10):',
               style: TitanicTheme.subtitle,
             ),
             const SizedBox(height: 12),
@@ -360,7 +360,7 @@ class _MoviePollAdminScreenState extends State<MoviePollAdminScreen> {
                 ArtDecoButton(
                   text: 'Добавить вариант',
                   icon: Icons.add,
-                  onPressed: _optionCtrls.length >= 5 ? null : _addOptionField,
+                  onPressed: _optionCtrls.length >= 10 ? null : _addOptionField,
                   primary: false,
                 ),
               ],

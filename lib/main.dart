@@ -5,11 +5,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:titanic/services/app_log.dart';
 import 'package:titanic/theme/app_theme.dart';
 import 'screens/login_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  AppLog.installDebugPrintHook();
+  unawaited(AppLog.info('main', 'Application startup'));
   GoogleFonts.config.allowRuntimeFetching = false;
   runApp(const AppBootstrap());
 }
@@ -58,12 +61,21 @@ class _AppBootstrapState extends State<AppBootstrap> {
         url: _supabaseUrl,
         anonKey: _resolveSupabaseAnonKey(),
       );
+      final logPath = await AppLog.currentLogPath();
+      debugPrint('AppLog path: $logPath');
+      await AppLog.info(
+        'AppBootstrap',
+        'Supabase initialized',
+        data: {'url': _supabaseUrl, 'log_path': logPath},
+      );
     } catch (e) {
       final msg = e.toString().toLowerCase();
       // During hot-restart or remount Supabase can already be initialized.
       if (!msg.contains('already initialized')) {
+        await AppLog.error('AppBootstrap', 'Supabase initialization failed', error: e);
         rethrow;
       }
+      await AppLog.warn('AppBootstrap', 'Supabase already initialized');
     } finally {
       initSw.stop();
       _stopwatch.stop();

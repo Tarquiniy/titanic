@@ -310,7 +310,7 @@ Future<void> openBuyTurnFlow({
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Text('Стоимость: 10 войсов'),
+          const Text('Стоимость: 30 войсов'),
           const SizedBox(height: 8),
           Text('Получатель: $displayName'),
         ],
@@ -339,7 +339,7 @@ Future<void> openBuyTurnFlow({
     final rpcRes = await svc.rpcBuyEconomistTurn(
       fromUser: currentUser.id,
       toUser: chosen['id'].toString(),
-      cost: 10,
+      cost: 30,
     );
     Navigator.of(context).pop();
 

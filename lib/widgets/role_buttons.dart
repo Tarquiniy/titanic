@@ -141,7 +141,6 @@ class RoleButtons extends StatelessWidget {
     final isJournalist = _roleContains('journalist') || _roleContains('журналист');
 
     if (!isPolitician &&
-        !isJournalist &&
         hasActiveDebate &&
         !alreadyVotedInActiveDebate) {
       buttons.add(
@@ -155,7 +154,7 @@ class RoleButtons extends StatelessWidget {
     }
 
     // ✅ Политрешение — ТОЛЬКО для политиков (фикс бага “видно у экономистов”)
-    if (isPolitician && hasActiveResolution && !alreadyBetInActiveResolution) {
+    if (isPolitician && hasActiveResolution) {
       buttons.add(
         _btn(
           text: 'Политрешение',

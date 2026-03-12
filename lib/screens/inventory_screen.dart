@@ -1,8 +1,10 @@
 // lib/screens/inventory_screen.dart
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/app_user.dart';
+import '../services/app_log.dart';
 import '../services/game_service.dart';
 import '../theme/app_theme.dart';
 
@@ -374,6 +376,8 @@ class _InventoryScreenState extends State<InventoryScreen> {
             table: 'item_offers',
             callback: (payload) async {
               final record = payload.newRecord;
+              _logDbOfferEvent(event: 'INSERT', newRec: record, oldRec: payload.oldRecord);
+              if (record == null) return;
               final sellerId = record['seller_id']?.toString();
               final buyerId = record['buyer_id']?.toString();
               if (sellerId != widget.user.id && buyerId != widget.user.id) return;
@@ -388,6 +392,8 @@ class _InventoryScreenState extends State<InventoryScreen> {
             table: 'item_offers',
             callback: (payload) async {
               final record = payload.newRecord;
+              _logDbOfferEvent(event: 'UPDATE', newRec: record, oldRec: payload.oldRecord);
+              if (record == null) return;
               final sellerId = record['seller_id']?.toString();
               final buyerId = record['buyer_id']?.toString();
               if (sellerId != widget.user.id && buyerId != widget.user.id) return;
@@ -398,6 +404,42 @@ class _InventoryScreenState extends State<InventoryScreen> {
           )
           .subscribe();
     } catch (_) {}
+  }
+
+  Map<String, dynamic>? _offerRecordSummary(dynamic rec) {
+    if (rec is! Map) return null;
+    final map = Map<String, dynamic>.from(rec);
+    final out = <String, dynamic>{};
+    for (final key in [
+      'id',
+      'seller_id',
+      'buyer_id',
+      'status',
+      'price',
+      'created_at',
+      'updated_at',
+    ]) {
+      if (map.containsKey(key)) out[key] = map[key];
+    }
+    return out;
+  }
+
+  void _logDbOfferEvent({
+    required String event,
+    dynamic newRec,
+    dynamic oldRec,
+  }) {
+    unawaited(
+      AppLog.db(
+        'InventoryScreen',
+        'Realtime $event on item_offers',
+        data: {
+          'user_id': widget.user.id,
+          if (_offerRecordSummary(newRec) != null) 'new': _offerRecordSummary(newRec),
+          if (_offerRecordSummary(oldRec) != null) 'old': _offerRecordSummary(oldRec),
+        },
+      ),
+    );
   }
 
   String _normalizeItemLabel(String? value) {
@@ -445,14 +487,25 @@ class _InventoryScreenState extends State<InventoryScreen> {
             orElse: () => null,
           );
       if (targetKey != null) {
-        updated.remove(targetKey);
+        final rawCount = updated[targetKey];
+        final count = (rawCount is num)
+            ? rawCount.toInt()
+            : int.tryParse(rawCount?.toString() ?? '');
+        if (count != null && count > 1) {
+          updated[targetKey] = count - 1;
+        } else {
+          updated.remove(targetKey);
+        }
       }
       return updated.isEmpty ? null : updated;
     }
 
     if (inventory is List) {
       final updated = List<dynamic>.from(inventory);
-      updated.removeWhere((entry) => _inventoryEntryMatchesItem(entry, item));
+      final index = updated.indexWhere((entry) => _inventoryEntryMatchesItem(entry, item));
+      if (index >= 0) {
+        updated.removeAt(index);
+      }
       return updated.isEmpty ? null : updated;
     }
 

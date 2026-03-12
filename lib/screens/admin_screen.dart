@@ -745,23 +745,37 @@ class _UserEditDialogState extends State<_UserEditDialog> {
 
     if (decoded is List) {
       for (final item in decoded) {
-        if (item is Map) {
-          // Если у элемента есть type: 'enterprise' – это предприятие
-          if (item['type'] == 'enterprise') {
-            result.add(Map<String, dynamic>.from(item));
-          } else {
-            // Обычный предмет
-            final name = item['name'] ?? item['label'] ?? 'Предмет';
-            final voices = item['voices'] ?? item['count'] ?? 0;
-            result.add({
-              'name': name.toString(),
-              'voices': voices is num ? voices.toInt() : int.tryParse(voices.toString()) ?? 0,
-            });
-          }
+        if (item is! Map) continue;
+        final itemMap = Map<String, dynamic>.from(item);
+
+        if (itemMap['type'] == 'enterprise') {
+          result.add(itemMap);
+          continue;
         }
+
+        final dynamic rawName = itemMap['name'] ?? itemMap['label'];
+        final dynamic rawVoices = itemMap['voices'] ?? itemMap['count'];
+
+        final String name;
+        if (rawName != null && rawName.toString().trim().isNotEmpty) {
+          name = rawName.toString();
+        } else if (itemMap.length == 1) {
+          // Support compact format like {"Extra turn": 0}
+          name = itemMap.keys.first.toString();
+        } else {
+          name = 'item';
+        }
+
+        final dynamic voicesSource =
+            rawVoices ?? (itemMap.length == 1 ? itemMap.values.first : 0);
+        result.add({
+          'name': name,
+          'voices': voicesSource is num
+              ? voicesSource.toInt()
+              : int.tryParse(voicesSource.toString()) ?? 0,
+        });
       }
     } else if (decoded is Map) {
-      // Старый формат: {"предмет": количество}
       decoded.forEach((key, value) {
         result.add({
           'name': key.toString(),
@@ -769,10 +783,10 @@ class _UserEditDialogState extends State<_UserEditDialog> {
         });
       });
     }
+
     return result;
   }
 
-  // Парсер устаревшего поля enterprises
   List<Map<String, dynamic>> _parseLegacyEnterprises(dynamic ent) {
     final List<Map<String, dynamic>> result = [];
     if (ent == null) return result;
@@ -1448,7 +1462,7 @@ class _InventoryItemDialogState extends State<_InventoryItemDialog> {
               return;
             }
             final voices = int.tryParse(_voicesCtrl.text.trim()) ?? 0;
-            if (voices <= 0) {
+            if (voices < 0) {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('Введите положительное число войсов')),
               );

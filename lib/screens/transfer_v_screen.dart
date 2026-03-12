@@ -47,6 +47,11 @@ class _TransferVScreenState extends State<TransferVScreen> {
     return widget.user.role.toString() == 'politician';
   }
 
+  bool get _isEconomistSender {
+    final role = widget.user.role.toString().toLowerCase();
+    return role.contains('economist') || role.contains('экономист');
+  }
+
   // ✅ кнопка активна только когда выбран получатель и введена сумма
   bool get _canSubmit {
     if (_loading) return false;
@@ -133,6 +138,13 @@ class _TransferVScreenState extends State<TransferVScreen> {
       for (final user in list) {
         final userId = user['id'];
         final userRole = (user['role'] ?? '').toString();
+        final userRoleLower = userRole.toLowerCase();
+
+        // Экономист не видит в списке других экономистов
+        if (_isEconomistSender &&
+            (userRoleLower.contains('economist') || userRoleLower.contains('экономист'))) {
+          continue;
+        }
 
         // ❌ Политик не видит других политиков
         if (_isPoliticianSender && userRole == 'politician') {
