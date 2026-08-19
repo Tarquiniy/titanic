@@ -16,15 +16,15 @@ def _env_int(name: str, default: int) -> int:
 
 
 def main() -> None:
-    host = os.getenv("HOST", "192.168.10.10")
-    port = _env_int("PORT", 80)
+    host = os.getenv("HOST", "0.0.0.0")
+    port = _env_int("PORT", 8080)
 
     # Tuned for ~200 simultaneous users on a single instance.
-    threads = _env_int("WAITRESS_THREADS", 64)
+    threads = _env_int("WAITRESS_THREADS", 32)
     connection_limit = _env_int("WAITRESS_CONNECTION_LIMIT", 1000)
     backlog = _env_int("WAITRESS_BACKLOG", 2048)
     channel_timeout = _env_int("WAITRESS_CHANNEL_TIMEOUT", 120)
-    cleanup_interval = _env_int("WAITRESS_CLEANUP_INTERVAL", 1024)
+    cleanup_interval = _env_int("WAITRESS_CLEANUP_INTERVAL", 30)
 
     serve(
         app,
