@@ -1,46 +1,133 @@
-# titanic
+# Titanic
 
-A new Flutter project.
+Titanic — это проект “клиент + бекенд”:
 
-## Getting Started
+- **Flutter (web/mobile)** — фронтенд, работающий через **Supabase** (auth/data/realtime).
+- **Python/Flask** — поднимает HTTP сервер в локальной сети и **раздаёт билд Flutter web** из `build/web`, плюс даёт небольшой health-check API.
 
-This project is a starting point for a Flutter application.
+## Архитектура
 
-A few resources to get you started if this is your first Flutter project:
+1. `flutter build web --release` собирает фронтенд в `build/web`.
+2. `backend/serve.py` (Waitress) или `backend/app.py`/Gunicorn поднимают Flask и:
+   - раздают статику Flutter web (`GET /`, любые `/<path>`),
+   - предоставляют API endpoints (`/api`, `/api/health`).
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+## Стек
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+- Flutter / Dart
+- `supabase_flutter`
+- Python 3.11+
+- Flask + Gunicorn (Linux/macOS) / Waitress (Windows)
+- Supabase DB — схема и функции в `schema.sql`
 
-## Flask backend (Poetry + Waitress/Gunicorn)
+## Требования
 
-Server runs Python API and serves Flutter Web build from `build/web`.
+- Flutter SDK
+- Python + Poetry (`poetry install`)
+- Supabase (рекомендуется локально через Supabase CLI)
+- Для web-сборки CI: нужен Chrome (используется GitHub Actions)
 
-1. Install dependencies with Poetry:
-   - `cd backend`
-   - `poetry install`
-2. Build Flutter web app:
-   - `cd ..`
-   - `flutter build web`
-3. Run on Windows (Waitress, tuned for ~200 concurrent users):
-   - `cd backend`
-   - `poetry run python serve.py`
-4. Run on Linux/macOS (Gunicorn):
-   - `poetry run gunicorn -w 4 --threads 50 -k gthread -b 192.168.10.10:8080 app:app`
-5. Local dev run (without production server):
-   - `poetry run python app.py`
+## Конфигурация
 
-Waitress tuning (optional via env):
-- `WAITRESS_THREADS` (default `32`)
-- `WAITRESS_CONNECTION_LIMIT` (default `1000`)
-- `WAITRESS_BACKLOG` (default `2048`)
-- `WAITRESS_CHANNEL_TIMEOUT` (default `120`)
-- `WAITRESS_CLEANUP_INTERVAL` (default `30`)
+### Flutter: переменные для Supabase (build-time)
 
-Available endpoints:
-- `GET /` (Flutter web app)
-- `GET /api`
-- `GET /api/health`
+Приложение использует `--dart-define`:
+
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+
+Пример для запуска:
+
+```bash
+flutter run -d chrome \
+  --dart-define=SUPABASE_URL="http://localhost:8000" \
+  --dart-define=SUPABASE_ANON_KEY="YOUR_ANON_KEY"
+```
+
+Для сборки web:
+
+```bash
+flutter build web --release \
+  --dart-define=SUPABASE_URL="http://localhost:8000" \
+  --dart-define=SUPABASE_ANON_KEY="YOUR_ANON_KEY"
+```
+
+> Примечание: если значения не передать, приложение переключится на dev-поведение (в т.ч. с fallback URL и ключом). Для продакшена **обязательно** передавайте оба значения.
+
+### Backend: переменные окружения
+
+По умолчанию сервер слушает **`0.0.0.0:8080`**:
+
+- `HOST` (default: `0.0.0.0`)
+- `PORT` (default: `8080`)
+
+Настройка Waitress (для Windows и/или при запуске через `serve.py`):
+
+- `WAITRESS_THREADS` (default: `32`)
+- `WAITRESS_CONNECTION_LIMIT` (default: `1000`)
+- `WAITRESS_BACKLOG` (default: `2048`)
+- `WAITRESS_CHANNEL_TIMEOUT` (default: `120`)
+- `WAITRESS_CLEANUP_INTERVAL` (default: `30`)
+
+## Локальная разработка (рекомендуемый сценарий)
+
+### 1) Поднимите Supabase
+
+Обычно:
+
+```bash
+supabase init
+supabase start
+```
+
+По умолчанию Supabase local доступен по `http://localhost:8000`.
+
+### 2) Соберите Flutter web
+
+```bash
+flutter build web --release \
+  --dart-define=SUPABASE_URL="http://localhost:8000" \
+  --dart-define=SUPABASE_ANON_KEY="YOUR_ANON_KEY"
+```
+
+### 3) Запустите backend
+
+```bash
+cd backend
+poetry install
+poetry run python serve.py
+```
+
+После этого откройте:
+
+- `http://localhost:8080/`
+- `http://localhost:8080/api/health`
+
+## API endpoints
+
+- `GET /` — Flutter web app
+- `GET /api` — сервисный health (кратко)
+- `GET /api/health` — `{"status": "healthy"}`
+
+## Supabase: схема БД
+
+Примените `schema.sql` в SQL Editor вашего Supabase проекта.
+
+## Деплой (GitHub Actions → Vercel)
+
+CI workflow `./.github/workflows/build-and-deploy.yml` собирает Flutter web и деплоит статику из `build/web`.
+
+В GitHub Secrets нужны:
+
+- `VERCEL_TOKEN`
+- `VERCEL_ORG_ID`
+- `VERCEL_PROJECT_ID`
+
+Также, чтобы Flutter собрался с корректными настройками Supabase:
+
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+
+## Нагрузочное тестирование (backend)
+
+См. `backend/test/README.md`.

@@ -7,8 +7,8 @@ package-mode = false
 
 [tool.poetry.dependencies]
 python = "^3.11"
-flask = "3.1.0"
-gunicorn = { version = "23.0.0", markers = "platform_system != 'Windows'" }
+flask = "^3.1.3"
+gunicorn = { version = "^26.1.0", markers = "platform_system != 'Windows'" }
 waitress = { version = "3.0.2", markers = "platform_system == 'Windows'" }
 
 [build-system]
