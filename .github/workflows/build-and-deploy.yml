@@ -20,16 +20,30 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Cache Flutter/Dart packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+            ${{ github.workspace }}/.dart_tool
+          key: ${{ runner.os }}-pub-${{ hashFiles('pubspec.lock') }}
+
       - name: Setup Flutter SDK
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.38.5'  
+          flutter-version: '3.47.0'
 
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Analyze (non-fatal)
+        run: flutter analyze --no-fatal-warnings --no-fatal-infos
+
       - name: Build Flutter Web
-        run: flutter build web --release
+        run: |
+          flutter build web --release \
+            --dart-define=SUPABASE_URL=${{ secrets.SUPABASE_URL }} \
+            --dart-define=SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}
 
       - name: Deploy to Vercel
         uses: amondnet/vercel-action@v20
